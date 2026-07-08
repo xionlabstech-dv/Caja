@@ -15,6 +15,7 @@ import { sincronizarCierre } from '@/lib/sync';
 import { formatBS, formatUSD } from '@/lib/precio';
 import { Venta, MetodoPago, CierreCaja, DesgloseCierre } from '@/types';
 import { useApp } from '@/components/Providers';
+import ThemeToggle from '@/components/ThemeToggle';
 
 const METODO_LABELS: Record<MetodoPago, string> = {
   efectivo_bs: 'Efectivo Bs',
@@ -28,8 +29,41 @@ const METODO_COLORS: Record<MetodoPago, string> = {
   efectivo_bs: 'bg-emerald-100 text-emerald-700',
   pago_movil: 'bg-blue-100 text-blue-700',
   biopago: 'bg-purple-100 text-purple-700',
-  tarjeta: 'bg-orange-100 text-orange-700',
-  efectivo_usd: 'bg-yellow-100 text-yellow-700',
+  tarjeta: 'bg-slate-100 text-slate-700',
+  efectivo_usd: 'bg-amber-100 text-amber-700',
+};
+
+const METODO_ICONS: Record<MetodoPago, JSX.Element> = {
+  efectivo_bs: (
+    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
+        d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+    </svg>
+  ),
+  pago_movil: (
+    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
+        d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+    </svg>
+  ),
+  biopago: (
+    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
+        d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 008 4.07M3 15.364c.64-1.319 1-2.8 1-4.364 0-1.457.39-2.823 1.07-4" />
+    </svg>
+  ),
+  tarjeta: (
+    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
+        d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+    </svg>
+  ),
+  efectivo_usd: (
+    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
+        d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  ),
 };
 
 function fmtFecha(iso: string, conHora = true) {
@@ -74,7 +108,6 @@ export default function ResumenPage() {
     {} as Partial<Record<MetodoPago, number>>
   );
 
-  // Start of current period: last cierre time, or oldest pending venta, or null
   const periodoInicio = ultimoCierre
     ?? (ventas.length > 0
       ? ventas.reduce((min, v) => (v.fecha < min ? v.fecha : min), ventas[0].fecha)
@@ -110,7 +143,7 @@ export default function ResumenPage() {
     await saveCierre(cierre);
     await tagVentasConCierre(ventas.map(v => v.id), cierre.id);
     await setUltimoCierre(now);
-    sincronizarCierre(cierre); // fire-and-forget
+    sincronizarCierre(cierre);
 
     setVentas([]);
     setCierres(prev => [cierre, ...prev]);
@@ -122,7 +155,7 @@ export default function ResumenPage() {
   return (
     <div>
       <header className="bg-emerald-600 text-white px-4 pt-4 pb-3">
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <h1 className="text-xl font-bold">Período actual</h1>
             <p className="text-emerald-200 text-sm mt-0.5">
@@ -131,22 +164,24 @@ export default function ResumenPage() {
                 : 'Sin ventas pendientes'}
             </p>
           </div>
-          {ventas.length > 0 && (
-            <button
-              onClick={() => setShowConfirmCierre(true)}
-              className="flex-shrink-0 bg-white text-emerald-700 px-3 py-2 rounded-xl font-semibold text-sm flex items-center gap-1.5"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-              </svg>
-              Cerrar caja
-            </button>
-          )}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <ThemeToggle />
+            {ventas.length > 0 && (
+              <button
+                onClick={() => setShowConfirmCierre(true)}
+                className="bg-white text-emerald-700 px-3 py-2 rounded-xl font-semibold text-sm flex items-center gap-1.5"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                </svg>
+                Cerrar caja
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
       <div className="p-4 space-y-4">
-        {/* Total del período */}
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 text-center">
           <p className="text-gray-500 text-sm mb-1">Total sin cerrar</p>
           <p className="text-4xl font-bold text-gray-900">{formatBS(totalBS)}</p>
@@ -156,14 +191,14 @@ export default function ResumenPage() {
           </p>
         </div>
 
-        {/* Por método */}
         {Object.keys(porMetodo).length > 0 && (
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
             <h2 className="font-semibold text-gray-700 mb-3">Por método de pago</h2>
             <div className="space-y-2">
               {(Object.entries(porMetodo) as [MetodoPago, number][]).map(([metodo, total]) => (
                 <div key={metodo} className="flex items-center justify-between">
-                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${METODO_COLORS[metodo]}`}>
+                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full flex items-center gap-1 ${METODO_COLORS[metodo]}`}>
+                    {METODO_ICONS[metodo]}
                     {METODO_LABELS[metodo]}
                   </span>
                   <span className="font-bold text-gray-800">{formatBS(total)}</span>
@@ -173,7 +208,6 @@ export default function ResumenPage() {
           </div>
         )}
 
-        {/* Lista de ventas pendientes */}
         {ventas.length > 0 ? (
           <div className="space-y-2">
             <h2 className="font-semibold text-gray-700 px-1">Ventas</h2>
@@ -197,7 +231,8 @@ export default function ResumenPage() {
                       <p className="font-semibold text-gray-800">Venta #{ventas.length - idx}</p>
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className="text-gray-400 text-xs">{hora}</span>
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${METODO_COLORS[venta.metodo_pago]}`}>
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex items-center gap-1 ${METODO_COLORS[venta.metodo_pago]}`}>
+                          {METODO_ICONS[venta.metodo_pago]}
                           {METODO_LABELS[venta.metodo_pago]}
                         </span>
                       </div>
@@ -247,7 +282,6 @@ export default function ResumenPage() {
           </div>
         )}
 
-        {/* Cierres anteriores */}
         {cierres.length > 0 && (
           <div className="space-y-2">
             <h2 className="font-semibold text-gray-700 px-1">Cierres anteriores</h2>
@@ -288,7 +322,8 @@ export default function ResumenPage() {
                       {(Object.entries(cierre.desglose_metodos) as [MetodoPago, DesgloseCierre][]).map(([metodo, d]) => (
                         <div key={metodo} className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${METODO_COLORS[metodo]}`}>
+                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 ${METODO_COLORS[metodo]}`}>
+                              {METODO_ICONS[metodo]}
                               {METODO_LABELS[metodo]}
                             </span>
                             <span className="text-xs text-gray-400">{d.count} venta{d.count !== 1 ? 's' : ''}</span>
@@ -311,7 +346,6 @@ export default function ResumenPage() {
         )}
       </div>
 
-      {/* Confirmation modal */}
       {showConfirmCierre && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
           <div
@@ -337,7 +371,8 @@ export default function ResumenPage() {
                 <div className="space-y-2 mb-4">
                   {(Object.entries(porMetodo) as [MetodoPago, number][]).map(([metodo, total]) => (
                     <div key={metodo} className="flex items-center justify-between">
-                      <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${METODO_COLORS[metodo]}`}>
+                      <span className={`text-xs font-semibold px-2.5 py-1 rounded-full flex items-center gap-1 ${METODO_COLORS[metodo]}`}>
+                        {METODO_ICONS[metodo]}
                         {METODO_LABELS[metodo]}
                       </span>
                       <span className="font-bold text-sm text-gray-800">{formatBS(total)}</span>

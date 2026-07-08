@@ -8,6 +8,13 @@ import { getProductos, getProductoPorCodigo, saveVenta } from '@/lib/db';
 import { precioBS, precioUSD, formatBS, formatUSD } from '@/lib/precio';
 import { useApp } from '@/components/Providers';
 import Scanner from '@/components/Scanner';
+import ThemeToggle from '@/components/ThemeToggle';
+
+function avatarColor(nombre: string): string {
+  const idx = nombre.charCodeAt(0) % 8;
+  return ['bg-violet-500', 'bg-blue-500', 'bg-cyan-500', 'bg-teal-500',
+    'bg-emerald-500', 'bg-amber-500', 'bg-orange-500', 'bg-pink-500'][idx];
+}
 
 const METODOS_PAGO: { id: MetodoPago; label: string }[] = [
   { id: 'efectivo_bs', label: 'Efectivo Bs' },
@@ -51,7 +58,6 @@ export default function CajaPage() {
       )
     : productos;
 
-  // Returns the Bs price for a single cart line (handles both regular and weight items)
   const itemPrecioBS = useCallback((item: ItemCarrito): number => {
     if (item.esPorPeso && item.precioCalculadoBase !== undefined) {
       return item.producto.moneda === 'USD'
@@ -182,7 +188,6 @@ export default function CajaPage() {
       ? (cambio ?? -1) >= 0
       : true);
 
-  // Live preview for weight modal
   const gramosNum = parseFloat(gramos);
   const pesoPreviewBase = productoPeso && gramosNum > 0
     ? productoPeso.precio * (gramosNum / 1000)
@@ -196,18 +201,19 @@ export default function CajaPage() {
 
   return (
     <div className="flex flex-col h-screen max-h-screen">
-      {/* Header */}
       <header className="bg-emerald-600 text-white px-4 pt-4 pb-3 flex items-center justify-between sticky top-0 z-30">
         <h1 className="text-xl font-bold">Caja</h1>
-        <div className="flex items-center gap-1.5 text-sm">
-          <span
-            className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-300' : 'bg-red-400'}`}
-          />
-          <span className="text-emerald-100">{isOnline ? 'En línea' : 'Sin conexión'}</span>
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          <div className="flex items-center gap-1.5 text-sm">
+            <span
+              className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-300' : 'bg-red-400'}`}
+            />
+            <span className="text-emerald-100">{isOnline ? 'En línea' : 'Sin conexión'}</span>
+          </div>
         </div>
       </header>
 
-      {/* Search */}
       <div className="px-4 py-3 bg-white border-b border-gray-200 flex gap-2">
         <div className="flex-1 relative">
           <svg
@@ -272,7 +278,6 @@ export default function CajaPage() {
         </div>
       )}
 
-      {/* Product list */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
         {productos.length === 0 ? (
           <div className="text-center text-gray-400 py-16">
@@ -301,9 +306,12 @@ export default function CajaPage() {
             return (
               <div
                 key={producto.id}
-                className="bg-white rounded-xl p-4 flex items-center justify-between shadow-sm border border-gray-100"
+                className="bg-white rounded-xl p-4 flex items-center gap-3 shadow-sm border border-gray-100"
               >
-                <div className="flex-1 min-w-0 pr-3">
+                <div className={`w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center ${avatarColor(producto.nombre)}`}>
+                  <span className="text-white font-bold text-sm">{producto.nombre.charAt(0).toUpperCase()}</span>
+                </div>
+                <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
                     <p className="font-medium text-gray-900 truncate">{producto.nombre}</p>
                     {producto.por_peso && (
@@ -314,7 +322,7 @@ export default function CajaPage() {
                   </div>
                   {pbs !== null ? (
                     <>
-                      <p className="text-xl font-bold text-gray-900 mt-0.5">
+                      <p className="text-2xl font-bold text-gray-900 mt-0.5">
                         {formatBS(pbs)}
                         {producto.por_peso && <span className="text-sm font-normal text-gray-400"> / kg</span>}
                       </p>
@@ -375,24 +383,22 @@ export default function CajaPage() {
         )}
       </div>
 
-      {/* Floating cart */}
       {totalItems > 0 && !showCarrito && !showPago && (
         <button
           onClick={() => setShowCarrito(true)}
-          className="fixed bottom-20 right-4 bg-emerald-600 text-white px-5 py-3 rounded-2xl shadow-lg flex items-center gap-2 z-30"
+          className="fixed bottom-20 right-4 bg-emerald-600 text-white px-5 py-3 rounded-2xl shadow-xl shadow-emerald-900/30 flex items-center gap-2 z-30"
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
               d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"
             />
           </svg>
-          <span className="font-bold">{totalItems}</span>
+          <span key={totalItems} className="font-bold animate-cart-pop">{totalItems}</span>
           <span className="hidden sm:inline">·</span>
           <span className="font-semibold text-sm hidden sm:inline">{formatBS(totalBS)}</span>
         </button>
       )}
 
-      {/* Cart bottom sheet */}
       {showCarrito && (
         <div className="fixed inset-0 z-50 flex items-end">
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowCarrito(false)} />
@@ -422,7 +428,6 @@ export default function CajaPage() {
                   </div>
 
                   {item.esPorPeso ? (
-                    // Weight items: just a remove button, no quantity stepper
                     <button
                       onClick={() => removerItem(item.lineId)}
                       className="w-8 h-8 rounded-full bg-red-50 flex items-center justify-center text-red-400 flex-shrink-0"
@@ -433,7 +438,6 @@ export default function CajaPage() {
                       </svg>
                     </button>
                   ) : (
-                    // Regular items: quantity stepper
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => actualizarCantidad(item.lineId, -1)}
@@ -473,7 +477,6 @@ export default function CajaPage() {
         </div>
       )}
 
-      {/* Payment sheet */}
       {showPago && (
         <div className="fixed inset-0 z-50 flex items-end">
           <div className="absolute inset-0 bg-black/40" onClick={() => { setShowPago(false); setShowCarrito(true); }} />
@@ -554,7 +557,6 @@ export default function CajaPage() {
         </div>
       )}
 
-      {/* Weight input modal */}
       {showPeso && productoPeso && (
         <div className="fixed inset-0 z-50 flex items-end">
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowPeso(false)} />
@@ -616,10 +618,8 @@ export default function CajaPage() {
         </div>
       )}
 
-      {/* Scanner */}
       {showScanner && <Scanner onDetect={handleScan} onClose={() => setShowScanner(false)} />}
 
-      {/* Toast */}
       {toast && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-5 py-2.5 rounded-xl text-sm font-medium z-50 shadow-lg whitespace-nowrap">
           {toast}
