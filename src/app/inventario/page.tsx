@@ -1,5 +1,7 @@
 'use client';
 
+export const dynamic = 'force-dynamic';
+
 import { useState, useEffect } from 'react';
 import { Producto } from '@/types';
 import { getProductos, saveProducto, deleteProductoDB } from '@/lib/db';
@@ -7,13 +9,7 @@ import { createProductoSupabase, updateProductoSupabase, softDeleteProducto } fr
 import { precioBS, precioUSD, formatBS, formatUSD } from '@/lib/precio';
 import { useApp } from '@/components/Providers';
 
-const PRODUCTO_VACIO = {
-  nombre: '',
-  codigo_barra: '',
-  precio: '',
-  moneda: 'USD' as 'USD' | 'VES',
-  activo: true,
-};
+const PRODUCTO_VACIO = { nombre: '', codigo_barra: '', precio: '', moneda: 'USD' as 'USD' | 'VES', activo: true };
 
 export default function InventarioPage() {
   const { tasa, isOnline } = useApp();
@@ -26,39 +22,18 @@ export default function InventarioPage() {
   const [error, setError] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<Producto | null>(null);
 
-  const cargar = async () => {
-    const prods = await getProductos();
-    setProductos(prods);
-  };
-
+  const cargar = async () => { setProductos(await getProductos()); };
   useEffect(() => { cargar(); }, []);
 
   const filtrados = busqueda
-    ? productos.filter(
-        p =>
-          p.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
-          (p.codigo_barra && p.codigo_barra.includes(busqueda))
-      )
+    ? productos.filter(p => p.nombre.toLowerCase().includes(busqueda.toLowerCase()) || (p.codigo_barra && p.codigo_barra.includes(busqueda)))
     : productos;
 
-  const abrirNuevo = () => {
-    setEditando(null);
-    setForm(PRODUCTO_VACIO);
-    setError('');
-    setShowModal(true);
-  };
-
+  const abrirNuevo = () => { setEditando(null); setForm(PRODUCTO_VACIO); setError(''); setShowModal(true); };
   const abrirEditar = (p: Producto) => {
     setEditando(p);
-    setForm({
-      nombre: p.nombre,
-      codigo_barra: p.codigo_barra || '',
-      precio: p.precio.toString(),
-      moneda: p.moneda,
-      activo: p.activo,
-    });
-    setError('');
-    setShowModal(true);
+    setForm({ nombre: p.nombre, codigo_barra: p.codigo_barra || '', precio: p.precio.toString(), moneda: p.moneda, activo: p.activo });
+    setError(''); setShowModal(true);
   };
 
   const guardar = async () => {
@@ -66,36 +41,16 @@ export default function InventarioPage() {
     const precio = parseFloat(form.precio);
     if (!precio || precio <= 0) { setError('El precio debe ser mayor a 0'); return; }
     if (!isOnline) { setError('Necesitas conexión para guardar'); return; }
-
-    setGuardando(true);
-    setError('');
-
-    const datos = {
-      nombre: form.nombre.trim(),
-      codigo_barra: form.codigo_barra.trim() || null,
-      precio,
-      moneda: form.moneda,
-      activo: true,
-    };
-
+    setGuardando(true); setError('');
+    const datos = { nombre: form.nombre.trim(), codigo_barra: form.codigo_barra.trim() || null, precio, moneda: form.moneda, activo: true };
     if (editando) {
       const ok = await updateProductoSupabase(editando.id, datos);
-      if (ok) {
-        await saveProducto({ ...editando, ...datos });
-        await cargar();
-        setShowModal(false);
-      } else {
-        setError('Error al actualizar');
-      }
+      if (ok) { await saveProducto({ ...editando, ...datos }); await cargar(); setShowModal(false); }
+      else setError('Error al actualizar');
     } else {
       const nuevo = await createProductoSupabase(datos);
-      if (nuevo) {
-        await saveProducto(nuevo);
-        await cargar();
-        setShowModal(false);
-      } else {
-        setError('Error al crear el producto');
-      }
+      if (nuevo) { await saveProducto(nuevo); await cargar(); setShowModal(false); }
+      else setError('Error al crear el producto');
     }
     setGuardando(false);
   };
@@ -103,10 +58,7 @@ export default function InventarioPage() {
   const eliminar = async (p: Producto) => {
     if (!isOnline) { setError('Necesitas conexión para eliminar'); return; }
     const ok = await softDeleteProducto(p.id);
-    if (ok) {
-      await deleteProductoDB(p.id);
-      await cargar();
-    }
+    if (ok) { await deleteProductoDB(p.id); await cargar(); }
     setConfirmDelete(null);
   };
 
@@ -117,13 +69,8 @@ export default function InventarioPage() {
           <h1 className="text-xl font-bold">Inventario</h1>
           <p className="text-emerald-200 text-sm">{productos.length} productos</p>
         </div>
-        <button
-          onClick={abrirNuevo}
-          className="bg-white text-emerald-700 px-4 py-2 rounded-xl font-semibold text-sm flex items-center gap-1.5"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-          </svg>
+        <button onClick={abrirNuevo} className="bg-white text-emerald-700 px-4 py-2 rounded-xl font-semibold text-sm flex items-center gap-1.5">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
           Agregar
         </button>
       </header>
@@ -133,13 +80,9 @@ export default function InventarioPage() {
           <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
-          <input
-            type="text"
-            value={busqueda}
-            onChange={e => setBusqueda(e.target.value)}
+          <input type="text" value={busqueda} onChange={e => setBusqueda(e.target.value)}
             placeholder="Buscar por nombre o código..."
-            className="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-emerald-400"
-          />
+            className="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-emerald-400" />
         </div>
       </div>
 
@@ -150,44 +93,34 @@ export default function InventarioPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10" />
             </svg>
             <p className="font-medium">{busqueda ? `Sin resultados para "${busqueda}"` : 'Sin productos'}</p>
-            {!busqueda && (
-              <button onClick={abrirNuevo} className="mt-3 text-emerald-600 font-semibold text-sm">Agregar el primero</button>
-            )}
+            {!busqueda && <button onClick={abrirNuevo} className="mt-3 text-emerald-600 font-semibold text-sm">Agregar el primero</button>}
           </div>
-        ) : (
-          filtrados.map(p => {
-            const pbs = tasa > 0 ? precioBS(p, tasa) : null;
-            const pusd = tasa > 0 ? precioUSD(p, tasa) : null;
-            return (
-              <div key={p.id} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 flex items-center justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-gray-900 truncate">{p.nombre}</p>
-                  {p.codigo_barra && <p className="text-xs text-gray-400 font-mono">{p.codigo_barra}</p>}
-                  {pbs !== null ? (
-                    <div className="mt-1">
-                      <p className="font-bold text-gray-900 text-lg">{formatBS(pbs)}</p>
-                      <p className="text-xs text-gray-400">{pusd !== null ? formatUSD(pusd) : ''}</p>
-                    </div>
-                  ) : (
-                    <p className="text-sm text-gray-400 mt-1">{p.precio} {p.moneda}</p>
-                  )}
-                </div>
-                <div className="flex gap-2 flex-shrink-0">
-                  <button onClick={() => abrirEditar(p)} className="p-2 rounded-lg bg-gray-100 text-gray-600">
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                    </svg>
-                  </button>
-                  <button onClick={() => setConfirmDelete(p)} className="p-2 rounded-lg bg-red-50 text-red-500">
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
-                  </button>
-                </div>
+        ) : filtrados.map(p => {
+          const pbs = tasa > 0 ? precioBS(p, tasa) : null;
+          const pusd = tasa > 0 ? precioUSD(p, tasa) : null;
+          return (
+            <div key={p.id} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 flex items-center justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-gray-900 truncate">{p.nombre}</p>
+                {p.codigo_barra && <p className="text-xs text-gray-400 font-mono">{p.codigo_barra}</p>}
+                {pbs !== null ? (
+                  <div className="mt-1">
+                    <p className="font-bold text-gray-900 text-lg">{formatBS(pbs)}</p>
+                    <p className="text-xs text-gray-400">{pusd !== null ? formatUSD(pusd) : ''}</p>
+                  </div>
+                ) : <p className="text-sm text-gray-400 mt-1">{p.precio} {p.moneda}</p>}
               </div>
-            );
-          })
-        )}
+              <div className="flex gap-2 flex-shrink-0">
+                <button onClick={() => abrirEditar(p)} className="p-2 rounded-lg bg-gray-100 text-gray-600">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                </button>
+                <button onClick={() => setConfirmDelete(p)} className="p-2 rounded-lg bg-red-50 text-red-500">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                </button>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {showModal && (
@@ -197,28 +130,20 @@ export default function InventarioPage() {
             <div className="flex items-center justify-between p-4 border-b border-gray-100">
               <h2 className="text-lg font-bold">{editando ? 'Editar producto' : 'Nuevo producto'}</h2>
               <button onClick={() => setShowModal(false)} className="p-1 text-gray-400">
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {!isOnline && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm">
-                  Sin conexión — no se puede guardar
-                </div>
-              )}
+              {!isOnline && <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm">Sin conexión — no se puede guardar</div>}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Nombre <span className="text-red-400">*</span></label>
                 <input type="text" value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-400"
-                  placeholder="Nombre del producto" autoFocus />
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-400" placeholder="Nombre del producto" autoFocus />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Código de barra</label>
                 <input type="text" value={form.codigo_barra} onChange={e => setForm(f => ({ ...f, codigo_barra: e.target.value }))}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 font-mono focus:outline-none focus:border-emerald-400"
-                  placeholder="Opcional" />
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 font-mono focus:outline-none focus:border-emerald-400" placeholder="Opcional" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Moneda</label>
@@ -227,19 +152,14 @@ export default function InventarioPage() {
                     <button key={m} onClick={() => setForm(f => ({ ...f, moneda: m }))}
                       className={`flex-1 py-3 rounded-xl font-semibold transition-colors ${
                         form.moneda === m ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-700'
-                      }`}>
-                      {m === 'USD' ? '$ USD' : 'Bs VES'}
-                    </button>
+                      }`}>{m === 'USD' ? '$ USD' : 'Bs VES'}</button>
                   ))}
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Precio ({form.moneda}) <span className="text-red-400">*</span>
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Precio ({form.moneda}) <span className="text-red-400">*</span></label>
                 <input type="number" step="0.01" value={form.precio} onChange={e => setForm(f => ({ ...f, precio: e.target.value }))}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none focus:border-emerald-400"
-                  placeholder="0.00" />
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none focus:border-emerald-400" placeholder="0.00" />
                 {tasa > 0 && form.precio && parseFloat(form.precio) > 0 && (
                   <p className="text-sm text-gray-400 mt-1">
                     {form.moneda === 'USD'

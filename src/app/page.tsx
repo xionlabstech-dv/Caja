@@ -1,5 +1,7 @@
 'use client';
 
+export const dynamic = 'force-dynamic';
+
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Producto, ItemCarrito, MetodoPago, Venta, VentaItem } from '@/types';
 import { getProductos, getProductoPorCodigo, saveVenta } from '@/lib/db';
@@ -130,56 +132,31 @@ export default function CajaPage() {
 
   return (
     <div className="flex flex-col h-screen max-h-screen">
-      {/* Header */}
       <header className="bg-emerald-600 text-white px-4 pt-4 pb-3 flex items-center justify-between sticky top-0 z-30">
         <h1 className="text-xl font-bold">Caja</h1>
         <div className="flex items-center gap-1.5 text-sm">
-          <span
-            className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-300' : 'bg-red-400'}`}
-          />
+          <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-300' : 'bg-red-400'}`} />
           <span className="text-emerald-100">{isOnline ? 'En línea' : 'Sin conexión'}</span>
         </div>
       </header>
 
-      {/* Search */}
       <div className="px-4 py-3 bg-white border-b border-gray-200 flex gap-2">
         <div className="flex-1 relative">
-          <svg
-            className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-            />
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
           <input
             ref={searchRef}
             type="text"
             value={busqueda}
-            onChange={e => {
-              setBusqueda(e.target.value);
-              setNoEncontrado('');
-            }}
+            onChange={e => { setBusqueda(e.target.value); setNoEncontrado(''); }}
             placeholder="Buscar producto..."
             className="w-full pl-9 pr-8 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-emerald-400"
           />
           {busqueda && (
-            <button
-              onClick={() => setBusqueda('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
-            >
+            <button onClick={() => setBusqueda('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           )}
@@ -190,12 +167,7 @@ export default function CajaPage() {
           aria-label="Escanear código"
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"
-            />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
           </svg>
         </button>
       </div>
@@ -206,13 +178,11 @@ export default function CajaPage() {
         </div>
       )}
 
-      {/* Product list */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
         {productos.length === 0 ? (
           <div className="text-center text-gray-400 py-16">
             <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10" />
             </svg>
             <p className="font-medium">Sin productos</p>
             <p className="text-sm mt-1">Agrega productos en Inventario</p>
@@ -226,12 +196,8 @@ export default function CajaPage() {
             const pbs = tasa > 0 ? precioBS(producto, tasa) : null;
             const pusd = tasa > 0 ? precioUSD(producto, tasa) : null;
             const enCarrito = carrito.find(i => i.producto.id === producto.id);
-
             return (
-              <div
-                key={producto.id}
-                className="bg-white rounded-xl p-4 flex items-center justify-between shadow-sm border border-gray-100"
-              >
+              <div key={producto.id} className="bg-white rounded-xl p-4 flex items-center justify-between shadow-sm border border-gray-100">
                 <div className="flex-1 min-w-0 pr-3">
                   <p className="font-medium text-gray-900 truncate">{producto.nombre}</p>
                   {pbs !== null ? (
@@ -240,30 +206,19 @@ export default function CajaPage() {
                       <p className="text-sm text-gray-400">{pusd !== null ? formatUSD(pusd) : ''}</p>
                     </>
                   ) : (
-                    <p className="text-sm text-gray-400 mt-1">
-                      {producto.precio.toLocaleString('es-VE')} {producto.moneda} · tasa no configurada
-                    </p>
+                    <p className="text-sm text-gray-400 mt-1">{producto.precio.toLocaleString('es-VE')} {producto.moneda} · tasa no configurada</p>
                   )}
                 </div>
                 <button
                   onClick={() => agregarAlCarrito(producto)}
                   className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold transition-colors ${
-                    enCarrito
-                      ? 'bg-emerald-100 text-emerald-700'
-                      : 'bg-emerald-600 text-white'
+                    enCarrito ? 'bg-emerald-100 text-emerald-700' : 'bg-emerald-600 text-white'
                   }`}
                 >
                   {enCarrito ? (
-                    <>
-                      <span>{enCarrito.cantidad}</span>
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                      </svg>
-                    </>
+                    <><span>{enCarrito.cantidad}</span><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg></>
                   ) : (
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                    </svg>
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
                   )}
                 </button>
               </div>
@@ -272,23 +227,19 @@ export default function CajaPage() {
         )}
       </div>
 
-      {/* Floating cart */}
       {totalItems > 0 && !showCarrito && !showPago && (
         <button
           onClick={() => setShowCarrito(true)}
           className="fixed bottom-20 right-4 bg-emerald-600 text-white px-5 py-3 rounded-2xl shadow-lg flex items-center gap-2 z-30"
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"
-            />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
           </svg>
           <span className="font-bold">{totalItems}</span>
           <span className="font-semibold text-sm hidden sm:inline">· {formatBS(totalBS)}</span>
         </button>
       )}
 
-      {/* Cart bottom sheet */}
       {showCarrito && (
         <div className="fixed inset-0 z-50 flex items-end">
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowCarrito(false)} />
@@ -296,9 +247,7 @@ export default function CajaPage() {
             <div className="flex items-center justify-between p-4 border-b border-gray-100">
               <h2 className="text-lg font-bold">Tu carrito</h2>
               <button onClick={() => setShowCarrito(false)} className="p-1 text-gray-400">
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -306,24 +255,12 @@ export default function CajaPage() {
                 <div key={item.producto.id} className="flex items-center gap-3">
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm truncate">{item.producto.nombre}</p>
-                    <p className="text-emerald-700 font-bold">
-                      {formatBS(precioBS(item.producto, tasa) * item.cantidad)}
-                    </p>
+                    <p className="text-emerald-700 font-bold">{formatBS(precioBS(item.producto, tasa) * item.cantidad)}</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => actualizarCantidad(item.producto.id, -1)}
-                      className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-lg font-bold text-gray-700"
-                    >
-                      −
-                    </button>
+                    <button onClick={() => actualizarCantidad(item.producto.id, -1)} className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-lg font-bold text-gray-700">−</button>
                     <span className="w-6 text-center font-semibold">{item.cantidad}</span>
-                    <button
-                      onClick={() => actualizarCantidad(item.producto.id, 1)}
-                      className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-lg font-bold text-emerald-700"
-                    >
-                      +
-                    </button>
+                    <button onClick={() => actualizarCantidad(item.producto.id, 1)} className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-lg font-bold text-emerald-700">+</button>
                   </div>
                 </div>
               ))}
@@ -336,18 +273,12 @@ export default function CajaPage() {
                   {tasa > 0 && <p className="text-sm text-gray-400">{formatUSD(totalUSD)}</p>}
                 </div>
               </div>
-              <button
-                onClick={() => { setShowCarrito(false); setShowPago(true); }}
-                className="w-full bg-emerald-600 text-white py-4 rounded-xl text-lg font-bold"
-              >
-                Cobrar
-              </button>
+              <button onClick={() => { setShowCarrito(false); setShowPago(true); }} className="w-full bg-emerald-600 text-white py-4 rounded-xl text-lg font-bold">Cobrar</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Payment sheet */}
       {showPago && (
         <div className="fixed inset-0 z-50 flex items-end">
           <div className="absolute inset-0 bg-black/40" onClick={() => { setShowPago(false); setShowCarrito(true); }} />
@@ -355,9 +286,7 @@ export default function CajaPage() {
             <div className="flex items-center justify-between p-4 border-b border-gray-100">
               <h2 className="text-lg font-bold">Método de pago</h2>
               <button onClick={() => { setShowPago(false); setShowCarrito(true); }} className="p-1 text-gray-400">
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                </svg>
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-4">
@@ -367,31 +296,20 @@ export default function CajaPage() {
               </div>
               <div className="grid grid-cols-3 gap-2 mb-4">
                 {METODOS_PAGO.map(m => (
-                  <button
-                    key={m.id}
-                    onClick={() => { setMetodo(m.id); setMontoRecibido(''); }}
+                  <button key={m.id} onClick={() => { setMetodo(m.id); setMontoRecibido(''); }}
                     className={`py-3 px-2 rounded-xl text-sm font-medium transition-colors text-center ${
                       metodo === m.id ? 'bg-emerald-600 text-white shadow-sm' : 'bg-gray-100 text-gray-700'
-                    }`}
-                  >
+                    }`}>
                     {m.label}
                   </button>
                 ))}
               </div>
               {(metodo === 'efectivo_bs' || metodo === 'efectivo_usd') && (
                 <div className="mb-4">
-                  <label className="block text-sm text-gray-500 mb-1">
-                    Monto recibido ({metodo === 'efectivo_bs' ? 'Bs' : '$'})
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={montoRecibido}
-                    onChange={e => setMontoRecibido(e.target.value)}
+                  <label className="block text-sm text-gray-500 mb-1">Monto recibido ({metodo === 'efectivo_bs' ? 'Bs' : '$'})</label>
+                  <input type="number" step="0.01" value={montoRecibido} onChange={e => setMontoRecibido(e.target.value)}
                     className="w-full border border-gray-300 rounded-xl p-3 text-xl font-bold focus:outline-none focus:border-emerald-400"
-                    placeholder="0.00"
-                    autoFocus
-                  />
+                    placeholder="0.00" autoFocus />
                   {montoRecibido && cambio !== null && (
                     <div className={`mt-3 text-center text-xl font-bold py-3 rounded-xl ${
                       cambio >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'
@@ -405,11 +323,8 @@ export default function CajaPage() {
               )}
             </div>
             <div className="p-4 border-t border-gray-100">
-              <button
-                onClick={confirmarVenta}
-                disabled={!puedeConfirmar}
-                className="w-full bg-emerald-600 text-white py-4 rounded-xl text-lg font-bold disabled:opacity-40 disabled:cursor-not-allowed"
-              >
+              <button onClick={confirmarVenta} disabled={!puedeConfirmar}
+                className="w-full bg-emerald-600 text-white py-4 rounded-xl text-lg font-bold disabled:opacity-40 disabled:cursor-not-allowed">
                 Confirmar Venta
               </button>
             </div>

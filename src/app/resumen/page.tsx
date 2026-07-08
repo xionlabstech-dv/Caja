@@ -1,5 +1,7 @@
 'use client';
 
+export const dynamic = 'force-dynamic';
+
 import { useState, useEffect } from 'react';
 import { getVentasHoy } from '@/lib/db';
 import { formatBS, formatUSD } from '@/lib/precio';
@@ -35,19 +37,11 @@ export default function ResumenPage() {
   const totalUSD = tasa > 0 ? totalBS / tasa : 0;
 
   const porMetodo = ventas.reduce(
-    (acc, v) => {
-      acc[v.metodo_pago] = (acc[v.metodo_pago] || 0) + v.total_bs;
-      return acc;
-    },
+    (acc, v) => { acc[v.metodo_pago] = (acc[v.metodo_pago] || 0) + v.total_bs; return acc; },
     {} as Record<MetodoPago, number>
   );
 
-  const hoy = new Date().toLocaleDateString('es-VE', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
+  const hoy = new Date().toLocaleDateString('es-VE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
   return (
     <div>
@@ -55,15 +49,12 @@ export default function ResumenPage() {
         <h1 className="text-xl font-bold">Resumen del día</h1>
         <p className="text-emerald-200 text-sm capitalize mt-0.5">{hoy}</p>
       </header>
-
       <div className="p-4 space-y-4">
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 text-center">
           <p className="text-gray-500 text-sm mb-1">Total vendido</p>
           <p className="text-4xl font-bold text-gray-900">{formatBS(totalBS)}</p>
           {tasa > 0 && <p className="text-gray-400 mt-1">{formatUSD(totalUSD)}</p>}
-          <p className="text-emerald-600 text-sm font-medium mt-2">
-            {ventas.length} {ventas.length === 1 ? 'venta' : 'ventas'}
-          </p>
+          <p className="text-emerald-600 text-sm font-medium mt-2">{ventas.length} {ventas.length === 1 ? 'venta' : 'ventas'}</p>
         </div>
 
         {Object.keys(porMetodo).length > 0 && (
@@ -72,9 +63,7 @@ export default function ResumenPage() {
             <div className="space-y-2">
               {(Object.entries(porMetodo) as [MetodoPago, number][]).map(([metodo, total]) => (
                 <div key={metodo} className="flex items-center justify-between">
-                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${METODO_COLORS[metodo]}`}>
-                    {METODO_LABELS[metodo]}
-                  </span>
+                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${METODO_COLORS[metodo]}`}>{METODO_LABELS[metodo]}</span>
                   <span className="font-bold text-gray-800">{formatBS(total)}</span>
                 </div>
               ))}
@@ -90,17 +79,12 @@ export default function ResumenPage() {
               const isOpen = expandido === venta.id;
               return (
                 <div key={venta.id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-                  <button
-                    className="w-full flex items-center justify-between p-4 text-left"
-                    onClick={() => setExpandido(isOpen ? null : venta.id)}
-                  >
+                  <button className="w-full flex items-center justify-between p-4 text-left" onClick={() => setExpandido(isOpen ? null : venta.id)}>
                     <div>
                       <p className="font-semibold text-gray-800">Venta #{ventas.length - idx}</p>
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className="text-gray-400 text-xs">{hora}</span>
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${METODO_COLORS[venta.metodo_pago]}`}>
-                          {METODO_LABELS[venta.metodo_pago]}
-                        </span>
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${METODO_COLORS[venta.metodo_pago]}`}>{METODO_LABELS[venta.metodo_pago]}</span>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -131,9 +115,7 @@ export default function ResumenPage() {
         ) : (
           <div className="text-center text-gray-400 py-12">
             <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-              />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
             </svg>
             <p className="font-medium">Sin ventas hoy</p>
             <p className="text-sm mt-1">Las ventas aparecerán aquí</p>
