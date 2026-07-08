@@ -34,6 +34,25 @@ export interface Venta {
   total_bs: number;
   total_usd: number;
   tasa_usada: number;
+  cierre_id?: string;
+}
+
+export interface DesgloseCierre {
+  bs: number;
+  usd: number;
+  count: number;
+}
+
+export interface CierreCaja {
+  id: string;
+  periodo_inicio: string;
+  periodo_fin: string;
+  total_bs: number;
+  total_usd: number;
+  cantidad_ventas: number;
+  desglose_metodos: Partial<Record<MetodoPago, DesgloseCierre>>;
+  tasa_cierre: number;
+  creado_en: string;
 }
 
 export interface ItemCarrito {

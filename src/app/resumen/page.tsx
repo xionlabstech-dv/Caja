@@ -3,9 +3,17 @@
 export const dynamic = 'force-dynamic';
 
 import { useState, useEffect } from 'react';
-import { getVentasHoy } from '@/lib/db';
+import {
+  getVentasSinCerrar,
+  saveCierre,
+  tagVentasConCierre,
+  getCierres,
+  getUltimoCierre,
+  setUltimoCierre,
+} from '@/lib/db';
+import { sincronizarCierre } from '@/lib/sync';
 import { formatBS, formatUSD } from '@/lib/precio';
-import { Venta, MetodoPago } from '@/types';
+import { Venta, MetodoPago, CierreCaja, DesgloseCierre } from '@/types';
 import { useApp } from '@/components/Providers';
 
 const METODO_LABELS: Record<MetodoPago, string> = {
@@ -24,14 +32,36 @@ const METODO_COLORS: Record<MetodoPago, string> = {
   efectivo_usd: 'bg-yellow-100 text-yellow-700',
 };
 
+function fmtFecha(iso: string, conHora = true) {
+  return new Date(iso).toLocaleDateString('es-VE', {
+    day: '2-digit',
+    month: 'short',
+    ...(conHora ? { hour: '2-digit', minute: '2-digit' } : { year: 'numeric' }),
+  });
+}
+
 export default function ResumenPage() {
   const { tasa } = useApp();
   const [ventas, setVentas] = useState<Venta[]>([]);
+  const [cierres, setCierres] = useState<CierreCaja[]>([]);
+  const [ultimoCierre, setUltimoCierreState] = useState<string | null>(null);
   const [expandido, setExpandido] = useState<string | null>(null);
+  const [expandidoCierre, setExpandidoCierre] = useState<string | null>(null);
+  const [showConfirmCierre, setShowConfirmCierre] = useState(false);
+  const [cerrando, setCerrando] = useState(false);
 
-  useEffect(() => {
-    getVentasHoy().then(setVentas);
-  }, []);
+  const cargar = async () => {
+    const [v, c, uc] = await Promise.all([
+      getVentasSinCerrar(),
+      getCierres(),
+      getUltimoCierre(),
+    ]);
+    setVentas(v);
+    setCierres(c);
+    setUltimoCierreState(uc);
+  };
+
+  useEffect(() => { cargar(); }, []);
 
   const totalBS = ventas.reduce((s, v) => s + v.total_bs, 0);
   const totalUSD = tasa > 0 ? totalBS / tasa : 0;
@@ -41,27 +71,84 @@ export default function ResumenPage() {
       acc[v.metodo_pago] = (acc[v.metodo_pago] || 0) + v.total_bs;
       return acc;
     },
-    {} as Record<MetodoPago, number>
+    {} as Partial<Record<MetodoPago, number>>
   );
 
-  const hoy = new Date().toLocaleDateString('es-VE', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
+  // Start of current period: last cierre time, or oldest pending venta, or null
+  const periodoInicio = ultimoCierre
+    ?? (ventas.length > 0
+      ? ventas.reduce((min, v) => (v.fecha < min ? v.fecha : min), ventas[0].fecha)
+      : null);
+
+  const confirmarCierre = async () => {
+    setCerrando(true);
+    const now = new Date().toISOString();
+
+    const desglose = ventas.reduce((acc, v) => {
+      const m = v.metodo_pago;
+      if (!acc[m]) acc[m] = { bs: 0, usd: 0, count: 0 };
+      acc[m]!.bs += v.total_bs;
+      acc[m]!.usd += tasa > 0 ? v.total_bs / tasa : 0;
+      acc[m]!.count += 1;
+      return acc;
+    }, {} as Partial<Record<MetodoPago, DesgloseCierre>>);
+
+    const inicio = periodoInicio ?? now;
+
+    const cierre: CierreCaja = {
+      id: crypto.randomUUID(),
+      periodo_inicio: inicio,
+      periodo_fin: now,
+      total_bs: totalBS,
+      total_usd: tasa > 0 ? totalBS / tasa : 0,
+      cantidad_ventas: ventas.length,
+      desglose_metodos: desglose,
+      tasa_cierre: tasa,
+      creado_en: now,
+    };
+
+    await saveCierre(cierre);
+    await tagVentasConCierre(ventas.map(v => v.id), cierre.id);
+    await setUltimoCierre(now);
+    sincronizarCierre(cierre); // fire-and-forget
+
+    setVentas([]);
+    setCierres(prev => [cierre, ...prev]);
+    setUltimoCierreState(now);
+    setShowConfirmCierre(false);
+    setCerrando(false);
+  };
 
   return (
     <div>
       <header className="bg-emerald-600 text-white px-4 pt-4 pb-3">
-        <h1 className="text-xl font-bold">Resumen del día</h1>
-        <p className="text-emerald-200 text-sm capitalize mt-0.5">{hoy}</p>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-xl font-bold">Período actual</h1>
+            <p className="text-emerald-200 text-sm mt-0.5">
+              {periodoInicio
+                ? `Desde ${fmtFecha(periodoInicio)}`
+                : 'Sin ventas pendientes'}
+            </p>
+          </div>
+          {ventas.length > 0 && (
+            <button
+              onClick={() => setShowConfirmCierre(true)}
+              className="flex-shrink-0 bg-white text-emerald-700 px-3 py-2 rounded-xl font-semibold text-sm flex items-center gap-1.5"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+              </svg>
+              Cerrar caja
+            </button>
+          )}
+        </div>
       </header>
 
       <div className="p-4 space-y-4">
-        {/* Total */}
+        {/* Total del período */}
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 text-center">
-          <p className="text-gray-500 text-sm mb-1">Total vendido</p>
+          <p className="text-gray-500 text-sm mb-1">Total sin cerrar</p>
           <p className="text-4xl font-bold text-gray-900">{formatBS(totalBS)}</p>
           {tasa > 0 && <p className="text-gray-400 mt-1">{formatUSD(totalUSD)}</p>}
           <p className="text-emerald-600 text-sm font-medium mt-2">
@@ -76,9 +163,7 @@ export default function ResumenPage() {
             <div className="space-y-2">
               {(Object.entries(porMetodo) as [MetodoPago, number][]).map(([metodo, total]) => (
                 <div key={metodo} className="flex items-center justify-between">
-                  <span
-                    className={`text-xs font-semibold px-2.5 py-1 rounded-full ${METODO_COLORS[metodo]}`}
-                  >
+                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${METODO_COLORS[metodo]}`}>
                     {METODO_LABELS[metodo]}
                   </span>
                   <span className="font-bold text-gray-800">{formatBS(total)}</span>
@@ -88,7 +173,7 @@ export default function ResumenPage() {
           </div>
         )}
 
-        {/* Lista de ventas */}
+        {/* Lista de ventas pendientes */}
         {ventas.length > 0 ? (
           <div className="space-y-2">
             <h2 className="font-semibold text-gray-700 px-1">Ventas</h2>
@@ -109,14 +194,10 @@ export default function ResumenPage() {
                     onClick={() => setExpandido(isOpen ? null : venta.id)}
                   >
                     <div>
-                      <p className="font-semibold text-gray-800">
-                        Venta #{ventas.length - idx}
-                      </p>
+                      <p className="font-semibold text-gray-800">Venta #{ventas.length - idx}</p>
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className="text-gray-400 text-xs">{hora}</span>
-                        <span
-                          className={`text-xs font-medium px-2 py-0.5 rounded-full ${METODO_COLORS[venta.metodo_pago]}`}
-                        >
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${METODO_COLORS[venta.metodo_pago]}`}>
                           {METODO_LABELS[venta.metodo_pago]}
                         </span>
                       </div>
@@ -125,9 +206,7 @@ export default function ResumenPage() {
                       <p className="font-bold text-gray-900">{formatBS(venta.total_bs)}</p>
                       <svg
                         className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
+                        fill="none" viewBox="0 0 24 24" stroke="currentColor"
                       >
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                       </svg>
@@ -157,17 +236,138 @@ export default function ResumenPage() {
             })}
           </div>
         ) : (
-          <div className="text-center text-gray-400 py-12">
+          <div className="text-center text-gray-400 py-10">
             <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
               />
             </svg>
-            <p className="font-medium">Sin ventas hoy</p>
-            <p className="text-sm mt-1">Las ventas aparecerán aquí</p>
+            <p className="font-medium">Caja cerrada</p>
+            <p className="text-sm mt-1">Las nuevas ventas aparecerán aquí</p>
+          </div>
+        )}
+
+        {/* Cierres anteriores */}
+        {cierres.length > 0 && (
+          <div className="space-y-2">
+            <h2 className="font-semibold text-gray-700 px-1">Cierres anteriores</h2>
+            {cierres.map(cierre => {
+              const isOpen = expandidoCierre === cierre.id;
+              return (
+                <div key={cierre.id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                  <button
+                    className="w-full flex items-center justify-between p-4 text-left"
+                    onClick={() => setExpandidoCierre(isOpen ? null : cierre.id)}
+                  >
+                    <div>
+                      <p className="font-semibold text-gray-800">{fmtFecha(cierre.periodo_fin)}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {cierre.cantidad_ventas} {cierre.cantidad_ventas === 1 ? 'venta' : 'ventas'}
+                        {' · '}desde {fmtFecha(cierre.periodo_inicio)}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <p className="font-bold text-gray-900">{formatBS(cierre.total_bs)}</p>
+                      <svg
+                        className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                        fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  </button>
+
+                  {isOpen && (
+                    <div className="border-t border-gray-100 px-4 pb-4 pt-3 space-y-2">
+                      {cierre.total_usd > 0 && (
+                        <div className="flex justify-between text-sm mb-1">
+                          <span className="text-gray-500">Total</span>
+                          <span className="font-medium text-gray-700">{formatUSD(cierre.total_usd)}</span>
+                        </div>
+                      )}
+                      {(Object.entries(cierre.desglose_metodos) as [MetodoPago, DesgloseCierre][]).map(([metodo, d]) => (
+                        <div key={metodo} className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${METODO_COLORS[metodo]}`}>
+                              {METODO_LABELS[metodo]}
+                            </span>
+                            <span className="text-xs text-gray-400">{d.count} venta{d.count !== 1 ? 's' : ''}</span>
+                          </div>
+                          <span className="font-bold text-sm text-gray-800">{formatBS(d.bs)}</span>
+                        </div>
+                      ))}
+                      <div className="border-t border-gray-100 pt-2 flex justify-between text-sm">
+                        <span className="text-gray-500">Tasa al cierre</span>
+                        <span className="text-gray-600">
+                          Bs {cierre.tasa_cierre.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
+
+      {/* Confirmation modal */}
+      {showConfirmCierre && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => { if (!cerrando) setShowConfirmCierre(false); }}
+          />
+          <div className="relative bg-white rounded-2xl w-full max-w-sm shadow-xl overflow-hidden">
+            <div className="p-5">
+              <h2 className="text-xl font-bold text-gray-900 mb-1">Cerrar caja</h2>
+              <p className="text-sm text-gray-500 mb-4">
+                Se archivarán todas las ventas del período actual.
+              </p>
+
+              <div className="bg-emerald-50 rounded-xl p-4 mb-4 text-center">
+                <p className="text-3xl font-bold text-gray-900">{formatBS(totalBS)}</p>
+                {tasa > 0 && <p className="text-sm text-gray-500 mt-0.5">{formatUSD(totalUSD)}</p>}
+                <p className="text-emerald-600 text-sm font-medium mt-1">
+                  {ventas.length} {ventas.length === 1 ? 'venta' : 'ventas'}
+                </p>
+              </div>
+
+              {Object.keys(porMetodo).length > 0 && (
+                <div className="space-y-2 mb-4">
+                  {(Object.entries(porMetodo) as [MetodoPago, number][]).map(([metodo, total]) => (
+                    <div key={metodo} className="flex items-center justify-between">
+                      <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${METODO_COLORS[metodo]}`}>
+                        {METODO_LABELS[metodo]}
+                      </span>
+                      <span className="font-bold text-sm text-gray-800">{formatBS(total)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <p className="text-xs text-gray-400 text-center mb-4">Esta acción no se puede deshacer.</p>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowConfirmCierre(false)}
+                  disabled={cerrando}
+                  className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-700 font-semibold disabled:opacity-40"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={confirmarCierre}
+                  disabled={cerrando}
+                  className="flex-1 py-3 rounded-xl bg-emerald-600 text-white font-bold disabled:opacity-40"
+                >
+                  {cerrando ? 'Cerrando...' : 'Confirmar cierre'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 import { saveProductos, saveConfiguracion, getConfiguracion as getConfigDB } from './db';
-import { Producto, Configuracion } from '@/types';
+import { Producto, Configuracion, CierreCaja } from '@/types';
 
 export async function syncFromSupabase(): Promise<Configuracion | null> {
   try {
@@ -102,3 +102,21 @@ export async function softDeleteProducto(id: string): Promise<boolean> {
 }
 
 export { getConfigDB as getConfiguracion };
+
+export async function sincronizarCierre(cierre: CierreCaja): Promise<void> {
+  try {
+    await supabase.from('cierres_caja').insert({
+      id: cierre.id,
+      periodo_inicio: cierre.periodo_inicio,
+      periodo_fin: cierre.periodo_fin,
+      total_bs: cierre.total_bs,
+      total_usd: cierre.total_usd,
+      cantidad_ventas: cierre.cantidad_ventas,
+      desglose_metodos: cierre.desglose_metodos,
+      tasa_cierre: cierre.tasa_cierre,
+      creado_en: cierre.creado_en,
+    });
+  } catch {
+    // fire-and-forget: the local record is already saved
+  }
+}

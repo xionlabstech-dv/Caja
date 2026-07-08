@@ -1,5 +1,10 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
-import { Producto, Configuracion, Venta } from '@/types';
+import { Producto, Configuracion, Venta, CierreCaja } from '@/types';
+
+interface MetaItem {
+  key: string;
+  value: string;
+}
 
 interface CajaDBSchema extends DBSchema {
   productos: {
@@ -16,6 +21,14 @@ interface CajaDBSchema extends DBSchema {
     value: Venta;
     indexes: { 'by-fecha-dia': string };
   };
+  cierres: {
+    key: string;
+    value: CierreCaja;
+  };
+  meta: {
+    key: string;
+    value: MetaItem;
+  };
 }
 
 let dbPromise: Promise<IDBPDatabase<CajaDBSchema>> | null = null;
@@ -23,13 +36,19 @@ let dbPromise: Promise<IDBPDatabase<CajaDBSchema>> | null = null;
 function getDB() {
   if (typeof window === 'undefined') throw new Error('IDB solo disponible en el browser');
   if (!dbPromise) {
-    dbPromise = openDB<CajaDBSchema>('caja-db', 1, {
-      upgrade(db) {
-        const productosStore = db.createObjectStore('productos', { keyPath: 'id' });
-        productosStore.createIndex('by-codigo', 'codigo_barra');
-        db.createObjectStore('configuracion', { keyPath: 'id' });
-        const ventasStore = db.createObjectStore('ventas', { keyPath: 'id' });
-        ventasStore.createIndex('by-fecha-dia', 'fecha_dia');
+    dbPromise = openDB<CajaDBSchema>('caja-db', 2, {
+      upgrade(db, oldVersion) {
+        if (oldVersion < 1) {
+          const productosStore = db.createObjectStore('productos', { keyPath: 'id' });
+          productosStore.createIndex('by-codigo', 'codigo_barra');
+          db.createObjectStore('configuracion', { keyPath: 'id' });
+          const ventasStore = db.createObjectStore('ventas', { keyPath: 'id' });
+          ventasStore.createIndex('by-fecha-dia', 'fecha_dia');
+        }
+        if (oldVersion < 2) {
+          db.createObjectStore('cierres', { keyPath: 'id' });
+          db.createObjectStore('meta', { keyPath: 'key' });
+        }
       },
     });
   }
@@ -83,4 +102,42 @@ export async function getVentasHoy(): Promise<Venta[]> {
   const db = await getDB();
   const today = new Date().toISOString().split('T')[0];
   return db.getAllFromIndex('ventas', 'by-fecha-dia', today);
+}
+
+export async function getVentasSinCerrar(): Promise<Venta[]> {
+  const db = await getDB();
+  const all = await db.getAll('ventas');
+  return all.filter(v => !v.cierre_id);
+}
+
+export async function tagVentasConCierre(ventaIds: string[], cierreId: string): Promise<void> {
+  const db = await getDB();
+  const tx = db.transaction('ventas', 'readwrite');
+  for (const id of ventaIds) {
+    const venta = await tx.store.get(id);
+    if (venta) await tx.store.put({ ...venta, cierre_id: cierreId });
+  }
+  await tx.done;
+}
+
+export async function saveCierre(cierre: CierreCaja): Promise<void> {
+  const db = await getDB();
+  await db.put('cierres', cierre);
+}
+
+export async function getCierres(): Promise<CierreCaja[]> {
+  const db = await getDB();
+  const all = await db.getAll('cierres');
+  return all.sort((a, b) => b.periodo_fin.localeCompare(a.periodo_fin));
+}
+
+export async function getUltimoCierre(): Promise<string | null> {
+  const db = await getDB();
+  const item = await db.get('meta', 'ultimoCierre');
+  return item?.value ?? null;
+}
+
+export async function setUltimoCierre(ts: string): Promise<void> {
+  const db = await getDB();
+  await db.put('meta', { key: 'ultimoCierre', value: ts });
 }
