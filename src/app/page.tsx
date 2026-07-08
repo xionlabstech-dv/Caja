@@ -422,6 +422,7 @@ export default function CajaPage() {
                   </div>
 
                   {item.esPorPeso ? (
+                    // Weight items: just a remove button, no quantity stepper
                     <button
                       onClick={() => removerItem(item.lineId)}
                       className="w-8 h-8 rounded-full bg-red-50 flex items-center justify-center text-red-400 flex-shrink-0"
@@ -432,6 +433,7 @@ export default function CajaPage() {
                       </svg>
                     </button>
                   ) : (
+                    // Regular items: quantity stepper
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => actualizarCantidad(item.lineId, -1)}
