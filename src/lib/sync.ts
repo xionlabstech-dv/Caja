@@ -4,18 +4,36 @@ import { Producto, Configuracion } from '@/types';
 
 export async function syncFromSupabase(): Promise<Configuracion | null> {
   try {
-    const [productosRes, configRes] = await Promise.all([
-      supabase.from('productos').select('*'),
-      supabase.from('configuracion').select('*').eq('id', 1).single(),
-    ]);
+    const PAGE_SIZE = 1000;
+    let from = 0;
+    const allProducts: Producto[] = [];
 
-    if (productosRes.data) {
-      await saveProductos(productosRes.data as Producto[]);
+    while (true) {
+      const { data, error } = await supabase
+        .from('productos')
+        .select('*')
+        .eq('activo', true)
+        .range(from, from + PAGE_SIZE - 1);
+
+      if (error || !data?.length) break;
+      allProducts.push(...(data as Producto[]));
+      if (data.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
     }
 
-    if (configRes.data) {
-      await saveConfiguracion(configRes.data as Configuracion);
-      return configRes.data as Configuracion;
+    if (allProducts.length > 0) {
+      await saveProductos(allProducts);
+    }
+
+    const { data: configData } = await supabase
+      .from('configuracion')
+      .select('*')
+      .eq('id', 1)
+      .single();
+
+    if (configData) {
+      await saveConfiguracion(configData as Configuracion);
+      return configData as Configuracion;
     }
 
     return null;
