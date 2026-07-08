@@ -16,6 +16,7 @@ const PRODUCTO_VACIO = {
   precio: '',
   moneda: 'USD' as 'USD' | 'VES',
   activo: true,
+  por_peso: false,
 };
 
 export default function InventarioPage() {
@@ -60,6 +61,7 @@ export default function InventarioPage() {
       precio: p.precio.toString(),
       moneda: p.moneda,
       activo: p.activo,
+      por_peso: p.por_peso ?? false,
     });
     setError('');
     setShowModal(true);
@@ -80,6 +82,7 @@ export default function InventarioPage() {
       precio,
       moneda: form.moneda,
       activo: true,
+      por_peso: form.por_peso,
     };
 
     if (editando) {
@@ -171,18 +174,28 @@ export default function InventarioPage() {
             return (
               <div key={p.id} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 flex items-center justify-between gap-3">
                 <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-gray-900 truncate">{p.nombre}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-semibold text-gray-900 truncate">{p.nombre}</p>
+                    {p.por_peso && (
+                      <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium flex-shrink-0">
+                        /kg
+                      </span>
+                    )}
+                  </div>
                   {p.codigo_barra && (
                     <p className="text-xs text-gray-400 font-mono">{p.codigo_barra}</p>
                   )}
                   {pbs !== null ? (
                     <div className="mt-1">
-                      <p className="font-bold text-gray-900 text-lg">{formatBS(pbs)}</p>
-                      <p className="text-xs text-gray-400">{pusd !== null ? formatUSD(pusd) : ''}</p>
+                      <p className="font-bold text-gray-900 text-lg">
+                        {formatBS(pbs)}
+                        {p.por_peso && <span className="text-sm font-normal text-gray-400"> / kg</span>}
+                      </p>
+                      <p className="text-xs text-gray-400">{pusd !== null ? formatUSD(pusd) : ''}{p.por_peso ? ' / kg' : ''}</p>
                     </div>
                   ) : (
                     <p className="text-sm text-gray-400 mt-1">
-                      {p.precio} {p.moneda}
+                      {p.precio} {p.moneda}{p.por_peso ? ' / kg' : ''}
                     </p>
                   )}
                 </div>
@@ -253,6 +266,29 @@ export default function InventarioPage() {
                 />
               </div>
 
+              {/* Toggle por peso */}
+              <div className="flex items-center justify-between py-1">
+                <div>
+                  <p className="text-sm font-medium text-gray-700">Se vende por peso</p>
+                  <p className="text-xs text-gray-400 mt-0.5">El precio será por kilo (kg)</p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={form.por_peso}
+                  onClick={() => setForm(f => ({ ...f, por_peso: !f.por_peso }))}
+                  className={`relative inline-flex w-11 h-6 rounded-full transition-colors flex-shrink-0 ${
+                    form.por_peso ? 'bg-emerald-600' : 'bg-gray-200'
+                  }`}
+                >
+                  <span
+                    className={`inline-block w-5 h-5 m-0.5 bg-white rounded-full shadow-sm transition-transform ${
+                      form.por_peso ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Código de barra
@@ -304,7 +340,7 @@ export default function InventarioPage() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Precio ({form.moneda}) <span className="text-red-400">*</span>
+                  {form.por_peso ? 'Precio por kilo' : 'Precio'} ({form.moneda}) <span className="text-red-400">*</span>
                 </label>
                 <input
                   type="number"
@@ -319,6 +355,7 @@ export default function InventarioPage() {
                     {form.moneda === 'USD'
                       ? `Bs ${(parseFloat(form.precio) * tasa).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                       : `$ ${(parseFloat(form.precio) / tasa).toFixed(2)}`}
+                    {form.por_peso ? ' / kg' : ''}
                   </p>
                 )}
               </div>
