@@ -25,9 +25,14 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="es">
+      <head>
+        <script dangerouslySetInnerHTML={{
+          __html: `(function(){try{var t=localStorage.getItem('theme');if(t==='dark')document.documentElement.classList.add('dark');}catch(e){}})();`
+        }} />
+      </head>
       <body>
         <Providers>
-          <main className="min-h-screen bg-gray-50 pb-16 max-w-lg mx-auto">
+          <main className="min-h-screen bg-gray-50 dark:bg-slate-900 pb-16 max-w-lg mx-auto">
             {children}
           </main>
           <BottomNav />

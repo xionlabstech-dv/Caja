@@ -9,6 +9,8 @@ interface AppContextType {
   setTasa: (tasa: number) => void;
   isOnline: boolean;
   configuracion: Configuracion | null;
+  theme: 'light' | 'dark';
+  toggleTheme: () => void;
 }
 
 const AppContext = createContext<AppContextType>({
@@ -16,6 +18,8 @@ const AppContext = createContext<AppContextType>({
   setTasa: () => {},
   isOnline: true,
   configuracion: null,
+  theme: 'light',
+  toggleTheme: () => {},
 });
 
 export function useApp() {
@@ -26,6 +30,21 @@ export default function Providers({ children }: { children: ReactNode }) {
   const [tasa, setTasaState] = useState(0);
   const [isOnline, setIsOnline] = useState(true);
   const [configuracion, setConfiguracion] = useState<Configuracion | null>(null);
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+
+  useEffect(() => {
+    const saved = localStorage.getItem('theme') as 'light' | 'dark' | null;
+    if (saved) setTheme(saved);
+  }, []);
+
+  const toggleTheme = () => {
+    setTheme(prev => {
+      const next = prev === 'light' ? 'dark' : 'light';
+      localStorage.setItem('theme', next);
+      document.documentElement.classList.toggle('dark', next === 'dark');
+      return next;
+    });
+  };
 
   useEffect(() => {
     setIsOnline(navigator.onLine);
@@ -72,7 +91,7 @@ export default function Providers({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AppContext.Provider value={{ tasa, setTasa, isOnline, configuracion }}>
+    <AppContext.Provider value={{ tasa, setTasa, isOnline, configuracion, theme, toggleTheme }}>
       {children}
     </AppContext.Provider>
   );

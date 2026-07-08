@@ -5,6 +5,7 @@ export const dynamic = 'force-dynamic';
 import { useState } from 'react';
 import { updateTasa } from '@/lib/sync';
 import { useApp } from '@/components/Providers';
+import ThemeToggle from '@/components/ThemeToggle';
 
 export default function TasaPage() {
   const { tasa, setTasa, configuracion, isOnline } = useApp();
@@ -52,9 +53,12 @@ export default function TasaPage() {
 
   return (
     <div>
-      <header className="bg-emerald-600 text-white px-4 pt-4 pb-3">
-        <h1 className="text-xl font-bold">Tasa BCV</h1>
-        <p className="text-emerald-200 text-sm mt-0.5">Tipo de cambio Bs / $</p>
+      <header className="bg-emerald-600 text-white px-4 pt-4 pb-3 flex items-start justify-between">
+        <div>
+          <h1 className="text-xl font-bold">Tasa BCV</h1>
+          <p className="text-emerald-200 text-sm mt-0.5">Tipo de cambio Bs / $</p>
+        </div>
+        <ThemeToggle />
       </header>
 
       <div className="p-4 space-y-4">
@@ -126,7 +130,21 @@ export default function TasaPage() {
             <p className="mt-2 text-red-500 text-sm">{error}</p>
           )}
           {mensaje && (
-            <p className="mt-2 text-emerald-600 text-sm font-medium">{mensaje}</p>
+            <div className="mt-2 flex items-center gap-2 text-emerald-600 text-sm font-medium">
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none" className="flex-shrink-0">
+                <circle cx="10" cy="10" r="9" stroke="currentColor" strokeWidth="2" />
+                <path
+                  className="animate-check-path"
+                  d="M5.5 10.5l3.5 3.5 5.5-7"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  fill="none"
+                />
+              </svg>
+              {mensaje}
+            </div>
           )}
         </div>
       </div>
