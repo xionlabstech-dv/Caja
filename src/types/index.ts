@@ -5,6 +5,7 @@ export interface Producto {
   moneda: 'USD' | 'VES';
   precio: number;
   activo: boolean;
+  por_peso: boolean;
 }
 
 export interface Configuracion {
@@ -19,6 +20,7 @@ export interface VentaItem {
   precio_bs: number;
   cantidad: number;
   subtotal_bs: number;
+  gramos?: number;
 }
 
 export type MetodoPago = 'efectivo_bs' | 'pago_movil' | 'biopago' | 'tarjeta' | 'efectivo_usd';
@@ -35,6 +37,10 @@ export interface Venta {
 }
 
 export interface ItemCarrito {
+  lineId: string;
   producto: Producto;
   cantidad: number;
+  esPorPeso?: boolean;
+  gramos?: number;
+  precioCalculadoBase?: number;
 }
