@@ -19,6 +19,28 @@ function formatearNombre(nombre: string): string {
     .join(' ');
 }
 
+let audioCtx: AudioContext | null = null;
+
+function reproducirBeep() {
+  try {
+    if (!audioCtx) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      audioCtx = new ((window as any).AudioContext || (window as any).webkitAudioContext)();
+    }
+    const osc = audioCtx!.createOscillator();
+    const gain = audioCtx!.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx!.destination);
+    osc.frequency.value = 1800;
+    osc.type = 'sine';
+    gain.gain.setValueAtTime(0.15, audioCtx!.currentTime);
+    osc.start();
+    osc.stop(audioCtx!.currentTime + 0.1);
+  } catch {
+    // Audio not supported
+  }
+}
+
 const PRODUCTO_VACIO = {
   nombre: '',
   codigo_barra: '',
@@ -39,6 +61,8 @@ export default function InventarioPage() {
   const [error, setError] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<Producto | null>(null);
   const [showScanner, setShowScanner] = useState(false);
+  const [showScannerBuscar, setShowScannerBuscar] = useState(false);
+  const [toast, setToast] = useState('');
 
   const cargar = async () => {
     const prods = await getProductos();
@@ -118,6 +142,26 @@ export default function InventarioPage() {
     setGuardando(false);
   };
 
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(''), 2500);
+  };
+
+  const handleScanInventario = (codigo: string) => {
+    setShowScannerBuscar(false);
+    const encontrado = productos.find(p => p.codigo_barra === codigo);
+    reproducirBeep();
+    if (encontrado) {
+      abrirEditar(encontrado);
+    } else {
+      setEditando(null);
+      setForm({ ...PRODUCTO_VACIO, codigo_barra: codigo });
+      setError('');
+      setShowModal(true);
+      showToast('Código no encontrado — completa los datos para agregarlo');
+    }
+  };
+
   const eliminar = async (p: Producto) => {
     if (!isOnline) { setError('Necesitas conexión para eliminar'); return; }
     const ok = await softDeleteProducto(p.id);
@@ -149,8 +193,8 @@ export default function InventarioPage() {
         </div>
       </header>
 
-      <div className="px-4 py-3 bg-white border-b border-gray-100">
-        <div className="relative">
+      <div className="px-4 py-3 bg-white border-b border-gray-100 flex gap-2">
+        <div className="flex-1 relative">
           <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
@@ -162,6 +206,20 @@ export default function InventarioPage() {
             className="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-emerald-400"
           />
         </div>
+        <button
+          onClick={() => setShowScannerBuscar(true)}
+          className="bg-emerald-600 text-white p-2.5 rounded-xl flex items-center justify-center"
+          aria-label="Escanear código"
+        >
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"
+            />
+          </svg>
+        </button>
       </div>
 
       <div className="p-4 space-y-2">
@@ -413,6 +471,21 @@ export default function InventarioPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-5 py-2.5 rounded-xl text-sm font-medium z-50 shadow-lg whitespace-nowrap">
+          {toast}
+        </div>
+      )}
+
+      {/* Header scanner — buscar producto o abrir nuevo con código pre-llenado */}
+      {showScannerBuscar && (
+        <Scanner
+          onDetect={handleScanInventario}
+          onClose={() => setShowScannerBuscar(false)}
+        />
       )}
 
       {/* Barcode scanner — renders on top of all modals (last in DOM) */}
