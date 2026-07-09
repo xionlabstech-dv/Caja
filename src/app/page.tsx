@@ -16,6 +16,36 @@ function avatarColor(nombre: string): string {
     'bg-emerald-500', 'bg-amber-500', 'bg-orange-500', 'bg-pink-500'][idx];
 }
 
+function formatearNombre(nombre: string): string {
+  return nombre
+    .toLowerCase()
+    .split(' ')
+    .map(p => p.charAt(0).toUpperCase() + p.slice(1))
+    .join(' ');
+}
+
+let audioCtx: AudioContext | null = null;
+
+function reproducirBeep() {
+  try {
+    if (!audioCtx) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      audioCtx = new ((window as any).AudioContext || (window as any).webkitAudioContext)();
+    }
+    const osc = audioCtx!.createOscillator();
+    const gain = audioCtx!.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx!.destination);
+    osc.frequency.value = 1800;
+    osc.type = 'sine';
+    gain.gain.setValueAtTime(0.15, audioCtx!.currentTime);
+    osc.start();
+    osc.stop(audioCtx!.currentTime + 0.1);
+  } catch {
+    // Audio not supported
+  }
+}
+
 const METODOS_PAGO: { id: MetodoPago; label: string }[] = [
   { id: 'efectivo_bs', label: 'Efectivo Bs' },
   { id: 'pago_movil', label: 'Pago Móvil' },
@@ -58,6 +88,7 @@ export default function CajaPage() {
       )
     : productos;
 
+  // Returns the Bs price for a single cart line (handles both regular and weight items)
   const itemPrecioBS = useCallback((item: ItemCarrito): number => {
     if (item.esPorPeso && item.precioCalculadoBase !== undefined) {
       return item.producto.moneda === 'USD'
@@ -84,6 +115,7 @@ export default function CajaPage() {
       return [...prev, { lineId: producto.id, producto, cantidad: 1 }];
     });
     showToast(`${producto.nombre} agregado`);
+    reproducirBeep();
   }, []);
 
   const agregarPorPeso = () => {
@@ -102,6 +134,7 @@ export default function CajaPage() {
     setShowPeso(false);
     setProductoPeso(null);
     showToast(`${productoPeso.nombre} ${g}g agregado`);
+    reproducirBeep();
   };
 
   const actualizarCantidad = (lineId: string, delta: number) => {
@@ -125,6 +158,7 @@ export default function CajaPage() {
     setShowScanner(false);
     const producto = await getProductoPorCodigo(codigo);
     if (producto) {
+      reproducirBeep();
       agregarAlCarrito(producto);
     } else {
       setNoEncontrado(codigo);
@@ -188,6 +222,7 @@ export default function CajaPage() {
       ? (cambio ?? -1) >= 0
       : true);
 
+  // Live preview for weight modal
   const gramosNum = parseFloat(gramos);
   const pesoPreviewBase = productoPeso && gramosNum > 0
     ? productoPeso.precio * (gramosNum / 1000)
@@ -201,6 +236,7 @@ export default function CajaPage() {
 
   return (
     <div className="flex flex-col h-screen max-h-screen">
+      {/* Header */}
       <header className="bg-emerald-600 text-white px-4 pt-4 pb-3 flex items-center justify-between sticky top-0 z-30">
         <h1 className="text-xl font-bold">Caja</h1>
         <div className="flex items-center gap-2">
@@ -214,6 +250,7 @@ export default function CajaPage() {
         </div>
       </header>
 
+      {/* Search */}
       <div className="px-4 py-3 bg-white border-b border-gray-200 flex gap-2">
         <div className="flex-1 relative">
           <svg
@@ -278,6 +315,7 @@ export default function CajaPage() {
         </div>
       )}
 
+      {/* Product list */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
         {productos.length === 0 ? (
           <div className="text-center text-gray-400 py-16">
@@ -306,14 +344,14 @@ export default function CajaPage() {
             return (
               <div
                 key={producto.id}
-                className="bg-white rounded-xl p-4 flex items-center gap-3 shadow-sm border border-gray-100"
+                className="bg-white rounded-xl p-4 flex items-start gap-3 shadow-sm border border-gray-100"
               >
                 <div className={`w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center ${avatarColor(producto.nombre)}`}>
                   <span className="text-white font-bold text-sm">{producto.nombre.charAt(0).toUpperCase()}</span>
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
-                    <p className="font-medium text-gray-900 truncate">{producto.nombre}</p>
+                    <p className="font-medium text-gray-900">{formatearNombre(producto.nombre)}</p>
                     {producto.por_peso && (
                       <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium flex-shrink-0">
                         /kg
@@ -383,6 +421,7 @@ export default function CajaPage() {
         )}
       </div>
 
+      {/* Floating cart */}
       {totalItems > 0 && !showCarrito && !showPago && (
         <button
           onClick={() => setShowCarrito(true)}
@@ -399,6 +438,7 @@ export default function CajaPage() {
         </button>
       )}
 
+      {/* Cart bottom sheet */}
       {showCarrito && (
         <div className="fixed inset-0 z-50 flex items-end">
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowCarrito(false)} />
@@ -414,10 +454,10 @@ export default function CajaPage() {
 
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {carrito.map(item => (
-                <div key={item.lineId} className="flex items-center gap-3">
+                <div key={item.lineId} className="flex items-start gap-3">
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm truncate">
-                      {item.producto.nombre}
+                    <p className="font-medium text-sm">
+                      {formatearNombre(item.producto.nombre)}
                       {item.esPorPeso && item.gramos && (
                         <span className="text-gray-400"> — {item.gramos}g</span>
                       )}
@@ -428,6 +468,7 @@ export default function CajaPage() {
                   </div>
 
                   {item.esPorPeso ? (
+                    // Weight items: just a remove button, no quantity stepper
                     <button
                       onClick={() => removerItem(item.lineId)}
                       className="w-8 h-8 rounded-full bg-red-50 flex items-center justify-center text-red-400 flex-shrink-0"
@@ -438,6 +479,7 @@ export default function CajaPage() {
                       </svg>
                     </button>
                   ) : (
+                    // Regular items: quantity stepper
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => actualizarCantidad(item.lineId, -1)}
@@ -477,6 +519,7 @@ export default function CajaPage() {
         </div>
       )}
 
+      {/* Payment sheet */}
       {showPago && (
         <div className="fixed inset-0 z-50 flex items-end">
           <div className="absolute inset-0 bg-black/40" onClick={() => { setShowPago(false); setShowCarrito(true); }} />
@@ -557,6 +600,7 @@ export default function CajaPage() {
         </div>
       )}
 
+      {/* Weight input modal */}
       {showPeso && productoPeso && (
         <div className="fixed inset-0 z-50 flex items-end">
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowPeso(false)} />
@@ -618,8 +662,10 @@ export default function CajaPage() {
         </div>
       )}
 
+      {/* Scanner */}
       {showScanner && <Scanner onDetect={handleScan} onClose={() => setShowScanner(false)} />}
 
+      {/* Toast */}
       {toast && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-5 py-2.5 rounded-xl text-sm font-medium z-50 shadow-lg whitespace-nowrap">
           {toast}

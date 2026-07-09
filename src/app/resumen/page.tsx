@@ -74,6 +74,14 @@ function fmtFecha(iso: string, conHora = true) {
   });
 }
 
+function formatearNombre(nombre: string): string {
+  return nombre
+    .toLowerCase()
+    .split(' ')
+    .map(p => p.charAt(0).toUpperCase() + p.slice(1))
+    .join(' ');
+}
+
 export default function ResumenPage() {
   const { tasa } = useApp();
   const [ventas, setVentas] = useState<Venta[]>([]);
@@ -108,6 +116,7 @@ export default function ResumenPage() {
     {} as Partial<Record<MetodoPago, number>>
   );
 
+  // Start of current period: last cierre time, or oldest pending venta, or null
   const periodoInicio = ultimoCierre
     ?? (ventas.length > 0
       ? ventas.reduce((min, v) => (v.fecha < min ? v.fecha : min), ventas[0].fecha)
@@ -143,7 +152,7 @@ export default function ResumenPage() {
     await saveCierre(cierre);
     await tagVentasConCierre(ventas.map(v => v.id), cierre.id);
     await setUltimoCierre(now);
-    sincronizarCierre(cierre);
+    sincronizarCierre(cierre); // fire-and-forget
 
     setVentas([]);
     setCierres(prev => [cierre, ...prev]);
@@ -182,6 +191,7 @@ export default function ResumenPage() {
       </header>
 
       <div className="p-4 space-y-4">
+        {/* Total del período */}
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 text-center">
           <p className="text-gray-500 text-sm mb-1">Total sin cerrar</p>
           <p className="text-4xl font-bold text-gray-900">{formatBS(totalBS)}</p>
@@ -191,6 +201,7 @@ export default function ResumenPage() {
           </p>
         </div>
 
+        {/* Por método */}
         {Object.keys(porMetodo).length > 0 && (
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
             <h2 className="font-semibold text-gray-700 mb-3">Por método de pago</h2>
@@ -208,6 +219,7 @@ export default function ResumenPage() {
           </div>
         )}
 
+        {/* Lista de ventas pendientes */}
         {ventas.length > 0 ? (
           <div className="space-y-2">
             <h2 className="font-semibold text-gray-700 px-1">Ventas</h2>
@@ -254,8 +266,8 @@ export default function ResumenPage() {
                         <div key={i} className="flex justify-between text-sm">
                           <span className="text-gray-600">
                             {item.gramos !== undefined
-                              ? item.nombre
-                              : `${item.cantidad}× ${item.nombre}`}
+                              ? formatearNombre(item.nombre)
+                              : `${item.cantidad}× ${formatearNombre(item.nombre)}`}
                           </span>
                           <span className="font-medium">{formatBS(item.subtotal_bs)}</span>
                         </div>
@@ -282,6 +294,7 @@ export default function ResumenPage() {
           </div>
         )}
 
+        {/* Cierres anteriores */}
         {cierres.length > 0 && (
           <div className="space-y-2">
             <h2 className="font-semibold text-gray-700 px-1">Cierres anteriores</h2>
@@ -346,6 +359,7 @@ export default function ResumenPage() {
         )}
       </div>
 
+      {/* Confirmation modal */}
       {showConfirmCierre && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
           <div

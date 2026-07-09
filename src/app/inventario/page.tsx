@@ -11,6 +11,14 @@ import { useApp } from '@/components/Providers';
 import Scanner from '@/components/Scanner';
 import ThemeToggle from '@/components/ThemeToggle';
 
+function formatearNombre(nombre: string): string {
+  return nombre
+    .toLowerCase()
+    .split(' ')
+    .map(p => p.charAt(0).toUpperCase() + p.slice(1))
+    .join(' ');
+}
+
 const PRODUCTO_VACIO = {
   nombre: '',
   codigo_barra: '',
@@ -133,10 +141,10 @@ export default function InventarioPage() {
             onClick={abrirNuevo}
             className="bg-white text-emerald-700 px-4 py-2 rounded-xl font-semibold text-sm flex items-center gap-1.5"
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-            </svg>
-            Agregar
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+          </svg>
+          Agregar
           </button>
         </div>
       </header>
@@ -176,10 +184,10 @@ export default function InventarioPage() {
             const pusd = tasa > 0 ? precioUSD(p, tasa) : null;
 
             return (
-              <div key={p.id} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 flex items-center justify-between gap-3">
+              <div key={p.id} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <p className="font-semibold text-gray-900 truncate">{p.nombre}</p>
+                    <p className="font-semibold text-gray-900">{formatearNombre(p.nombre)}</p>
                     {p.por_peso && (
                       <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium flex-shrink-0">
                         /kg
@@ -233,6 +241,7 @@ export default function InventarioPage() {
         )}
       </div>
 
+      {/* Add/Edit Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-end">
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowModal(false)} />
@@ -269,6 +278,7 @@ export default function InventarioPage() {
                 />
               </div>
 
+              {/* Toggle por peso */}
               <div className="flex items-center justify-between py-1">
                 <div>
                   <p className="text-sm font-medium text-gray-700">Se vende por peso</p>
@@ -378,6 +388,7 @@ export default function InventarioPage() {
         </div>
       )}
 
+      {/* Confirm delete */}
       {confirmDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
           <div className="absolute inset-0 bg-black/40" onClick={() => setConfirmDelete(null)} />
@@ -404,6 +415,7 @@ export default function InventarioPage() {
         </div>
       )}
 
+      {/* Barcode scanner — renders on top of all modals (last in DOM) */}
       {showScanner && (
         <Scanner
           onDetect={code => {
