@@ -68,7 +68,6 @@ export default function CajaPage() {
   const [metodo, setMetodo] = useState<MetodoPago | null>(null);
   const [montoRecibido, setMontoRecibido] = useState('');
   const [toast, setToast] = useState('');
-  const [, setNoEncontrado] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -154,18 +153,14 @@ export default function CajaPage() {
   const totalUSD = tasa > 0 ? totalBS / tasa : 0;
   const totalItems = carrito.reduce((sum, i) => sum + (i.esPorPeso ? 1 : i.cantidad), 0);
 
-  const handleScan = async (codigo: string) => {
-    setShowScanner(false);
+  const handleScan = useCallback(async (codigo: string): Promise<{ nombre: string } | null> => {
     const producto = await getProductoPorCodigo(codigo);
     if (producto) {
-      reproducirBeep();
       agregarAlCarrito(producto);
-    } else {
-      setNoEncontrado(codigo);
-      setBusqueda(codigo);
-      showToast(`Código ${codigo} no encontrado`);
+      return { nombre: producto.nombre };
     }
-  };
+    return null;
+  }, [agregarAlCarrito]);
 
   const confirmarVenta = async () => {
     if (!metodo) return;
@@ -270,10 +265,7 @@ export default function CajaPage() {
             ref={searchRef}
             type="text"
             value={busqueda}
-            onChange={e => {
-              setBusqueda(e.target.value);
-              setNoEncontrado('');
-            }}
+            onChange={e => setBusqueda(e.target.value)}
             placeholder="Buscar producto..."
             className="w-full pl-9 pr-8 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-emerald-400"
           />
@@ -663,7 +655,7 @@ export default function CajaPage() {
       )}
 
       {/* Scanner */}
-      {showScanner && <Scanner onDetect={handleScan} onClose={() => setShowScanner(false)} />}
+      {showScanner && <Scanner continuous onDetect={handleScan} onClose={() => setShowScanner(false)} />}
 
       {/* Toast */}
       {toast && (
