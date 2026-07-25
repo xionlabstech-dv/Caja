@@ -9,6 +9,7 @@ import { precioBS, precioUSD, formatBS, formatUSD } from '@/lib/precio';
 import { useApp } from '@/components/Providers';
 import Scanner from '@/components/Scanner';
 import ThemeToggle from '@/components/ThemeToggle';
+import { supabase } from '@/lib/supabase';
 
 function avatarColor(nombre: string): string {
   const idx = nombre.charCodeAt(0) % 8;
@@ -55,7 +56,7 @@ const METODOS_PAGO: { id: MetodoPago; label: string }[] = [
 ];
 
 export default function CajaPage() {
-  const { tasa, isOnline, negocioNombre, signOut } = useApp();
+  const { tasa, isOnline, negocioNombre, signOut, user } = useApp();
   const [productos, setProductos] = useState<Producto[]>([]);
   const [busqueda, setBusqueda] = useState('');
   const [carrito, setCarrito] = useState<ItemCarrito[]>([]);
@@ -68,6 +69,12 @@ export default function CajaPage() {
   const [metodo, setMetodo] = useState<MetodoPago | null>(null);
   const [montoRecibido, setMontoRecibido] = useState('');
   const [toast, setToast] = useState('');
+  const [showPerfil, setShowPerfil] = useState(false);
+  const [passActual, setPassActual] = useState('');
+  const [passNueva, setPassNueva] = useState('');
+  const [passConfirmar, setPassConfirmar] = useState('');
+  const [passError, setPassError] = useState('');
+  const [passCargando, setPassCargando] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -77,6 +84,44 @@ export default function CajaPage() {
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(''), 2500);
+  };
+
+  const abrirPerfil = () => {
+    setPassActual('');
+    setPassNueva('');
+    setPassConfirmar('');
+    setPassError('');
+    setShowPerfil(true);
+  };
+
+  const cambiarPassword = async () => {
+    setPassError('');
+    if (passNueva !== passConfirmar) {
+      setPassError('Las contraseñas no coinciden');
+      return;
+    }
+    if (passNueva.length < 6) {
+      setPassError('La nueva contraseña debe tener al menos 6 caracteres');
+      return;
+    }
+    setPassCargando(true);
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email: user?.email ?? '',
+      password: passActual,
+    });
+    if (signInError) {
+      setPassError('Contraseña actual incorrecta');
+      setPassCargando(false);
+      return;
+    }
+    const { error: updateError } = await supabase.auth.updateUser({ password: passNueva });
+    setPassCargando(false);
+    if (updateError) {
+      setPassError('Error al actualizar la contraseña');
+      return;
+    }
+    setShowPerfil(false);
+    showToast('Contraseña actualizada');
   };
 
   const productosFiltrados = busqueda
@@ -233,12 +278,24 @@ export default function CajaPage() {
     <div className="flex flex-col h-screen max-h-screen">
       {/* Header */}
       <header className="bg-emerald-600 text-white px-4 pt-4 pb-3 flex items-center justify-between sticky top-0 z-30">
-        <h1 className="text-xl font-bold min-w-0 truncate">
-          Caja
-          {negocioNombre && (
-            <span className="font-normal text-emerald-200"> · {negocioNombre}</span>
-          )}
-        </h1>
+        <button
+          onClick={abrirPerfil}
+          className="flex items-center gap-1.5 min-w-0 text-left"
+          aria-label="Ver perfil del negocio"
+        >
+          <h1 className="text-xl font-bold truncate">
+            Caja
+            {negocioNombre && (
+              <span className="font-normal text-emerald-200"> · {negocioNombre}</span>
+            )}
+          </h1>
+          <svg
+            className={`w-4 h-4 text-emerald-200 flex-shrink-0 transition-transform ${showPerfil ? 'rotate-180' : ''}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
         <div className="flex items-center gap-2 flex-shrink-0">
           <ThemeToggle />
           <div className="flex items-center gap-1.5 text-sm">
@@ -249,16 +306,6 @@ export default function CajaPage() {
               {isOnline ? 'En línea' : 'Sin conexión'}
             </span>
           </div>
-          <button
-            onClick={signOut}
-            className="p-2 rounded-lg bg-white/10"
-            aria-label="Cerrar sesión"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-            </svg>
-          </button>
         </div>
       </header>
 
@@ -673,6 +720,93 @@ export default function CajaPage() {
 
       {/* Scanner */}
       {showScanner && <Scanner continuous onDetect={handleScan} onClose={() => setShowScanner(false)} />}
+
+      {/* Profile sheet */}
+      {showPerfil && (
+        <div className="fixed inset-0 z-50 flex items-end">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowPerfil(false)} />
+          <div className="relative w-full max-w-lg mx-auto bg-white dark:bg-slate-800 rounded-t-2xl max-h-[90vh] overflow-y-auto flex flex-col">
+            {/* Drag handle + close */}
+            <div className="flex items-center justify-between px-4 pt-4 pb-0">
+              <div className="w-8 h-1 bg-gray-200 dark:bg-slate-600 rounded-full mx-auto" />
+              <button
+                onClick={() => setShowPerfil(false)}
+                className="absolute right-4 top-4 p-1 text-gray-400 dark:text-gray-500"
+              >
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Avatar + negocio */}
+            <div className="flex flex-col items-center py-5 px-6">
+              <div className="w-20 h-20 rounded-full bg-emerald-600 flex items-center justify-center mb-3 shadow-md">
+                <span className="text-white text-3xl font-bold">
+                  {(negocioNombre || 'N').charAt(0).toUpperCase()}
+                </span>
+              </div>
+              <p className="text-xl font-bold text-gray-900 dark:text-white">{negocioNombre || 'Negocio'}</p>
+              <p className="text-sm text-gray-400 mt-0.5">Sistema de punto de venta</p>
+            </div>
+
+            <div className="border-t border-gray-100 dark:border-slate-700 mx-4" />
+
+            {/* Change password */}
+            <div className="p-4 space-y-3">
+              <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                Cambiar contraseña
+              </p>
+              <input
+                type="password"
+                inputMode="numeric"
+                value={passActual}
+                onChange={e => { setPassActual(e.target.value); setPassError(''); }}
+                placeholder="Contraseña actual"
+                className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-3 text-base bg-white dark:bg-slate-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-emerald-400"
+              />
+              <input
+                type="password"
+                inputMode="numeric"
+                value={passNueva}
+                onChange={e => { setPassNueva(e.target.value); setPassError(''); }}
+                placeholder="Nueva contraseña"
+                className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-3 text-base bg-white dark:bg-slate-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-emerald-400"
+              />
+              <input
+                type="password"
+                inputMode="numeric"
+                value={passConfirmar}
+                onChange={e => { setPassConfirmar(e.target.value); setPassError(''); }}
+                placeholder="Confirmar nueva contraseña"
+                className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-3 text-base bg-white dark:bg-slate-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-emerald-400"
+              />
+              {passError && (
+                <p className="text-red-500 dark:text-red-400 text-sm">{passError}</p>
+              )}
+              <button
+                onClick={cambiarPassword}
+                disabled={passCargando || !passActual || !passNueva || !passConfirmar}
+                className="w-full bg-emerald-600 text-white py-3 rounded-xl font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {passCargando ? 'Guardando...' : 'Guardar contraseña'}
+              </button>
+            </div>
+
+            <div className="border-t border-gray-100 dark:border-slate-700 mx-4" />
+
+            {/* Logout */}
+            <div className="p-4 pb-8">
+              <button
+                onClick={() => { setShowPerfil(false); signOut(); }}
+                className="w-full py-3 rounded-xl font-semibold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20"
+              >
+                Cerrar sesión
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Toast */}
       {toast && (
