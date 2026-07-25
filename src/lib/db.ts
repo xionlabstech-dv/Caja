@@ -141,3 +141,30 @@ export async function setUltimoCierre(ts: string): Promise<void> {
   const db = await getDB();
   await db.put('meta', { key: 'ultimoCierre', value: ts });
 }
+
+export async function getCachedNegocioId(): Promise<string | null> {
+  const db = await getDB();
+  const item = await db.get('meta', 'negocio_id');
+  return item?.value ?? null;
+}
+
+export async function setCachedNegocioId(id: string): Promise<void> {
+  const db = await getDB();
+  await db.put('meta', { key: 'negocio_id', value: id });
+}
+
+export async function clearTenantData(): Promise<void> {
+  const db = await getDB();
+  const tx = db.transaction(
+    ['productos', 'configuracion', 'ventas', 'cierres', 'meta'],
+    'readwrite',
+  );
+  await Promise.all([
+    tx.objectStore('productos').clear(),
+    tx.objectStore('configuracion').clear(),
+    tx.objectStore('ventas').clear(),
+    tx.objectStore('cierres').clear(),
+    tx.objectStore('meta').clear(),
+    tx.done,
+  ]);
+}

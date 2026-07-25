@@ -4,6 +4,7 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
 import type { User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { syncFromSupabase, getConfiguracion } from '@/lib/sync';
+import { getCachedNegocioId, setCachedNegocioId, clearTenantData } from '@/lib/db';
 import { Configuracion } from '@/types';
 import LoginScreen from './LoginScreen';
 
@@ -89,6 +90,7 @@ export default function Providers({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     await supabase.auth.signOut();
+    await clearTenantData();
     setUser(null);
     setNegocioId(null);
     setNegocioNombre('');
@@ -149,6 +151,12 @@ export default function Providers({ children }: { children: ReactNode }) {
     window.addEventListener('offline', handleOffline);
 
     async function init() {
+      const cachedNegocioId = await getCachedNegocioId();
+      if (cachedNegocioId !== null && cachedNegocioId !== id) {
+        await clearTenantData();
+      }
+      await setCachedNegocioId(id);
+
       const localConfig = await getConfiguracion();
       if (localConfig) {
         setTasaState(localConfig.tasa);
