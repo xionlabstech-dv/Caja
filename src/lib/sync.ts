@@ -63,7 +63,7 @@ export async function updateTasa(tasa: number, negocioId: string): Promise<boole
 export async function createProductoSupabase(
   producto: Omit<Producto, 'id'>,
   negocioId: string
-): Promise<Producto | null> {
+): Promise<Producto | 'duplicate' | null> {
   try {
     const { data, error } = await supabase
       .from('productos')
@@ -73,7 +73,8 @@ export async function createProductoSupabase(
 
     if (error) throw error;
     return data as Producto;
-  } catch {
+  } catch (err) {
+    if ((err as { code?: string }).code === '23505') return 'duplicate';
     return null;
   }
 }
@@ -81,12 +82,13 @@ export async function createProductoSupabase(
 export async function updateProductoSupabase(
   id: string,
   producto: Partial<Producto>
-): Promise<boolean> {
+): Promise<boolean | 'duplicate'> {
   try {
     const { error } = await supabase.from('productos').update(producto).eq('id', id);
     if (error) throw error;
     return true;
-  } catch {
+  } catch (err) {
+    if ((err as { code?: string }).code === '23505') return 'duplicate';
     return false;
   }
 }

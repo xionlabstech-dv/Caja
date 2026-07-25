@@ -120,20 +120,24 @@ export default function InventarioPage() {
 
     if (editando) {
       const ok = await updateProductoSupabase(editando.id, datos);
-      if (ok) {
+      if (ok === true) {
         const actualizado = { ...editando, ...datos };
         await saveProducto(actualizado);
         await cargar();
         setShowModal(false);
+      } else if (ok === 'duplicate') {
+        setError('Ya existe un producto con ese código de barras en tu negocio');
       } else {
         setError('Error al actualizar');
       }
     } else {
       const nuevo = await createProductoSupabase(datos, negocioId!);
-      if (nuevo) {
+      if (nuevo && nuevo !== 'duplicate') {
         await saveProducto(nuevo);
         await cargar();
         setShowModal(false);
+      } else if (nuevo === 'duplicate') {
+        setError('Ya existe un producto con ese código de barras en tu negocio');
       } else {
         setError('Error al crear el producto');
       }
