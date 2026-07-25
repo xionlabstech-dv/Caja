@@ -2,7 +2,7 @@ import { supabase } from './supabase';
 import { saveProductos, saveConfiguracion, getConfiguracion as getConfigDB } from './db';
 import { Producto, Configuracion, CierreCaja } from '@/types';
 
-export async function syncFromSupabase(): Promise<Configuracion | null> {
+export async function syncFromSupabase(negocioId: string): Promise<Configuracion | null> {
   try {
     const PAGE_SIZE = 1000;
     let from = 0;
@@ -25,15 +25,13 @@ export async function syncFromSupabase(): Promise<Configuracion | null> {
       await saveProductos(allProducts);
     }
 
-    // RLS filters by auth.uid() → negocio_id automatically
     const { data: configData } = await supabase
       .from('configuracion')
       .select('*')
-      .limit(1)
-      .maybeSingle();
+      .eq('negocio_id', negocioId)
+      .single();
 
     if (configData) {
-      // Normalize to id=1 for local IndexedDB key
       const config: Configuracion = { ...configData, id: 1 };
       await saveConfiguracion(config);
       return config;

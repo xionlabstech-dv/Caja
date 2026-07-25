@@ -128,15 +128,15 @@ export default function Providers({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Data sync: only runs when user is authenticated
+  // Data sync: only runs when user is authenticated and negocioId is known
   useEffect(() => {
-    if (!user) return;
+    if (!user || !negocioId) return;
 
     setIsOnline(navigator.onLine);
 
     const handleOnline = async () => {
       setIsOnline(true);
-      const config = await syncFromSupabase();
+      const config = await syncFromSupabase(negocioId);
       if (config) {
         setTasaState(config.tasa);
         setConfiguracion(config);
@@ -155,7 +155,7 @@ export default function Providers({ children }: { children: ReactNode }) {
       }
 
       if (navigator.onLine) {
-        const remoteConfig = await syncFromSupabase();
+        const remoteConfig = await syncFromSupabase(negocioId);
         if (remoteConfig) {
           setTasaState(remoteConfig.tasa);
           setConfiguracion(remoteConfig);
@@ -169,7 +169,7 @@ export default function Providers({ children }: { children: ReactNode }) {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, [user]);
+  }, [user, negocioId]);
 
   const setTasa = (newTasa: number) => setTasaState(newTasa);
 
