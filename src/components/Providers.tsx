@@ -131,12 +131,13 @@ export default function Providers({ children }: { children: ReactNode }) {
   // Data sync: only runs when user is authenticated and negocioId is known
   useEffect(() => {
     if (!user || !negocioId) return;
+    const id: string = negocioId;
 
     setIsOnline(navigator.onLine);
 
     const handleOnline = async () => {
       setIsOnline(true);
-      const config = await syncFromSupabase(negocioId);
+      const config = await syncFromSupabase(id);
       if (config) {
         setTasaState(config.tasa);
         setConfiguracion(config);
@@ -155,7 +156,7 @@ export default function Providers({ children }: { children: ReactNode }) {
       }
 
       if (navigator.onLine) {
-        const remoteConfig = await syncFromSupabase(negocioId);
+        const remoteConfig = await syncFromSupabase(id);
         if (remoteConfig) {
           setTasaState(remoteConfig.tasa);
           setConfiguracion(remoteConfig);
