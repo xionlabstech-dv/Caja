@@ -8,7 +8,7 @@ import { useApp } from '@/components/Providers';
 import ThemeToggle from '@/components/ThemeToggle';
 
 export default function TasaPage() {
-  const { tasa, setTasa, configuracion, isOnline } = useApp();
+  const { tasa, setTasa, configuracion, isOnline, negocioId } = useApp();
   const [input, setInput] = useState('');
   const [guardando, setGuardando] = useState(false);
   const [mensaje, setMensaje] = useState('');
@@ -28,7 +28,7 @@ export default function TasaPage() {
 
     setGuardando(true);
     setError('');
-    const ok = await updateTasa(nueva);
+    const ok = await updateTasa(nueva, negocioId!);
     setGuardando(false);
 
     if (ok) {

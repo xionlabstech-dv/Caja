@@ -51,7 +51,7 @@ const PRODUCTO_VACIO = {
 };
 
 export default function InventarioPage() {
-  const { tasa, isOnline } = useApp();
+  const { tasa, isOnline, negocioId } = useApp();
   const [productos, setProductos] = useState<Producto[]>([]);
   const [busqueda, setBusqueda] = useState('');
   const [showModal, setShowModal] = useState(false);
@@ -129,7 +129,7 @@ export default function InventarioPage() {
         setError('Error al actualizar');
       }
     } else {
-      const nuevo = await createProductoSupabase(datos);
+      const nuevo = await createProductoSupabase(datos, negocioId!);
       if (nuevo) {
         await saveProducto(nuevo);
         await cargar();

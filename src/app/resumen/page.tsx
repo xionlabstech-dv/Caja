@@ -83,7 +83,7 @@ function formatearNombre(nombre: string): string {
 }
 
 export default function ResumenPage() {
-  const { tasa } = useApp();
+  const { tasa, negocioId } = useApp();
   const [ventas, setVentas] = useState<Venta[]>([]);
   const [cierres, setCierres] = useState<CierreCaja[]>([]);
   const [ultimoCierre, setUltimoCierreState] = useState<string | null>(null);
@@ -152,7 +152,7 @@ export default function ResumenPage() {
     await saveCierre(cierre);
     await tagVentasConCierre(ventas.map(v => v.id), cierre.id);
     await setUltimoCierre(now);
-    sincronizarCierre(cierre); // fire-and-forget
+    sincronizarCierre(cierre, negocioId!); // fire-and-forget
 
     setVentas([]);
     setCierres(prev => [cierre, ...prev]);

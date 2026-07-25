@@ -55,7 +55,7 @@ const METODOS_PAGO: { id: MetodoPago; label: string }[] = [
 ];
 
 export default function CajaPage() {
-  const { tasa, isOnline } = useApp();
+  const { tasa, isOnline, negocioNombre, signOut } = useApp();
   const [productos, setProductos] = useState<Producto[]>([]);
   const [busqueda, setBusqueda] = useState('');
   const [carrito, setCarrito] = useState<ItemCarrito[]>([]);
@@ -233,15 +233,32 @@ export default function CajaPage() {
     <div className="flex flex-col h-screen max-h-screen">
       {/* Header */}
       <header className="bg-emerald-600 text-white px-4 pt-4 pb-3 flex items-center justify-between sticky top-0 z-30">
-        <h1 className="text-xl font-bold">Caja</h1>
-        <div className="flex items-center gap-2">
+        <h1 className="text-xl font-bold min-w-0 truncate">
+          Caja
+          {negocioNombre && (
+            <span className="font-normal text-emerald-200"> · {negocioNombre}</span>
+          )}
+        </h1>
+        <div className="flex items-center gap-2 flex-shrink-0">
           <ThemeToggle />
           <div className="flex items-center gap-1.5 text-sm">
             <span
               className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-300' : 'bg-red-400'}`}
             />
-            <span className="text-emerald-100">{isOnline ? 'En línea' : 'Sin conexión'}</span>
+            <span className="text-emerald-100 text-xs hidden sm:inline">
+              {isOnline ? 'En línea' : 'Sin conexión'}
+            </span>
           </div>
+          <button
+            onClick={signOut}
+            className="p-2 rounded-lg bg-white/10"
+            aria-label="Cerrar sesión"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+          </button>
         </div>
       </header>
 

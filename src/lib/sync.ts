@@ -25,15 +25,18 @@ export async function syncFromSupabase(): Promise<Configuracion | null> {
       await saveProductos(allProducts);
     }
 
+    // RLS filters by auth.uid() → negocio_id automatically
     const { data: configData } = await supabase
       .from('configuracion')
       .select('*')
-      .eq('id', 1)
-      .single();
+      .limit(1)
+      .maybeSingle();
 
     if (configData) {
-      await saveConfiguracion(configData as Configuracion);
-      return configData as Configuracion;
+      // Normalize to id=1 for local IndexedDB key
+      const config: Configuracion = { ...configData, id: 1 };
+      await saveConfiguracion(config);
+      return config;
     }
 
     return null;
@@ -42,12 +45,13 @@ export async function syncFromSupabase(): Promise<Configuracion | null> {
   }
 }
 
-export async function updateTasa(tasa: number): Promise<boolean> {
+export async function updateTasa(tasa: number, negocioId: string): Promise<boolean> {
   try {
     const now = new Date().toISOString();
     const { error } = await supabase
       .from('configuracion')
-      .upsert({ id: 1, tasa, tasa_actualizada_en: now });
+      .update({ tasa, tasa_actualizada_en: now })
+      .eq('negocio_id', negocioId);
 
     if (error) throw error;
 
@@ -59,12 +63,13 @@ export async function updateTasa(tasa: number): Promise<boolean> {
 }
 
 export async function createProductoSupabase(
-  producto: Omit<Producto, 'id'>
+  producto: Omit<Producto, 'id'>,
+  negocioId: string
 ): Promise<Producto | null> {
   try {
     const { data, error } = await supabase
       .from('productos')
-      .insert(producto)
+      .insert({ ...producto, negocio_id: negocioId })
       .select()
       .single();
 
@@ -103,10 +108,11 @@ export async function softDeleteProducto(id: string): Promise<boolean> {
 
 export { getConfigDB as getConfiguracion };
 
-export async function sincronizarCierre(cierre: CierreCaja): Promise<void> {
+export async function sincronizarCierre(cierre: CierreCaja, negocioId: string): Promise<void> {
   try {
     await supabase.from('cierres_caja').insert({
       id: cierre.id,
+      negocio_id: negocioId,
       periodo_inicio: cierre.periodo_inicio,
       periodo_fin: cierre.periodo_fin,
       total_bs: cierre.total_bs,
