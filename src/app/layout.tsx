@@ -12,7 +12,10 @@ export const metadata: Metadata = {
     statusBarStyle: 'default',
     title: 'Caja',
   },
-  icons: { apple: '/icon-192.png' },
+  icons: {
+    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180' }],
+    icon: [{ url: '/favicon-32.png', sizes: '32x32', type: 'image/png' }],
+  },
 };
 
 export const viewport: Viewport = {
@@ -25,9 +28,14 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="es">
+      <head>
+        <script dangerouslySetInnerHTML={{
+          __html: `(function(){try{var t=localStorage.getItem('theme');if(t==='dark')document.documentElement.classList.add('dark');}catch(e){}})();`
+        }} />
+      </head>
       <body>
         <Providers>
-          <main className="min-h-screen bg-gray-50 pb-16 max-w-lg mx-auto">
+          <main className="min-h-screen bg-gray-50 dark:bg-slate-900 pb-16 max-w-lg mx-auto">
             {children}
           </main>
           <BottomNav />

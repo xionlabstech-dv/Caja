@@ -5,6 +5,7 @@ export interface Producto {
   moneda: 'USD' | 'VES';
   precio: number;
   activo: boolean;
+  por_peso: boolean;
 }
 
 export interface Configuracion {
@@ -19,6 +20,7 @@ export interface VentaItem {
   precio_bs: number;
   cantidad: number;
   subtotal_bs: number;
+  gramos?: number;
 }
 
 export type MetodoPago = 'efectivo_bs' | 'pago_movil' | 'biopago' | 'tarjeta' | 'efectivo_usd';
@@ -32,9 +34,32 @@ export interface Venta {
   total_bs: number;
   total_usd: number;
   tasa_usada: number;
+  cierre_id?: string;
+}
+
+export interface DesgloseCierre {
+  bs: number;
+  usd: number;
+  count: number;
+}
+
+export interface CierreCaja {
+  id: string;
+  periodo_inicio: string;
+  periodo_fin: string;
+  total_bs: number;
+  total_usd: number;
+  cantidad_ventas: number;
+  desglose_metodos: Partial<Record<MetodoPago, DesgloseCierre>>;
+  tasa_cierre: number;
+  creado_en: string;
 }
 
 export interface ItemCarrito {
+  lineId: string;
   producto: Producto;
   cantidad: number;
+  esPorPeso?: boolean;
+  gramos?: number;
+  precioCalculadoBase?: number;
 }

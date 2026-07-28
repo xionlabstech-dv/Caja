@@ -1,11 +1,14 @@
 'use client';
 
+export const dynamic = 'force-dynamic';
+
 import { useState } from 'react';
 import { updateTasa } from '@/lib/sync';
 import { useApp } from '@/components/Providers';
+import ThemeToggle from '@/components/ThemeToggle';
 
 export default function TasaPage() {
-  const { tasa, setTasa, configuracion, isOnline } = useApp();
+  const { tasa, setTasa, configuracion, isOnline, negocioId } = useApp();
   const [input, setInput] = useState('');
   const [guardando, setGuardando] = useState(false);
   const [mensaje, setMensaje] = useState('');
@@ -13,12 +16,19 @@ export default function TasaPage() {
 
   const handleGuardar = async () => {
     const nueva = parseFloat(input.replace(',', '.'));
-    if (!nueva || nueva <= 0) { setError('Ingresa una tasa válida'); return; }
-    if (!isOnline) { setError('Necesitas conexión para actualizar la tasa'); return; }
+    if (!nueva || nueva <= 0) {
+      setError('Ingresa una tasa válida');
+      return;
+    }
+
+    if (!isOnline) {
+      setError('Necesitas conexión para actualizar la tasa');
+      return;
+    }
 
     setGuardando(true);
     setError('');
-    const ok = await updateTasa(nueva);
+    const ok = await updateTasa(nueva, negocioId!);
     setGuardando(false);
 
     if (ok) {
@@ -33,18 +43,26 @@ export default function TasaPage() {
 
   const fechaActualizada = configuracion?.tasa_actualizada_en
     ? new Date(configuracion.tasa_actualizada_en).toLocaleDateString('es-VE', {
-        day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
+        day: '2-digit',
+        month: 'long',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
       })
     : null;
 
   return (
     <div>
-      <header className="bg-emerald-600 text-white px-4 pt-4 pb-3">
-        <h1 className="text-xl font-bold">Tasa BCV</h1>
-        <p className="text-emerald-200 text-sm mt-0.5">Tipo de cambio Bs / $</p>
+      <header className="bg-emerald-600 text-white px-4 pt-4 pb-3 flex items-start justify-between">
+        <div>
+          <h1 className="text-xl font-bold">Tasa BCV</h1>
+          <p className="text-emerald-200 text-sm mt-0.5">Tipo de cambio Bs / $</p>
+        </div>
+        <ThemeToggle />
       </header>
 
       <div className="p-4 space-y-4">
+        {/* Tasa actual */}
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 text-center">
           <p className="text-gray-500 text-sm mb-1">Tasa actual</p>
           {tasa > 0 ? (
@@ -62,6 +80,7 @@ export default function TasaPage() {
           )}
         </div>
 
+        {/* Ejemplo de conversión */}
         {tasa > 0 && (
           <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-100">
             <p className="text-emerald-700 text-sm font-medium mb-2">Conversión de referencia</p>
@@ -78,14 +97,17 @@ export default function TasaPage() {
           </div>
         )}
 
+        {/* Actualizar tasa */}
         <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
           <h2 className="font-semibold text-gray-700 mb-3">Actualizar tasa</h2>
+
           {!isOnline && (
             <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm">
               Sin conexión — la tasa no puede guardarse
             </div>
           )}
-          <div className="flex gap-2">
+
+          <div className="flex gap-2 w-full">
             <input
               type="number"
               step="0.01"
@@ -93,18 +115,37 @@ export default function TasaPage() {
               onChange={e => { setInput(e.target.value); setError(''); }}
               onKeyDown={e => e.key === 'Enter' && handleGuardar()}
               placeholder={tasa > 0 ? tasa.toFixed(2) : 'Ej: 55.80'}
-              className="flex-1 border border-gray-200 rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none focus:border-emerald-400"
+              className="flex-1 min-w-0 border border-gray-200 rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none focus:border-emerald-400"
             />
             <button
               onClick={handleGuardar}
               disabled={guardando || !input || !isOnline}
-              className="bg-emerald-600 text-white px-5 py-3 rounded-xl font-semibold disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+              className="shrink-0 bg-emerald-600 text-white px-4 py-3 rounded-xl font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {guardando ? 'Guardando...' : 'Guardar'}
             </button>
           </div>
-          {error && <p className="mt-2 text-red-500 text-sm">{error}</p>}
-          {mensaje && <p className="mt-2 text-emerald-600 text-sm font-medium">{mensaje}</p>}
+
+          {error && (
+            <p className="mt-2 text-red-500 text-sm">{error}</p>
+          )}
+          {mensaje && (
+            <div className="mt-2 flex items-center gap-2 text-emerald-600 text-sm font-medium">
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none" className="flex-shrink-0">
+                <circle cx="10" cy="10" r="9" stroke="currentColor" strokeWidth="2" />
+                <path
+                  className="animate-check-path"
+                  d="M5.5 10.5l3.5 3.5 5.5-7"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  fill="none"
+                />
+              </svg>
+              {mensaje}
+            </div>
+          )}
         </div>
       </div>
     </div>

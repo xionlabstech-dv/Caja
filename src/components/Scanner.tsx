@@ -3,20 +3,52 @@
 import { useEffect, useRef, useState } from 'react';
 
 interface ScannerProps {
-  onDetect: (barcode: string) => void;
+  onDetect: (barcode: string) => Promise<{ nombre: string } | null> | void;
   onClose: () => void;
+  continuous?: boolean;
 }
 
-export default function Scanner({ onDetect, onClose }: ScannerProps) {
+export default function Scanner({ onDetect, onClose, continuous }: ScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [error, setError] = useState('');
   const [manualCode, setManualCode] = useState('');
   const [showManual, setShowManual] = useState(false);
+  const [banner, setBanner] = useState<{ text: string; ok: boolean } | null>(null);
+  const [itemsAdded, setItemsAdded] = useState(0);
   const detectedRef = useRef(false);
+  const cooldownRef = useRef<{ codigo: string; timestamp: number } | null>(null);
+  const processingRef = useRef(false);
+  const processCodeRef = useRef<((codigo: string) => Promise<void>) | null>(null);
+
+  useEffect(() => {
+    if (!banner) return;
+    const t = setTimeout(() => setBanner(null), 1000);
+    return () => clearTimeout(t);
+  }, [banner]);
 
   useEffect(() => {
     let stream: MediaStream | null = null;
     let animFrame: number;
+
+    const processCode = async (codigo: string) => {
+      const now = Date.now();
+      const cd = cooldownRef.current;
+      if (cd && cd.codigo === codigo && now - cd.timestamp < 1200) return;
+      if (processingRef.current) return;
+      processingRef.current = true;
+      cooldownRef.current = { codigo, timestamp: now };
+      navigator.vibrate?.(30);
+      const result = await (onDetect(codigo) as Promise<{ nombre: string } | null>);
+      if (result) {
+        setBanner({ text: `✓ ${result.nombre} agregado`, ok: true });
+        setItemsAdded(c => c + 1);
+      } else {
+        setBanner({ text: `Código ${codigo} no encontrado`, ok: false });
+      }
+      processingRef.current = false;
+    };
+
+    processCodeRef.current = processCode;
 
     async function start() {
       try {
@@ -40,19 +72,26 @@ export default function Scanner({ onDetect, onClose }: ScannerProps) {
         });
 
         const scan = async () => {
-          if (detectedRef.current) return;
+          if (!continuous && detectedRef.current) return;
           if (!videoRef.current || videoRef.current.readyState < 2) {
             animFrame = requestAnimationFrame(scan);
             return;
           }
           try {
             const barcodes = await detector.detect(videoRef.current);
-            if (barcodes.length > 0 && !detectedRef.current) {
-              detectedRef.current = true;
-              onDetect(barcodes[0].rawValue);
-              return;
+            if (barcodes.length > 0) {
+              const codigo = barcodes[0].rawValue;
+              if (!continuous) {
+                if (!detectedRef.current) {
+                  detectedRef.current = true;
+                  onDetect(codigo);
+                }
+                return;
+              }
+              // Continuous: fire-and-forget; processingRef prevents overlap
+              processCode(codigo);
             }
-          } catch { /* continue scanning */ }
+          } catch { /* continue */ }
           animFrame = requestAnimationFrame(scan);
         };
 
@@ -69,7 +108,18 @@ export default function Scanner({ onDetect, onClose }: ScannerProps) {
       cancelAnimationFrame(animFrame);
       stream?.getTracks().forEach(t => t.stop());
     };
-  }, [onDetect]);
+  }, [onDetect, continuous]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleManualSubmit = async () => {
+    const code = manualCode.trim();
+    if (!code) return;
+    if (continuous) {
+      await processCodeRef.current?.(code);
+      setManualCode('');
+    } else {
+      onDetect(code);
+    }
+  };
 
   return (
     <div className="fixed inset-0 bg-black z-50 flex flex-col">
@@ -84,6 +134,15 @@ export default function Scanner({ onDetect, onClose }: ScannerProps) {
 
       <div className="flex-1 relative overflow-hidden">
         <video ref={videoRef} className="w-full h-full object-cover" playsInline muted />
+
+        {banner && (
+          <div className={`absolute top-4 left-4 right-4 px-4 py-3 rounded-xl text-white text-sm font-semibold text-center shadow-lg ${
+            banner.ok ? 'bg-emerald-600/90' : 'bg-amber-500/90'
+          }`}>
+            {banner.text}
+          </div>
+        )}
+
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="relative w-64 h-44">
             <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-emerald-400 rounded-tl-lg" />
@@ -96,6 +155,13 @@ export default function Scanner({ onDetect, onClose }: ScannerProps) {
       </div>
 
       <div className="p-4 bg-black/80">
+        {continuous && (
+          <p className="text-white/60 text-xs text-center mb-2">
+            {itemsAdded === 0
+              ? 'Apunta al código de barras'
+              : `${itemsAdded} producto${itemsAdded !== 1 ? 's' : ''} agregado${itemsAdded !== 1 ? 's' : ''}`}
+          </p>
+        )}
         {error && (
           <p className="text-yellow-400 text-sm text-center mb-3">{error}</p>
         )}
@@ -105,24 +171,20 @@ export default function Scanner({ onDetect, onClose }: ScannerProps) {
               type="text"
               value={manualCode}
               onChange={e => setManualCode(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && manualCode.trim()) {
-                  onDetect(manualCode.trim());
-                }
-              }}
+              onKeyDown={e => { if (e.key === 'Enter') handleManualSubmit(); }}
               placeholder="Ingresa el código..."
               className="flex-1 bg-white/10 text-white border border-white/30 rounded-xl px-4 py-3 text-lg placeholder-white/40"
               autoFocus
             />
             <button
-              onClick={() => manualCode.trim() && onDetect(manualCode.trim())}
+              onClick={handleManualSubmit}
               className="bg-emerald-600 text-white px-4 py-3 rounded-xl font-semibold"
             >
               Buscar
             </button>
           </div>
         )}
-        {!showManual && (
+        {!showManual && !continuous && (
           <p className="text-white/60 text-sm text-center">Apunta al código de barras</p>
         )}
       </div>
