@@ -12,7 +12,10 @@ export const metadata: Metadata = {
     statusBarStyle: 'default',
     title: 'Caja',
   },
-  icons: { apple: '/icon-192.png' },
+  icons: {
+    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180' }],
+    icon: [{ url: '/favicon-32.png', sizes: '32x32', type: 'image/png' }],
+  },
 };
 
 export const viewport: Viewport = {
