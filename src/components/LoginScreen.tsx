@@ -17,13 +17,26 @@ export default function LoginScreen() {
     setLoading(true);
     setError('');
 
+    // El primer login SIEMPRE requiere red (necesita validar contra Supabase).
+    // Distinguir esto de "credenciales incorrectas" evita que un corte de luz
+    // se confunda con un usuario/contraseña mal escritos.
+    if (!navigator.onLine) {
+      setError('Sin conexión — necesitas internet para iniciar sesión por primera vez');
+      setLoading(false);
+      return;
+    }
+
     let email = u.toLowerCase();
     if (!email.includes('@')) email += '@caja.app';
 
     const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
 
     if (authError) {
-      setError('Usuario o contraseña incorrectos');
+      if (!navigator.onLine) {
+        setError('Sin conexión — necesitas internet para iniciar sesión por primera vez');
+      } else {
+        setError('Usuario o contraseña incorrectos');
+      }
     }
     // On success, onAuthStateChange in Providers handles the rest
 

@@ -1,7 +1,5 @@
 'use client';
 
-export const dynamic = 'force-dynamic';
-
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Producto, ItemCarrito, MetodoPago, Venta, VentaItem } from '@/types';
 import { getProductos, getProductoPorCodigo, saveVenta } from '@/lib/db';
@@ -56,7 +54,7 @@ const METODOS_PAGO: { id: MetodoPago; label: string }[] = [
 ];
 
 export default function CajaPage() {
-  const { tasa, isOnline, negocioNombre, signOut, user } = useApp();
+  const { tasa, isOnline, negocioNombre, signOut, user, pendientesCount } = useApp();
   const [productos, setProductos] = useState<Producto[]>([]);
   const [busqueda, setBusqueda] = useState('');
   const [carrito, setCarrito] = useState<ItemCarrito[]>([]);
@@ -300,14 +298,26 @@ export default function CajaPage() {
           <ThemeToggle />
           <div className="flex items-center gap-1.5 text-sm">
             <span
-              className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-300' : 'bg-red-400'}`}
+              className={`w-2 h-2 rounded-full ${
+                !isOnline ? 'bg-gray-300' : pendientesCount > 0 ? 'bg-amber-300 animate-pulse' : 'bg-emerald-300'
+              }`}
             />
             <span className="text-emerald-100 text-xs hidden sm:inline">
-              {isOnline ? 'En línea' : 'Sin conexión'}
+              {!isOnline
+                ? 'Sin conexión'
+                : pendientesCount > 0
+                  ? `Sincronizando… ${pendientesCount}`
+                  : 'En línea'}
             </span>
           </div>
         </div>
       </header>
+
+      {!isOnline && pendientesCount > 0 && (
+        <div className="mx-4 mt-3 p-2.5 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl text-gray-600 dark:text-gray-300 text-xs text-center">
+          {pendientesCount} cambio{pendientesCount === 1 ? '' : 's'} guardado{pendientesCount === 1 ? '' : 's'} en el dispositivo, pendiente{pendientesCount === 1 ? '' : 's'} de sincronizar
+        </div>
+      )}
 
       {/* Search */}
       <div className="px-4 py-3 bg-white border-b border-gray-200 flex gap-2">

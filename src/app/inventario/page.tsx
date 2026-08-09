@@ -1,11 +1,9 @@
 'use client';
 
-export const dynamic = 'force-dynamic';
-
 import { useState, useEffect } from 'react';
 import { Producto } from '@/types';
 import { getProductos, saveProducto, deleteProductoDB } from '@/lib/db';
-import { createProductoSupabase, updateProductoSupabase, softDeleteProducto } from '@/lib/sync';
+import { encolarCrearProducto, encolarEditarProducto, encolarEliminarProducto } from '@/lib/outbox';
 import { precioBS, precioUSD, formatBS, formatUSD } from '@/lib/precio';
 import { useApp } from '@/components/Providers';
 import Scanner from '@/components/Scanner';
@@ -100,55 +98,60 @@ export default function InventarioPage() {
     setShowModal(true);
   };
 
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(''), 2500);
+  };
+
   const guardar = async () => {
     if (!form.nombre.trim()) { setError('El nombre es obligatorio'); return; }
     const precio = parseFloat(form.precio);
     if (!precio || precio <= 0) { setError('El precio debe ser mayor a 0'); return; }
-    if (!isOnline) { setError('Necesitas conexión para guardar'); return; }
+
+    const codigoBarra = form.codigo_barra.trim() || null;
+    // Chequeo local contra el catálogo ya descargado — cubre el caso común
+    // (mismo código escaneado dos veces). Un choque contra datos que solo
+    // existen en el servidor y aún no bajaron al dispositivo no se detecta
+    // aquí; se resuelve al sincronizar.
+    if (codigoBarra) {
+      const colision = productos.find(
+        p => p.codigo_barra === codigoBarra && p.id !== editando?.id
+      );
+      if (colision) {
+        setError('Ya existe un producto con ese código de barras en tu negocio');
+        return;
+      }
+    }
 
     setGuardando(true);
     setError('');
 
     const datos = {
       nombre: form.nombre.trim(),
-      codigo_barra: form.codigo_barra.trim() || null,
+      codigo_barra: codigoBarra,
       precio,
       moneda: form.moneda,
       activo: true,
       por_peso: form.por_peso,
     };
 
+    // Offline-first: se guarda en IndexedDB de inmediato (la UI responde al
+    // instante) y se encola para Supabase — ahora mismo si hay red, o al
+    // reconectar si no la hay.
     if (editando) {
-      const ok = await updateProductoSupabase(editando.id, datos);
-      if (ok === true) {
-        const actualizado = { ...editando, ...datos };
-        await saveProducto(actualizado);
-        await cargar();
-        setShowModal(false);
-      } else if (ok === 'duplicate') {
-        setError('Ya existe un producto con ese código de barras en tu negocio');
-      } else {
-        setError('Error al actualizar');
-      }
+      const actualizado = { ...editando, ...datos };
+      await saveProducto(actualizado);
+      await encolarEditarProducto(editando.id, datos);
     } else {
-      const nuevo = await createProductoSupabase(datos, negocioId!);
-      if (nuevo && nuevo !== 'duplicate') {
-        await saveProducto(nuevo);
-        await cargar();
-        setShowModal(false);
-      } else if (nuevo === 'duplicate') {
-        setError('Ya existe un producto con ese código de barras en tu negocio');
-      } else {
-        setError('Error al crear el producto');
-      }
+      const nuevo: Producto = { id: crypto.randomUUID(), ...datos };
+      await saveProducto(nuevo);
+      await encolarCrearProducto(nuevo, negocioId!);
     }
 
+    await cargar();
+    setShowModal(false);
     setGuardando(false);
-  };
-
-  const showToast = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(''), 2500);
+    showToast(isOnline ? 'Producto guardado' : 'Guardado localmente — se sincronizará cuando haya conexión');
   };
 
   const handleScanInventario = (codigo: string) => {
@@ -167,13 +170,11 @@ export default function InventarioPage() {
   };
 
   const eliminar = async (p: Producto) => {
-    if (!isOnline) { setError('Necesitas conexión para eliminar'); return; }
-    const ok = await softDeleteProducto(p.id);
-    if (ok) {
-      await deleteProductoDB(p.id);
-      await cargar();
-    }
+    await deleteProductoDB(p.id);
+    await encolarEliminarProducto(p.id);
+    await cargar();
     setConfirmDelete(null);
+    showToast(isOnline ? 'Producto eliminado' : 'Eliminado localmente — se sincronizará cuando haya conexión');
   };
 
   return (
@@ -321,8 +322,8 @@ export default function InventarioPage() {
 
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {!isOnline && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm">
-                  Sin conexión — no se puede guardar
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-sm">
+                  Sin conexión — se guarda en el dispositivo y se sincroniza al reconectar
                 </div>
               )}
 
@@ -440,7 +441,7 @@ export default function InventarioPage() {
             <div className="p-4 border-t border-gray-100">
               <button
                 onClick={guardar}
-                disabled={guardando || !isOnline}
+                disabled={guardando}
                 className="w-full bg-emerald-600 text-white py-4 rounded-xl text-lg font-bold disabled:opacity-40"
               >
                 {guardando ? 'Guardando...' : editando ? 'Actualizar' : 'Agregar producto'}

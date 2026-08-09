@@ -61,7 +61,7 @@ export async function updateTasa(tasa: number, negocioId: string): Promise<boole
 }
 
 export async function createProductoSupabase(
-  producto: Omit<Producto, 'id'>,
+  producto: Producto,
   negocioId: string
 ): Promise<Producto | 'duplicate' | null> {
   try {
@@ -74,7 +74,9 @@ export async function createProductoSupabase(
     if (error) throw error;
     return data as Producto;
   } catch (err) {
-    if ((err as { code?: string }).code === '23505') return 'duplicate';
+    const code = (err as { code?: string }).code;
+    // 23505 con el mismo id (retry de la cola offline) = ya sincronizado, no error real
+    if (code === '23505') return 'duplicate';
     return null;
   }
 }
@@ -108,9 +110,9 @@ export async function softDeleteProducto(id: string): Promise<boolean> {
 
 export { getConfigDB as getConfiguracion };
 
-export async function sincronizarCierre(cierre: CierreCaja, negocioId: string): Promise<void> {
+export async function sincronizarCierre(cierre: CierreCaja, negocioId: string): Promise<boolean> {
   try {
-    await supabase.from('cierres_caja').insert({
+    const { error } = await supabase.from('cierres_caja').insert({
       id: cierre.id,
       negocio_id: negocioId,
       periodo_inicio: cierre.periodo_inicio,
@@ -122,7 +124,14 @@ export async function sincronizarCierre(cierre: CierreCaja, negocioId: string): 
       tasa_cierre: cierre.tasa_cierre,
       creado_en: cierre.creado_en,
     });
+    if (error) {
+      // Mismo id ya insertado en un intento previo (retry de la cola offline):
+      // el cierre ya está sincronizado, no es un fallo real.
+      if ((error as { code?: string }).code === '23505') return true;
+      throw error;
+    }
+    return true;
   } catch {
-    // fire-and-forget: the local record is already saved
+    return false;
   }
 }

@@ -4,9 +4,19 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
 import type { User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { syncFromSupabase, getConfiguracion } from '@/lib/sync';
-import { getCachedNegocioId, setCachedNegocioId, clearTenantData } from '@/lib/db';
+import {
+  getCachedNegocioId,
+  setCachedNegocioId,
+  getCachedNegocioNombre,
+  setCachedNegocioNombre,
+  clearTenantData,
+  contarPendientes,
+} from '@/lib/db';
+import { procesarCola } from '@/lib/outbox';
 import { Configuracion } from '@/types';
 import LoginScreen from './LoginScreen';
+
+type EstadoSync = 'online' | 'offline' | 'syncing';
 
 interface AppContextType {
   tasa: number;
@@ -20,6 +30,9 @@ interface AppContextType {
   negocioNombre: string;
   authLoading: boolean;
   signOut: () => Promise<void>;
+  pendientesCount: number;
+  syncStatus: EstadoSync;
+  sincronizarAhora: () => void;
 }
 
 const AppContext = createContext<AppContextType>({
@@ -34,6 +47,9 @@ const AppContext = createContext<AppContextType>({
   negocioNombre: '',
   authLoading: true,
   signOut: async () => {},
+  pendientesCount: 0,
+  syncStatus: 'online',
+  sincronizarAhora: () => {},
 });
 
 export function useApp() {
@@ -64,6 +80,25 @@ async function fetchNegocio(uid: string): Promise<{ negocioId: string; negocioNo
   }
 }
 
+// Resuelve el negocio del usuario. Si no hay red (o falla por cualquier otro
+// motivo), cae al último negocio cacheado localmente en vez de dejar al
+// usuario sin negocio — la sesión offline nunca debe bloquear la app.
+async function resolverNegocio(uid: string): Promise<{ negocioId: string; negocioNombre: string } | null> {
+  let negocio = await fetchNegocio(uid);
+  if (!negocio) {
+    const cachedId = await getCachedNegocioId();
+    if (cachedId) {
+      const cachedNombre = await getCachedNegocioNombre();
+      negocio = { negocioId: cachedId, negocioNombre: cachedNombre ?? '' };
+    }
+  }
+  if (negocio) {
+    await setCachedNegocioId(negocio.negocioId);
+    await setCachedNegocioNombre(negocio.negocioNombre);
+  }
+  return negocio;
+}
+
 export default function Providers({ children }: { children: ReactNode }) {
   const [tasa, setTasaState] = useState(0);
   const [isOnline, setIsOnline] = useState(true);
@@ -73,10 +108,23 @@ export default function Providers({ children }: { children: ReactNode }) {
   const [negocioId, setNegocioId] = useState<string | null>(null);
   const [negocioNombre, setNegocioNombre] = useState('');
   const [authLoading, setAuthLoading] = useState(true);
+  const [pendientesCount, setPendientesCount] = useState(0);
+  const [sincronizando, setSincronizando] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem('theme') as 'light' | 'dark' | null;
     if (saved) setTheme(saved);
+  }, []);
+
+  // Registro manual del Service Worker: next-pwa@5.6.0 inyecta su script de
+  // auto-registro en el entry 'main.js' (Pages Router), pero el App Router de
+  // Next.js sirve 'main-app.js' — ese registro nunca llega a ejecutarse.
+  // sw.js se genera correctamente (next-pwa maneja bien esa parte), solo falta
+  // registrarlo nosotros mismos para que el precache offline funcione.
+  useEffect(() => {
+    if (process.env.NODE_ENV !== 'production') return;
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
   }, []);
 
   const toggleTheme = () => {
@@ -89,6 +137,14 @@ export default function Providers({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
+    const pendientes = await contarPendientes();
+    if (pendientes > 0) {
+      const confirmar = window.confirm(
+        `Tienes ${pendientes} cambio${pendientes === 1 ? '' : 's'} sin sincronizar. ` +
+        'Si cierras sesión ahora se perderán. ¿Cerrar sesión de todas formas?'
+      );
+      if (!confirmar) return;
+    }
     await supabase.auth.signOut();
     await clearTenantData();
     setUser(null);
@@ -96,14 +152,18 @@ export default function Providers({ children }: { children: ReactNode }) {
     setNegocioNombre('');
     setTasaState(0);
     setConfiguracion(null);
+    setPendientesCount(0);
   };
 
-  // Auth: check session on mount and listen for changes
+  // Auth: revisa la sesión al montar y escucha cambios. La sesión NUNCA se
+  // limpia por falta de red — solo un SIGNED_OUT explícito (logout manual o
+  // token realmente inválido) borra el usuario. Un fallo de refresh por falta
+  // de conexión debe dejar al usuario trabajando con la sesión local.
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
         setUser(session.user);
-        const negocio = await fetchNegocio(session.user.id);
+        const negocio = await resolverNegocio(session.user.id);
         if (negocio) {
           setNegocioId(negocio.negocioId);
           setNegocioNombre(negocio.negocioNombre);
@@ -115,16 +175,18 @@ export default function Providers({ children }: { children: ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (session?.user) {
         setUser(session.user);
-        const negocio = await fetchNegocio(session.user.id);
+        const negocio = await resolverNegocio(session.user.id);
         if (negocio) {
           setNegocioId(negocio.negocioId);
           setNegocioNombre(negocio.negocioNombre);
         }
-      } else {
+      } else if (_event === 'SIGNED_OUT') {
         setUser(null);
         setNegocioId(null);
         setNegocioNombre('');
       }
+      // Otros eventos con session null (ej. refresh fallido sin red) se
+      // ignoran a propósito: mantenemos la sesión local intacta.
     });
 
     return () => subscription.unsubscribe();
@@ -137,18 +199,41 @@ export default function Providers({ children }: { children: ReactNode }) {
 
     setIsOnline(navigator.onLine);
 
-    const handleOnline = async () => {
-      setIsOnline(true);
+    const refrescarConfig = async () => {
       const config = await syncFromSupabase(id);
       if (config) {
         setTasaState(config.tasa);
         setConfiguracion(config);
       }
     };
+
+    // Procesa la cola de pendientes y refresca desde Supabase para reconciliar.
+    const sincronizar = async () => {
+      if (!navigator.onLine) return;
+      setSincronizando(true);
+      try {
+        await procesarCola();
+        await refrescarConfig();
+      } finally {
+        setPendientesCount(await contarPendientes());
+        setSincronizando(false);
+      }
+    };
+
+    const handleOnline = async () => {
+      setIsOnline(true);
+      await sincronizar();
+    };
     const handleOffline = () => setIsOnline(false);
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+
+    // Red de seguridad: reintenta la cola cada 30s mientras haya conexión,
+    // por si un fallo puntual (no un simple "sin red") dejó algo atascado.
+    const interval = setInterval(() => {
+      if (navigator.onLine) sincronizar();
+    }, 30000);
 
     async function init() {
       const cachedNegocioId = await getCachedNegocioId();
@@ -163,12 +248,10 @@ export default function Providers({ children }: { children: ReactNode }) {
         setConfiguracion(localConfig);
       }
 
+      setPendientesCount(await contarPendientes());
+
       if (navigator.onLine) {
-        const remoteConfig = await syncFromSupabase(id);
-        if (remoteConfig) {
-          setTasaState(remoteConfig.tasa);
-          setConfiguracion(remoteConfig);
-        }
+        await sincronizar();
       }
     }
 
@@ -177,10 +260,30 @@ export default function Providers({ children }: { children: ReactNode }) {
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      clearInterval(interval);
     };
   }, [user, negocioId]);
 
   const setTasa = (newTasa: number) => setTasaState(newTasa);
+
+  const sincronizarAhora = () => {
+    if (!negocioId || !navigator.onLine) return;
+    setSincronizando(true);
+    procesarCola()
+      .then(() => syncFromSupabase(negocioId))
+      .then(config => {
+        if (config) {
+          setTasaState(config.tasa);
+          setConfiguracion(config);
+        }
+      })
+      .finally(async () => {
+        setPendientesCount(await contarPendientes());
+        setSincronizando(false);
+      });
+  };
+
+  const syncStatus: EstadoSync = !isOnline ? 'offline' : sincronizando ? 'syncing' : 'online';
 
   if (authLoading) {
     return (
@@ -206,6 +309,7 @@ export default function Providers({ children }: { children: ReactNode }) {
     <AppContext.Provider value={{
       tasa, setTasa, isOnline, configuracion, theme, toggleTheme,
       user, negocioId, negocioNombre, authLoading, signOut,
+      pendientesCount, syncStatus, sincronizarAhora,
     }}>
       {children}
     </AppContext.Provider>
