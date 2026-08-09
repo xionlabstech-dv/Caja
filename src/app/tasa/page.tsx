@@ -1,7 +1,5 @@
 'use client';
 
-export const dynamic = 'force-dynamic';
-
 import { useState } from 'react';
 import { updateTasa } from '@/lib/sync';
 import { useApp } from '@/components/Providers';

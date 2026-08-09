@@ -1,7 +1,5 @@
 'use client';
 
-export const dynamic = 'force-dynamic';
-
 import { useState, useEffect } from 'react';
 import { Producto } from '@/types';
 import { getProductos, saveProducto, deleteProductoDB } from '@/lib/db';

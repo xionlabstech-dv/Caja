@@ -79,6 +79,17 @@ export default function Providers({ children }: { children: ReactNode }) {
     if (saved) setTheme(saved);
   }, []);
 
+  // Registro manual del Service Worker: next-pwa@5.6.0 inyecta su script de
+  // auto-registro en el entry 'main.js' (Pages Router), pero el App Router de
+  // Next.js sirve 'main-app.js' — ese registro nunca llega a ejecutarse.
+  // sw.js se genera correctamente (next-pwa maneja bien esa parte), solo falta
+  // registrarlo nosotros mismos para que el precache offline funcione.
+  useEffect(() => {
+    if (process.env.NODE_ENV !== 'production') return;
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  }, []);
+
   const toggleTheme = () => {
     setTheme(prev => {
       const next = prev === 'light' ? 'dark' : 'light';
