@@ -63,3 +63,50 @@ export interface ItemCarrito {
   gramos?: number;
   precioCalculadoBase?: number;
 }
+
+export type TipoPendiente =
+  | 'crear_producto'
+  | 'editar_producto'
+  | 'eliminar_producto'
+  | 'actualizar_tasa'
+  | 'cerrar_caja';
+
+export interface PayloadCrearProducto {
+  producto: Producto;
+  negocioId: string;
+}
+
+export interface PayloadEditarProducto {
+  id: string;
+  datos: Partial<Producto>;
+}
+
+export interface PayloadEliminarProducto {
+  id: string;
+}
+
+export interface PayloadActualizarTasa {
+  tasa: number;
+  negocioId: string;
+}
+
+export interface PayloadCerrarCaja {
+  cierre: CierreCaja;
+  negocioId: string;
+}
+
+export type PayloadPendiente =
+  | PayloadCrearProducto
+  | PayloadEditarProducto
+  | PayloadEliminarProducto
+  | PayloadActualizarTasa
+  | PayloadCerrarCaja;
+
+export interface OperacionPendiente {
+  id: string;
+  tipo: TipoPendiente;
+  payload: PayloadPendiente;
+  timestamp: string;
+  intentos: number;
+  ultimoIntento?: string;
+}

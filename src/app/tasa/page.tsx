@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { updateTasa } from '@/lib/sync';
+import { saveConfiguracion } from '@/lib/db';
+import { encolarActualizarTasa } from '@/lib/outbox';
 import { useApp } from '@/components/Providers';
 import ThemeToggle from '@/components/ThemeToggle';
 
@@ -19,24 +20,19 @@ export default function TasaPage() {
       return;
     }
 
-    if (!isOnline) {
-      setError('Necesitas conexión para actualizar la tasa');
-      return;
-    }
-
     setGuardando(true);
     setError('');
-    const ok = await updateTasa(nueva, negocioId!);
-    setGuardando(false);
 
-    if (ok) {
-      setTasa(nueva);
-      setInput('');
-      setMensaje('Tasa actualizada correctamente');
-      setTimeout(() => setMensaje(''), 3000);
-    } else {
-      setError('Error al guardar. Verifica tu conexión.');
-    }
+    // Offline-first: se aplica localmente de inmediato y se encola para
+    // sincronizar con Supabase apenas haya conexión (o ahora mismo si ya la hay).
+    const now = new Date().toISOString();
+    await saveConfiguracion({ id: 1, tasa: nueva, tasa_actualizada_en: now });
+    await encolarActualizarTasa(nueva, negocioId!);
+    setTasa(nueva);
+    setInput('');
+    setGuardando(false);
+    setMensaje(isOnline ? 'Tasa actualizada correctamente' : 'Guardada localmente — se sincronizará cuando haya conexión');
+    setTimeout(() => setMensaje(''), 3000);
   };
 
   const fechaActualizada = configuracion?.tasa_actualizada_en
@@ -100,8 +96,8 @@ export default function TasaPage() {
           <h2 className="font-semibold text-gray-700 mb-3">Actualizar tasa</h2>
 
           {!isOnline && (
-            <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm">
-              Sin conexión — la tasa no puede guardarse
+            <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-sm">
+              Sin conexión — se guarda en el dispositivo y se sincroniza al reconectar
             </div>
           )}
 
@@ -117,7 +113,7 @@ export default function TasaPage() {
             />
             <button
               onClick={handleGuardar}
-              disabled={guardando || !input || !isOnline}
+              disabled={guardando || !input}
               className="shrink-0 bg-emerald-600 text-white px-4 py-3 rounded-xl font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {guardando ? 'Guardando...' : 'Guardar'}

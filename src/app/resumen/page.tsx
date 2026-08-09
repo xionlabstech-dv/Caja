@@ -9,7 +9,7 @@ import {
   getUltimoCierre,
   setUltimoCierre,
 } from '@/lib/db';
-import { sincronizarCierre } from '@/lib/sync';
+import { encolarCerrarCaja } from '@/lib/outbox';
 import { formatBS, formatUSD } from '@/lib/precio';
 import { Venta, MetodoPago, CierreCaja, DesgloseCierre } from '@/types';
 import { useApp } from '@/components/Providers';
@@ -81,7 +81,7 @@ function formatearNombre(nombre: string): string {
 }
 
 export default function ResumenPage() {
-  const { tasa, negocioId } = useApp();
+  const { tasa, negocioId, isOnline } = useApp();
   const [ventas, setVentas] = useState<Venta[]>([]);
   const [cierres, setCierres] = useState<CierreCaja[]>([]);
   const [ultimoCierre, setUltimoCierreState] = useState<string | null>(null);
@@ -150,7 +150,11 @@ export default function ResumenPage() {
     await saveCierre(cierre);
     await tagVentasConCierre(ventas.map(v => v.id), cierre.id);
     await setUltimoCierre(now);
-    sincronizarCierre(cierre, negocioId!); // fire-and-forget
+    // Offline-first: el cierre ya quedó guardado localmente arriba. Se encola
+    // para Supabase — ahora mismo si hay red, o al reconectar si no la hay.
+    // El id del cierre se reutiliza como id de la operación en cola, así que
+    // reintentos duplicados nunca crean un cierre repetido en el servidor.
+    await encolarCerrarCaja(cierre, negocioId!);
 
     setVentas([]);
     setCierres(prev => [cierre, ...prev]);
@@ -390,6 +394,12 @@ export default function ResumenPage() {
                       <span className="font-bold text-sm text-gray-800">{formatBS(total)}</span>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {!isOnline && (
+                <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-sm text-center">
+                  Sin conexión — el cierre se guarda en el dispositivo y se sincroniza al reconectar
                 </div>
               )}
 

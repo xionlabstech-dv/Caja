@@ -1,5 +1,5 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
-import { Producto, Configuracion, Venta, CierreCaja } from '@/types';
+import { Producto, Configuracion, Venta, CierreCaja, OperacionPendiente } from '@/types';
 
 interface MetaItem {
   key: string;
@@ -29,6 +29,11 @@ interface CajaDBSchema extends DBSchema {
     key: string;
     value: MetaItem;
   };
+  pendientes: {
+    key: string;
+    value: OperacionPendiente;
+    indexes: { 'by-timestamp': string };
+  };
 }
 
 let dbPromise: Promise<IDBPDatabase<CajaDBSchema>> | null = null;
@@ -36,7 +41,7 @@ let dbPromise: Promise<IDBPDatabase<CajaDBSchema>> | null = null;
 function getDB() {
   if (typeof window === 'undefined') throw new Error('IDB solo disponible en el browser');
   if (!dbPromise) {
-    dbPromise = openDB<CajaDBSchema>('caja-db', 2, {
+    dbPromise = openDB<CajaDBSchema>('caja-db', 3, {
       upgrade(db, oldVersion) {
         if (oldVersion < 1) {
           const productosStore = db.createObjectStore('productos', { keyPath: 'id' });
@@ -48,6 +53,10 @@ function getDB() {
         if (oldVersion < 2) {
           db.createObjectStore('cierres', { keyPath: 'id' });
           db.createObjectStore('meta', { keyPath: 'key' });
+        }
+        if (oldVersion < 3) {
+          const pendientesStore = db.createObjectStore('pendientes', { keyPath: 'id' });
+          pendientesStore.createIndex('by-timestamp', 'timestamp');
         }
       },
     });
@@ -153,10 +162,21 @@ export async function setCachedNegocioId(id: string): Promise<void> {
   await db.put('meta', { key: 'negocio_id', value: id });
 }
 
+export async function getCachedNegocioNombre(): Promise<string | null> {
+  const db = await getDB();
+  const item = await db.get('meta', 'negocio_nombre');
+  return item?.value ?? null;
+}
+
+export async function setCachedNegocioNombre(nombre: string): Promise<void> {
+  const db = await getDB();
+  await db.put('meta', { key: 'negocio_nombre', value: nombre });
+}
+
 export async function clearTenantData(): Promise<void> {
   const db = await getDB();
   const tx = db.transaction(
-    ['productos', 'configuracion', 'ventas', 'cierres', 'meta'],
+    ['productos', 'configuracion', 'ventas', 'cierres', 'meta', 'pendientes'],
     'readwrite',
   );
   await Promise.all([
@@ -165,6 +185,29 @@ export async function clearTenantData(): Promise<void> {
     tx.objectStore('ventas').clear(),
     tx.objectStore('cierres').clear(),
     tx.objectStore('meta').clear(),
+    tx.objectStore('pendientes').clear(),
     tx.done,
   ]);
+}
+
+// --- Cola de sincronización (outbox) ---
+
+export async function encolarPendiente(op: OperacionPendiente): Promise<void> {
+  const db = await getDB();
+  await db.put('pendientes', op);
+}
+
+export async function getPendientes(): Promise<OperacionPendiente[]> {
+  const db = await getDB();
+  return db.getAllFromIndex('pendientes', 'by-timestamp');
+}
+
+export async function eliminarPendiente(id: string): Promise<void> {
+  const db = await getDB();
+  await db.delete('pendientes', id);
+}
+
+export async function contarPendientes(): Promise<number> {
+  const db = await getDB();
+  return db.count('pendientes');
 }
