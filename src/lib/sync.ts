@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 import { saveProductos, saveConfiguracion, getConfiguracion as getConfigDB } from './db';
-import { Producto, Configuracion, CierreCaja } from '@/types';
+import { Producto, Configuracion, CierreCaja, Venta } from '@/types';
 
 export async function syncFromSupabase(negocioId: string): Promise<Configuracion | null> {
   try {
@@ -130,6 +130,67 @@ export async function sincronizarCierre(cierre: CierreCaja, negocioId: string): 
       if ((error as { code?: string }).code === '23505') return true;
       throw error;
     }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function sincronizarVenta(venta: Venta, negocioId: string): Promise<boolean> {
+  try {
+    const { error: ventaError } = await supabase.from('ventas').insert({
+      id: venta.id,
+      negocio_id: negocioId,
+      cierre_id: venta.cierre_id ?? null,
+      metodo_pago: venta.metodo_pago,
+      total_bs: venta.total_bs,
+      total_usd: venta.total_usd,
+      tasa: venta.tasa_usada,
+      vendida_en: venta.fecha,
+    });
+
+    if (ventaError && (ventaError as { code?: string }).code !== '23505') {
+      throw ventaError;
+    }
+    // Si dio 23505, la venta ya estaba insertada de un intento previo — seguimos
+    // igual a insertar los items, por si esa vez se cortó antes de llegar a ellos.
+
+    const itemsPayload = venta.items.map(item => {
+      const esPorPeso = item.gramos !== undefined;
+      return {
+        id: item.id,
+        venta_id: venta.id,
+        producto_id: item.producto_id,
+        nombre: item.nombre,
+        cantidad: esPorPeso ? item.gramos! / 1000 : item.cantidad,
+        precio_bs: item.precioUnitarioBs,
+        precio_usd: item.precioUnitarioUsd,
+        es_por_peso: esPorPeso,
+        gramos: item.gramos ?? null,
+      };
+    });
+
+    if (itemsPayload.length > 0) {
+      const { error: itemsError } = await supabase.from('venta_items').insert(itemsPayload);
+      if (itemsError && (itemsError as { code?: string }).code !== '23505') {
+        throw itemsError;
+      }
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function actualizarCierreIdVentas(ventaIds: string[], cierreId: string): Promise<boolean> {
+  if (ventaIds.length === 0) return true;
+  try {
+    const { error } = await supabase
+      .from('ventas')
+      .update({ cierre_id: cierreId })
+      .in('id', ventaIds);
+    if (error) throw error;
     return true;
   } catch {
     return false;

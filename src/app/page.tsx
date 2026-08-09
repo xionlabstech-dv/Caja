@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Producto, ItemCarrito, MetodoPago, Venta, VentaItem } from '@/types';
 import { getProductos, getProductoPorCodigo, saveVenta } from '@/lib/db';
+import { encolarRegistrarVenta } from '@/lib/outbox';
 import { precioBS, precioUSD, formatBS, formatUSD } from '@/lib/precio';
 import { useApp } from '@/components/Providers';
 import Scanner from '@/components/Scanner';
@@ -54,7 +55,7 @@ const METODOS_PAGO: { id: MetodoPago; label: string }[] = [
 ];
 
 export default function CajaPage() {
-  const { tasa, isOnline, negocioNombre, signOut, user, pendientesCount } = useApp();
+  const { tasa, isOnline, negocioNombre, signOut, user, pendientesCount, negocioId } = useApp();
   const [productos, setProductos] = useState<Producto[]>([]);
   const [busqueda, setBusqueda] = useState('');
   const [carrito, setCarrito] = useState<ItemCarrito[]>([]);
@@ -212,21 +213,29 @@ export default function CajaPage() {
       if (item.esPorPeso) {
         const precio_bs = itemPrecioBS(item);
         return {
+          id: crypto.randomUUID(),
           producto_id: item.producto.id,
           nombre: `${item.producto.nombre} — ${item.gramos}g`,
           precio_bs,
           cantidad: 1,
           subtotal_bs: precio_bs,
           gramos: item.gramos,
+          // Precio por kg (unitario), no el total de la línea — es lo que
+          // espera venta_items para poder recalcular cantidad × precio.
+          precioUnitarioBs: precioBS(item.producto, tasa),
+          precioUnitarioUsd: precioUSD(item.producto, tasa),
         };
       }
       const precio_bs = precioBS(item.producto, tasa);
       return {
+        id: crypto.randomUUID(),
         producto_id: item.producto.id,
         nombre: item.producto.nombre,
         precio_bs,
         cantidad: item.cantidad,
         subtotal_bs: precio_bs * item.cantidad,
+        precioUnitarioBs: precio_bs,
+        precioUnitarioUsd: precioUSD(item.producto, tasa),
       };
     });
 
@@ -239,9 +248,15 @@ export default function CajaPage() {
       total_bs: totalBS,
       total_usd: totalUSD,
       tasa_usada: tasa,
+      sincronizada: false,
     };
 
+    // Offline-first: se guarda local de inmediato (la venta nunca depende de
+    // red) y se encola el respaldo en Supabase — ahora mismo si hay conexión,
+    // o al reconectar si no la hay.
     await saveVenta(venta);
+    if (negocioId) await encolarRegistrarVenta(venta.id, negocioId);
+
     setCarrito([]);
     setShowPago(false);
     setMetodo(null);

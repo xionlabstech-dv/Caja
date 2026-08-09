@@ -9,7 +9,7 @@ import {
   getUltimoCierre,
   setUltimoCierre,
 } from '@/lib/db';
-import { encolarCerrarCaja } from '@/lib/outbox';
+import { encolarCerrarCaja, encolarActualizarCierreVentas } from '@/lib/outbox';
 import { formatBS, formatUSD } from '@/lib/precio';
 import { Venta, MetodoPago, CierreCaja, DesgloseCierre } from '@/types';
 import { useApp } from '@/components/Providers';
@@ -155,6 +155,13 @@ export default function ResumenPage() {
     // El id del cierre se reutiliza como id de la operación en cola, así que
     // reintentos duplicados nunca crean un cierre repetido en el servidor.
     await encolarCerrarCaja(cierre, negocioId!);
+    // Encolado DESPUÉS del cierre a propósito: la cola procesa en orden
+    // cronológico, así que el cierre siempre se sincroniza primero. Esto
+    // cubre las ventas que ya estaban en Supabase (les asigna cierre_id).
+    // Las que todavía no habían sincronizado lo reciben directo en su propio
+    // envío, porque 'registrar_venta' relee el estado actual de la venta
+    // (incluido cierre_id) justo antes de enviarla.
+    await encolarActualizarCierreVentas(ventas.map(v => v.id), cierre.id);
 
     setVentas([]);
     setCierres(prev => [cierre, ...prev]);

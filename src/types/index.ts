@@ -15,12 +15,18 @@ export interface Configuracion {
 }
 
 export interface VentaItem {
+  id: string;
   producto_id: string;
   nombre: string;
   precio_bs: number;
   cantidad: number;
   subtotal_bs: number;
   gramos?: number;
+  // Precio unitario (o por kg si es pesable) al momento de la venta — se usa
+  // para el respaldo en Supabase (venta_items.precio_bs/cantidad son
+  // "unitario × cantidad", no el subtotal ya calculado que usa la UI local).
+  precioUnitarioBs: number;
+  precioUnitarioUsd: number;
 }
 
 export type MetodoPago = 'efectivo_bs' | 'pago_movil' | 'biopago' | 'tarjeta' | 'efectivo_usd';
@@ -35,6 +41,9 @@ export interface Venta {
   total_usd: number;
   tasa_usada: number;
   cierre_id?: string;
+  // Marca si ya se respaldó en Supabase — evita que la cola tenga que
+  // reescanear el historial completo de ventas para saber qué falta subir.
+  sincronizada?: boolean;
 }
 
 export interface DesgloseCierre {
@@ -69,7 +78,9 @@ export type TipoPendiente =
   | 'editar_producto'
   | 'eliminar_producto'
   | 'actualizar_tasa'
-  | 'cerrar_caja';
+  | 'cerrar_caja'
+  | 'registrar_venta'
+  | 'actualizar_cierre_ventas';
 
 export interface PayloadCrearProducto {
   producto: Producto;
@@ -95,12 +106,24 @@ export interface PayloadCerrarCaja {
   negocioId: string;
 }
 
+export interface PayloadRegistrarVenta {
+  ventaId: string;
+  negocioId: string;
+}
+
+export interface PayloadActualizarCierreVentas {
+  ventaIds: string[];
+  cierreId: string;
+}
+
 export type PayloadPendiente =
   | PayloadCrearProducto
   | PayloadEditarProducto
   | PayloadEliminarProducto
   | PayloadActualizarTasa
-  | PayloadCerrarCaja;
+  | PayloadCerrarCaja
+  | PayloadRegistrarVenta
+  | PayloadActualizarCierreVentas;
 
 export interface OperacionPendiente {
   id: string;

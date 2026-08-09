@@ -107,6 +107,11 @@ export async function saveVenta(venta: Venta) {
   await db.put('ventas', venta);
 }
 
+export async function getVenta(id: string): Promise<Venta | undefined> {
+  const db = await getDB();
+  return db.get('ventas', id);
+}
+
 export async function getVentasHoy(): Promise<Venta[]> {
   const db = await getDB();
   const today = new Date().toISOString().split('T')[0];

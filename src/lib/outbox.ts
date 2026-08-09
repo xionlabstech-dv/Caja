@@ -3,6 +3,8 @@ import {
   getPendientes,
   eliminarPendiente,
   contarPendientes,
+  getVenta,
+  saveVenta,
 } from './db';
 import {
   createProductoSupabase,
@@ -10,6 +12,8 @@ import {
   softDeleteProducto,
   updateTasa,
   sincronizarCierre,
+  sincronizarVenta,
+  actualizarCierreIdVentas,
 } from './sync';
 import {
   OperacionPendiente,
@@ -20,6 +24,8 @@ import {
   PayloadEliminarProducto,
   PayloadActualizarTasa,
   PayloadCerrarCaja,
+  PayloadRegistrarVenta,
+  PayloadActualizarCierreVentas,
   Producto,
   CierreCaja,
 } from '@/types';
@@ -74,6 +80,17 @@ export async function encolarCerrarCaja(cierre: CierreCaja, negocioId: string): 
   await encolar('cerrar_caja', payload, cierre.id);
 }
 
+export async function encolarRegistrarVenta(ventaId: string, negocioId: string): Promise<void> {
+  const payload: PayloadRegistrarVenta = { ventaId, negocioId };
+  await encolar('registrar_venta', payload, ventaId);
+}
+
+export async function encolarActualizarCierreVentas(ventaIds: string[], cierreId: string): Promise<void> {
+  if (ventaIds.length === 0) return;
+  const payload: PayloadActualizarCierreVentas = { ventaIds, cierreId };
+  await encolar('actualizar_cierre_ventas', payload, `cierre-ventas-${cierreId}`);
+}
+
 async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
   switch (op.tipo) {
     case 'crear_producto': {
@@ -99,43 +116,89 @@ async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
       const { cierre, negocioId } = op.payload as PayloadCerrarCaja;
       return await sincronizarCierre(cierre, negocioId);
     }
+    case 'registrar_venta': {
+      const { ventaId, negocioId } = op.payload as PayloadRegistrarVenta;
+      // Se relee la venta actual de IndexedDB en vez de usar una copia
+      // congelada al encolar: si mientras tanto se cerró caja, el cierre_id
+      // ya asignado localmente viaja con la venta en su primer envío.
+      const venta = await getVenta(ventaId);
+      if (!venta) return true; // no hay nada que sincronizar
+      const ok = await sincronizarVenta(venta, negocioId);
+      if (ok) await saveVenta({ ...venta, sincronizada: true });
+      return ok;
+    }
+    case 'actualizar_cierre_ventas': {
+      const { ventaIds, cierreId } = op.payload as PayloadActualizarCierreVentas;
+      return await actualizarCierreIdVentas(ventaIds, cierreId);
+    }
     default:
       return true;
   }
 }
 
-let procesando = false;
-
-export async function procesarCola(): Promise<{ procesados: number; pendientes: number }> {
-  if (procesando) return { procesados: 0, pendientes: await contarPendientes() };
-  procesando = true;
+async function procesarColaUnaPasada(): Promise<number> {
   let procesados = 0;
-  try {
-    const cola = await getPendientes();
-    for (const op of cola) {
-      if (typeof navigator !== 'undefined' && !navigator.onLine) break;
+  const cola = await getPendientes();
+  for (const op of cola) {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) break;
 
-      if (op.ultimoIntento) {
-        const espera = backoffMs(op.intentos);
-        const transcurrido = Date.now() - new Date(op.ultimoIntento).getTime();
-        if (transcurrido < espera) continue;
-      }
-
-      const ok = await procesarOperacion(op);
-      if (ok) {
-        await eliminarPendiente(op.id);
-        procesados++;
-      } else {
-        await encolarPendiente({
-          ...op,
-          intentos: op.intentos + 1,
-          ultimoIntento: new Date().toISOString(),
-        });
-      }
+    if (op.ultimoIntento) {
+      const espera = backoffMs(op.intentos);
+      const transcurrido = Date.now() - new Date(op.ultimoIntento).getTime();
+      if (transcurrido < espera) continue;
     }
-  } finally {
-    procesando = false;
+
+    const ok = await procesarOperacion(op);
+    if (ok) {
+      await eliminarPendiente(op.id);
+      procesados++;
+    } else {
+      await encolarPendiente({
+        ...op,
+        intentos: op.intentos + 1,
+        ultimoIntento: new Date().toISOString(),
+      });
+    }
   }
-  const pendientes = await contarPendientes();
-  return { procesados, pendientes };
+  return procesados;
+}
+
+let procesando = false;
+let reejecutarSolicitado = false;
+let corridaActual: Promise<{ procesados: number; pendientes: number }> | null = null;
+
+// Dos operaciones encoladas casi al mismo tiempo (ej. cerrar caja + el
+// backfill de cierre_id en las ventas) disparan cada una su propio intento
+// de sync inmediato. Sin esto, la segunda llamada podía "rebotar" contra la
+// primera (todavía en vuelo) y su operación quedaba huérfana hasta el
+// siguiente 'online' o el barrido periódico de 30s. Ahora, si procesarCola()
+// se llama mientras ya hay una corrida en curso, se pide una repasada extra
+// al final en vez de simplemente abortar.
+export async function procesarCola(): Promise<{ procesados: number; pendientes: number }> {
+  if (procesando) {
+    reejecutarSolicitado = true;
+    return corridaActual ?? { procesados: 0, pendientes: await contarPendientes() };
+  }
+
+  procesando = true;
+  corridaActual = (async () => {
+    let totalProcesados = 0;
+    try {
+      do {
+        reejecutarSolicitado = false;
+        totalProcesados += await procesarColaUnaPasada();
+      } while (
+        reejecutarSolicitado &&
+        (typeof navigator === 'undefined' || navigator.onLine)
+      );
+    } finally {
+      procesando = false;
+    }
+    const pendientes = await contarPendientes();
+    return { procesados: totalProcesados, pendientes };
+  })();
+
+  const resultado = await corridaActual;
+  corridaActual = null;
+  return resultado;
 }
