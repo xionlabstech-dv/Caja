@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { Producto, ItemCarrito, MetodoPago, Venta, VentaItem } from '@/types';
 import { getProductos, getProductoPorCodigo, saveVenta } from '@/lib/db';
 import { encolarRegistrarVenta } from '@/lib/outbox';
@@ -55,7 +56,8 @@ const METODOS_PAGO: { id: MetodoPago; label: string }[] = [
 ];
 
 export default function CajaPage() {
-  const { tasa, isOnline, negocioNombre, signOut, user, pendientesCount, negocioId } = useApp();
+  const { tasa, isOnline, negocioNombre, signOut, user, pendientesCount, negocioId, rol, userNombre } = useApp();
+  const router = useRouter();
   const [productos, setProductos] = useState<Producto[]>([]);
   const [busqueda, setBusqueda] = useState('');
   const [carrito, setCarrito] = useState<ItemCarrito[]>([]);
@@ -249,6 +251,8 @@ export default function CajaPage() {
       total_usd: totalUSD,
       tasa_usada: tasa,
       sincronizada: false,
+      usuario_id: user?.id,
+      usuario_nombre: userNombre || undefined,
     };
 
     // Offline-first: se guarda local de inmediato (la venta nunca depende de
@@ -817,6 +821,24 @@ export default function CajaPage() {
                 {passCargando ? 'Guardando...' : 'Guardar contraseña'}
               </button>
             </div>
+
+            {rol === 'admin' && (
+              <>
+                <div className="border-t border-gray-100 dark:border-slate-700 mx-4" />
+                <div className="p-4">
+                  <button
+                    onClick={() => { setShowPerfil(false); router.push('/usuarios'); }}
+                    className="w-full py-3 rounded-xl font-semibold text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-slate-700 flex items-center justify-center gap-2"
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                        d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-4.13a4 4 0 100-8 4 4 0 000 8zm6 4a4 4 0 10-8 0 4 4 0 008 0z" />
+                    </svg>
+                    Usuarios
+                  </button>
+                </div>
+              </>
+            )}
 
             <div className="border-t border-gray-100 dark:border-slate-700 mx-4" />
 

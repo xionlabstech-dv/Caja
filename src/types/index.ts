@@ -31,6 +31,8 @@ export interface VentaItem {
 
 export type MetodoPago = 'efectivo_bs' | 'pago_movil' | 'biopago' | 'tarjeta' | 'efectivo_usd';
 
+export type Rol = 'admin' | 'cajero';
+
 export interface Venta {
   id: string;
   fecha: string;
@@ -44,6 +46,11 @@ export interface Venta {
   // Marca si ya se respaldó en Supabase — evita que la cola tenga que
   // reescanear el historial completo de ventas para saber qué falta subir.
   sincronizada?: boolean;
+  // Atribución: quién hizo la venta. usuario_nombre es un snapshot (igual
+  // que el nombre de producto en los items) — funciona offline y no se
+  // altera si luego cambia el nombre visible del usuario.
+  usuario_id?: string;
+  usuario_nombre?: string;
 }
 
 export interface DesgloseCierre {
@@ -62,6 +69,8 @@ export interface CierreCaja {
   desglose_metodos: Partial<Record<MetodoPago, DesgloseCierre>>;
   tasa_cierre: number;
   creado_en: string;
+  usuario_id?: string;
+  usuario_nombre?: string;
 }
 
 export interface ItemCarrito {

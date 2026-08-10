@@ -123,6 +123,7 @@ export async function sincronizarCierre(cierre: CierreCaja, negocioId: string): 
       desglose_metodos: cierre.desglose_metodos,
       tasa_cierre: cierre.tasa_cierre,
       creado_en: cierre.creado_en,
+      usuario_id: cierre.usuario_id ?? null,
     });
     if (error) {
       // Mismo id ya insertado en un intento previo (retry de la cola offline):
@@ -147,6 +148,7 @@ export async function sincronizarVenta(venta: Venta, negocioId: string): Promise
       total_usd: venta.total_usd,
       tasa: venta.tasa_usada,
       vendida_en: venta.fecha,
+      usuario_id: venta.usuario_id ?? null,
     });
 
     if (ventaError && (ventaError as { code?: string }).code !== '23505') {

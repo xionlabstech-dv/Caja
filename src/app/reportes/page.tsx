@@ -14,6 +14,7 @@ import {
   VentasPorDiaSemana,
 } from '@/lib/reportes';
 import { formatBS, formatUSD } from '@/lib/precio';
+import { useGuardarRuta } from '@/lib/useGuardarRuta';
 import ThemeToggle from '@/components/ThemeToggle';
 
 // ventas.metodo_pago es texto libre en Supabase (sin enum/check), y conviven
@@ -50,6 +51,7 @@ function formatearNombre(nombre: string): string {
 }
 
 export default function ReportesPage() {
+  useGuardarRuta();
   const { negocioId, isOnline } = useApp();
   const [periodoTipo, setPeriodoTipo] = useState<TipoPeriodo>('mes');
   const [loading, setLoading] = useState(true);

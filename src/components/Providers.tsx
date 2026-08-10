@@ -9,11 +9,15 @@ import {
   setCachedNegocioId,
   getCachedNegocioNombre,
   setCachedNegocioNombre,
+  getCachedRol,
+  setCachedRol,
+  getCachedUsuarioNombre,
+  setCachedUsuarioNombre,
   clearTenantData,
   contarPendientes,
 } from '@/lib/db';
 import { procesarCola } from '@/lib/outbox';
-import { Configuracion } from '@/types';
+import { Configuracion, Rol } from '@/types';
 import LoginScreen from './LoginScreen';
 
 type EstadoSync = 'online' | 'offline' | 'syncing';
@@ -28,6 +32,8 @@ interface AppContextType {
   user: User | null;
   negocioId: string | null;
   negocioNombre: string;
+  rol: Rol | null;
+  userNombre: string;
   authLoading: boolean;
   signOut: () => Promise<void>;
   pendientesCount: number;
@@ -45,6 +51,8 @@ const AppContext = createContext<AppContextType>({
   user: null,
   negocioId: null,
   negocioNombre: '',
+  rol: null,
+  userNombre: '',
   authLoading: true,
   signOut: async () => {},
   pendientesCount: 0,
@@ -56,15 +64,23 @@ export function useApp() {
   return useContext(AppContext);
 }
 
-async function fetchNegocio(uid: string): Promise<{ negocioId: string; negocioNombre: string } | null> {
+interface PerfilResuelto {
+  negocioId: string;
+  negocioNombre: string;
+  rol: Rol;
+  userNombre: string;
+}
+
+async function fetchPerfil(uid: string): Promise<PerfilResuelto | 'desactivado' | null> {
   try {
     const { data: perfil } = await supabase
       .from('perfiles')
-      .select('negocio_id')
+      .select('negocio_id, rol, nombre, activo')
       .eq('id', uid)
       .single();
 
     if (!perfil?.negocio_id) return null;
+    if (perfil.activo === false) return 'desactivado';
 
     const { data: negocio } = await supabase
       .from('negocios')
@@ -74,29 +90,48 @@ async function fetchNegocio(uid: string): Promise<{ negocioId: string; negocioNo
 
     if (!negocio) return null;
 
-    return { negocioId: perfil.negocio_id, negocioNombre: negocio.nombre };
+    return {
+      negocioId: perfil.negocio_id,
+      negocioNombre: negocio.nombre,
+      rol: (perfil.rol as Rol) ?? 'cajero',
+      userNombre: perfil.nombre ?? '',
+    };
   } catch {
     return null;
   }
 }
 
-// Resuelve el negocio del usuario. Si no hay red (o falla por cualquier otro
-// motivo), cae al último negocio cacheado localmente en vez de dejar al
-// usuario sin negocio — la sesión offline nunca debe bloquear la app.
-async function resolverNegocio(uid: string): Promise<{ negocioId: string; negocioNombre: string } | null> {
-  let negocio = await fetchNegocio(uid);
-  if (!negocio) {
-    const cachedId = await getCachedNegocioId();
-    if (cachedId) {
-      const cachedNombre = await getCachedNegocioNombre();
-      negocio = { negocioId: cachedId, negocioNombre: cachedNombre ?? '' };
-    }
+// Resuelve el perfil del usuario (negocio, rol, nombre). Si no hay red (o
+// falla por cualquier otro motivo), cae a lo último cacheado localmente en
+// vez de dejar al usuario sin negocio/rol — la sesión offline nunca debe
+// bloquear la app. La desactivación de un usuario SÍ requiere red para
+// aplicarse (no se puede confiar en un "estaba activo" cacheado para negar
+// acceso, pero tampoco para otorgarlo retroactivamente sin conexión).
+async function resolverPerfil(uid: string): Promise<PerfilResuelto | 'desactivado' | null> {
+  const perfil = await fetchPerfil(uid);
+  if (perfil === 'desactivado') return 'desactivado';
+
+  if (perfil) {
+    await setCachedNegocioId(perfil.negocioId);
+    await setCachedNegocioNombre(perfil.negocioNombre);
+    await setCachedRol(perfil.rol);
+    await setCachedUsuarioNombre(perfil.userNombre);
+    return perfil;
   }
-  if (negocio) {
-    await setCachedNegocioId(negocio.negocioId);
-    await setCachedNegocioNombre(negocio.negocioNombre);
-  }
-  return negocio;
+
+  const cachedId = await getCachedNegocioId();
+  if (!cachedId) return null;
+  const [cachedNombre, cachedRol, cachedUserNombre] = await Promise.all([
+    getCachedNegocioNombre(),
+    getCachedRol(),
+    getCachedUsuarioNombre(),
+  ]);
+  return {
+    negocioId: cachedId,
+    negocioNombre: cachedNombre ?? '',
+    rol: cachedRol ?? 'cajero',
+    userNombre: cachedUserNombre ?? '',
+  };
 }
 
 export default function Providers({ children }: { children: ReactNode }) {
@@ -107,9 +142,12 @@ export default function Providers({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [negocioId, setNegocioId] = useState<string | null>(null);
   const [negocioNombre, setNegocioNombre] = useState('');
+  const [rol, setRol] = useState<Rol | null>(null);
+  const [userNombre, setUserNombre] = useState('');
   const [authLoading, setAuthLoading] = useState(true);
   const [pendientesCount, setPendientesCount] = useState(0);
   const [sincronizando, setSincronizando] = useState(false);
+  const [motivoDeslogueo, setMotivoDeslogueo] = useState<string | null>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem('theme') as 'light' | 'dark' | null;
@@ -150,40 +188,64 @@ export default function Providers({ children }: { children: ReactNode }) {
     setUser(null);
     setNegocioId(null);
     setNegocioNombre('');
+    setRol(null);
+    setUserNombre('');
     setTasaState(0);
     setConfiguracion(null);
     setPendientesCount(0);
   };
 
   // Auth: revisa la sesión al montar y escucha cambios. La sesión NUNCA se
-  // limpia por falta de red — solo un SIGNED_OUT explícito (logout manual o
-  // token realmente inválido) borra el usuario. Un fallo de refresh por falta
-  // de conexión debe dejar al usuario trabajando con la sesión local.
+  // limpia por falta de red — solo un SIGNED_OUT explícito (logout manual,
+  // usuario desactivado, o token realmente inválido) borra el usuario. Un
+  // fallo de refresh por falta de conexión debe dejar al usuario trabajando
+  // con la sesión local.
   useEffect(() => {
+    // Usuario desactivado por un admin: cerrar sesión ya mismo. Solo puede
+    // detectarse con red (fetchPerfil trajo el perfil fresco y activo=false);
+    // sin conexión, resolverPerfil cae al cache y nunca llega a este caso.
+    const forzarDeslogueoPorInactivo = async () => {
+      await supabase.auth.signOut();
+      await clearTenantData();
+      setUser(null);
+      setNegocioId(null);
+      setNegocioNombre('');
+      setRol(null);
+      setUserNombre('');
+      setMotivoDeslogueo('Tu usuario fue desactivado. Contacta al administrador de tu negocio.');
+    };
+
+    const aplicarPerfil = async (u: User) => {
+      setUser(u);
+      const perfil = await resolverPerfil(u.id);
+      if (perfil === 'desactivado') {
+        await forzarDeslogueoPorInactivo();
+        return;
+      }
+      if (perfil) {
+        setNegocioId(perfil.negocioId);
+        setNegocioNombre(perfil.negocioNombre);
+        setRol(perfil.rol);
+        setUserNombre(perfil.userNombre);
+      }
+    };
+
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
-        setUser(session.user);
-        const negocio = await resolverNegocio(session.user.id);
-        if (negocio) {
-          setNegocioId(negocio.negocioId);
-          setNegocioNombre(negocio.negocioNombre);
-        }
+        await aplicarPerfil(session.user);
       }
       setAuthLoading(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (session?.user) {
-        setUser(session.user);
-        const negocio = await resolverNegocio(session.user.id);
-        if (negocio) {
-          setNegocioId(negocio.negocioId);
-          setNegocioNombre(negocio.negocioNombre);
-        }
+        await aplicarPerfil(session.user);
       } else if (_event === 'SIGNED_OUT') {
         setUser(null);
         setNegocioId(null);
         setNegocioNombre('');
+        setRol(null);
+        setUserNombre('');
       }
       // Otros eventos con session null (ej. refresh fallido sin red) se
       // ignoran a propósito: mantenemos la sesión local intacta.
@@ -302,13 +364,18 @@ export default function Providers({ children }: { children: ReactNode }) {
   }
 
   if (!user) {
-    return <LoginScreen />;
+    return (
+      <LoginScreen
+        mensajeInicial={motivoDeslogueo}
+        onMensajeVisto={() => setMotivoDeslogueo(null)}
+      />
+    );
   }
 
   return (
     <AppContext.Provider value={{
       tasa, setTasa, isOnline, configuracion, theme, toggleTheme,
-      user, negocioId, negocioNombre, authLoading, signOut,
+      user, negocioId, negocioNombre, rol, userNombre, authLoading, signOut,
       pendientesCount, syncStatus, sincronizarAhora,
     }}>
       {children}

@@ -6,6 +6,7 @@ import { getProductos, saveProducto, deleteProductoDB } from '@/lib/db';
 import { encolarCrearProducto, encolarEditarProducto, encolarEliminarProducto } from '@/lib/outbox';
 import { precioBS, precioUSD, formatBS, formatUSD } from '@/lib/precio';
 import { useApp } from '@/components/Providers';
+import { useGuardarRuta } from '@/lib/useGuardarRuta';
 import Scanner from '@/components/Scanner';
 import ThemeToggle from '@/components/ThemeToggle';
 
@@ -49,6 +50,7 @@ const PRODUCTO_VACIO = {
 };
 
 export default function InventarioPage() {
+  useGuardarRuta();
   const { tasa, isOnline, negocioId } = useApp();
   const [productos, setProductos] = useState<Producto[]>([]);
   const [busqueda, setBusqueda] = useState('');

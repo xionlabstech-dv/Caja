@@ -1,5 +1,5 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
-import { Producto, Configuracion, Venta, CierreCaja, OperacionPendiente } from '@/types';
+import { Producto, Configuracion, Venta, CierreCaja, OperacionPendiente, Rol } from '@/types';
 
 interface MetaItem {
   key: string;
@@ -176,6 +176,28 @@ export async function getCachedNegocioNombre(): Promise<string | null> {
 export async function setCachedNegocioNombre(nombre: string): Promise<void> {
   const db = await getDB();
   await db.put('meta', { key: 'negocio_nombre', value: nombre });
+}
+
+export async function getCachedRol(): Promise<Rol | null> {
+  const db = await getDB();
+  const item = await db.get('meta', 'rol');
+  return (item?.value as Rol | undefined) ?? null;
+}
+
+export async function setCachedRol(rol: Rol): Promise<void> {
+  const db = await getDB();
+  await db.put('meta', { key: 'rol', value: rol });
+}
+
+export async function getCachedUsuarioNombre(): Promise<string | null> {
+  const db = await getDB();
+  const item = await db.get('meta', 'usuario_nombre');
+  return item?.value ?? null;
+}
+
+export async function setCachedUsuarioNombre(nombre: string): Promise<void> {
+  const db = await getDB();
+  await db.put('meta', { key: 'usuario_nombre', value: nombre });
 }
 
 export async function clearTenantData(): Promise<void> {

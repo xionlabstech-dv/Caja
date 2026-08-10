@@ -81,7 +81,7 @@ function formatearNombre(nombre: string): string {
 }
 
 export default function ResumenPage() {
-  const { tasa, negocioId, isOnline } = useApp();
+  const { tasa, negocioId, isOnline, user, userNombre } = useApp();
   const [ventas, setVentas] = useState<Venta[]>([]);
   const [cierres, setCierres] = useState<CierreCaja[]>([]);
   const [ultimoCierre, setUltimoCierreState] = useState<string | null>(null);
@@ -155,6 +155,8 @@ export default function ResumenPage() {
       desglose_metodos: desglose,
       tasa_cierre: tasa,
       creado_en: now,
+      usuario_id: user?.id,
+      usuario_nombre: userNombre || undefined,
     };
 
     await saveCierre(cierre);
@@ -295,6 +297,10 @@ export default function ResumenPage() {
                         <span className="text-gray-500">Tasa usada</span>
                         <span className="text-gray-600">Bs {venta.tasa_usada.toLocaleString('es-VE')}</span>
                       </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">Vendida por</span>
+                        <span className="text-gray-600">{venta.usuario_nombre || '—'}</span>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -368,6 +374,10 @@ export default function ResumenPage() {
                         <span className="text-gray-600">
                           Bs {cierre.tasa_cierre.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">Cerrado por</span>
+                        <span className="text-gray-600">{cierre.usuario_nombre || '—'}</span>
                       </div>
                     </div>
                   )}
