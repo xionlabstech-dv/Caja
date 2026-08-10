@@ -120,6 +120,16 @@ export default function ResumenPage() {
       ? ventas.reduce((min, v) => (v.fecha < min ? v.fecha : min), ventas[0].fecha)
       : null);
 
+  // Numeración por orden cronológico real (no por posición en el array: IDB
+  // getAll() devuelve las ventas ordenadas por id/UUID, sin relación alguna
+  // con la fecha). La primera venta del período es siempre #1 y no cambia al
+  // llegar más ventas nuevas.
+  const ventasPorFecha = [...ventas].sort((a, b) => a.fecha.localeCompare(b.fecha));
+  const numeroPorVenta = new Map(ventasPorFecha.map((v, i) => [v.id, i + 1]));
+  // Más reciente primero para la lista — usamos el mismo orden cronológico
+  // ya calculado en vez de asumir que el array venía ordenado.
+  const ventasParaMostrar = [...ventasPorFecha].reverse();
+
   const confirmarCierre = async () => {
     setCerrando(true);
     const now = new Date().toISOString();
@@ -232,7 +242,7 @@ export default function ResumenPage() {
         {ventas.length > 0 ? (
           <div className="space-y-2">
             <h2 className="font-semibold text-gray-700 px-1">Ventas</h2>
-            {[...ventas].reverse().map((venta, idx) => {
+            {ventasParaMostrar.map(venta => {
               const hora = new Date(venta.fecha).toLocaleTimeString('es-VE', {
                 hour: '2-digit',
                 minute: '2-digit',
@@ -249,7 +259,7 @@ export default function ResumenPage() {
                     onClick={() => setExpandido(isOpen ? null : venta.id)}
                   >
                     <div>
-                      <p className="font-semibold text-gray-800">Venta #{ventas.length - idx}</p>
+                      <p className="font-semibold text-gray-800">Venta #{numeroPorVenta.get(venta.id)}</p>
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className="text-gray-400 text-xs">{hora}</span>
                         <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex items-center gap-1 ${METODO_COLORS[venta.metodo_pago]}`}>
