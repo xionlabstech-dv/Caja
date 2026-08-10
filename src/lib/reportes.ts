@@ -1,5 +1,4 @@
 import { supabase } from './supabase';
-import { MetodoPago } from '@/types';
 
 export interface TotalesPeriodo {
   total_bs: number;
@@ -8,7 +7,10 @@ export interface TotalesPeriodo {
 }
 
 export interface DesglosePorMetodo {
-  metodo_pago: MetodoPago;
+  // string, no MetodoPago: los valores reales en ventas.metodo_pago no están
+  // restringidos por un enum/check en la base, y de hecho conviven distintos
+  // esquemas de nombres (ver METODO_INFO en la página de Reportes).
+  metodo_pago: string;
   total_bs: number;
   total_usd: number;
   cantidad: number;

@@ -14,24 +14,29 @@ import {
   VentasPorDiaSemana,
 } from '@/lib/reportes';
 import { formatBS, formatUSD } from '@/lib/precio';
-import { MetodoPago } from '@/types';
 import ThemeToggle from '@/components/ThemeToggle';
 
-const METODO_LABELS: Record<MetodoPago, string> = {
-  efectivo_bs: 'Efectivo Bs',
-  pago_movil: 'Pago Móvil',
-  biopago: 'Biopago',
-  tarjeta: 'Tarjeta',
-  efectivo_usd: 'Efectivo $',
+// ventas.metodo_pago es texto libre en Supabase (sin enum/check), y conviven
+// dos esquemas de nombres en los datos reales: el que usa la pantalla de
+// Caja ('efectivo_bs'/'efectivo_usd') y el que aparece en el histórico ya
+// cargado ('efectivo'/'divisa'). Se mapean ambos al mismo label/color/moneda
+// para que ningún método quede sin etiqueta — y cualquier valor futuro no
+// contemplado cae en un fallback visible en vez de un chip vacío.
+interface MetodoInfo { label: string; color: string; enUsd: boolean }
+
+const METODO_INFO: Record<string, MetodoInfo> = {
+  efectivo_bs: { label: 'Efectivo Bs', color: 'bg-emerald-100 text-emerald-700', enUsd: false },
+  efectivo: { label: 'Efectivo Bs', color: 'bg-emerald-100 text-emerald-700', enUsd: false },
+  pago_movil: { label: 'Pago Móvil', color: 'bg-blue-100 text-blue-700', enUsd: false },
+  biopago: { label: 'Biopago', color: 'bg-purple-100 text-purple-700', enUsd: false },
+  tarjeta: { label: 'Tarjeta', color: 'bg-slate-100 text-slate-700', enUsd: false },
+  efectivo_usd: { label: 'Efectivo $', color: 'bg-amber-100 text-amber-700', enUsd: true },
+  divisa: { label: 'Efectivo $', color: 'bg-amber-100 text-amber-700', enUsd: true },
 };
 
-const METODO_COLORS: Record<MetodoPago, string> = {
-  efectivo_bs: 'bg-emerald-100 text-emerald-700',
-  pago_movil: 'bg-blue-100 text-blue-700',
-  biopago: 'bg-purple-100 text-purple-700',
-  tarjeta: 'bg-slate-100 text-slate-700',
-  efectivo_usd: 'bg-amber-100 text-amber-700',
-};
+function metodoInfo(metodoPago: string): MetodoInfo {
+  return METODO_INFO[metodoPago] ?? { label: metodoPago, color: 'bg-gray-100 text-gray-600', enUsd: false };
+}
 
 const DIAS_SEMANA = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 const ORDEN_LUNES_A_DOMINGO = [1, 2, 3, 4, 5, 6, 0];
@@ -211,15 +216,16 @@ export default function ReportesPage() {
                 <div className="space-y-3">
                   {porMetodo.map(m => {
                     const pct = totalGeneral > 0 ? (m.total_bs / totalGeneral) * 100 : 0;
+                    const info = metodoInfo(m.metodo_pago);
                     return (
                       <div key={m.metodo_pago}>
                         <div className="flex items-center justify-between mb-1">
-                          <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${METODO_COLORS[m.metodo_pago]}`}>
-                            {METODO_LABELS[m.metodo_pago]}
+                          <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${info.color}`}>
+                            {info.label}
                           </span>
                           <div className="text-right">
                             <span className="font-bold text-gray-800 dark:text-gray-100">
-                              {m.metodo_pago === 'efectivo_usd' ? formatUSD(m.total_usd) : formatBS(m.total_bs)}
+                              {info.enUsd ? formatUSD(m.total_usd) : formatBS(m.total_bs)}
                             </span>
                             <span className="text-xs text-gray-400 ml-1.5">
                               {m.cantidad} {m.cantidad === 1 ? 'venta' : 'ventas'} · {pct.toLocaleString('es-VE', { maximumFractionDigits: 0 })}%
