@@ -27,21 +27,22 @@ export interface CrearUsuarioInput {
   negocioId: string;
 }
 
-export async function crearUsuario(input: CrearUsuarioInput): Promise<{ ok: true } | { ok: false; error: string }> {
+type ResultadoFuncion = { ok: true } | { ok: false; error: string };
+
+// Con un status no-2xx, supabase-js devuelve data:null y el body de nuestra
+// respuesta (con el mensaje real) viaja en error.context, que es la Response
+// cruda — hay que leerla aparte. Compartido por toda función que invoque un
+// Edge Function de este módulo.
+async function invocarFuncion<T extends object>(nombre: string, body: T, mensajeDefecto: string): Promise<ResultadoFuncion> {
   try {
-    const { data, error } = await supabase.functions.invoke('crear-usuario', {
-      body: input,
-    });
+    const { data, error } = await supabase.functions.invoke(nombre, { body: body as unknown as Record<string, unknown> });
     if (error) {
-      // Con un status no-2xx, supabase-js devuelve data:null y el body de
-      // nuestra respuesta (con el mensaje real) viaja en error.context, que
-      // es la Response cruda — hay que leerla aparte.
-      let mensaje = 'No se pudo crear el usuario';
+      let mensaje = mensajeDefecto;
       const context = (error as { context?: Response }).context;
       if (context) {
         try {
-          const body = await context.clone().json();
-          if (body?.error) mensaje = body.error;
+          const respBody = await context.clone().json();
+          if (respBody?.error) mensaje = respBody.error;
         } catch {
           // el body no era JSON parseable — se queda el mensaje genérico
         }
@@ -55,6 +56,14 @@ export async function crearUsuario(input: CrearUsuarioInput): Promise<{ ok: true
   } catch {
     return { ok: false, error: 'No se pudo conectar. Verifica tu conexión.' };
   }
+}
+
+export async function crearUsuario(input: CrearUsuarioInput): Promise<ResultadoFuncion> {
+  return invocarFuncion('crear-usuario', input, 'No se pudo crear el usuario');
+}
+
+export async function eliminarUsuario(usuarioId: string): Promise<ResultadoFuncion> {
+  return invocarFuncion('eliminar-usuario', { usuarioId }, 'No se pudo eliminar el usuario');
 }
 
 export async function cambiarRol(id: string, rol: Rol): Promise<boolean> {

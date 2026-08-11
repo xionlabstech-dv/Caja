@@ -56,9 +56,10 @@ const METODOS_PAGO: { id: MetodoPago; label: string }[] = [
 ];
 
 export default function CajaPage() {
-  const { tasa, isOnline, negocioNombre, signOut, user, pendientesCount, negocioId, rol, userNombre } = useApp();
+  const { tasa, isOnline, negocioNombre, signOut, user, pendientesCount, negocioId, rol, userNombre, productosVersion } = useApp();
   const router = useRouter();
   const [productos, setProductos] = useState<Producto[]>([]);
+  const [cargandoProductos, setCargandoProductos] = useState(true);
   const [busqueda, setBusqueda] = useState('');
   const [carrito, setCarrito] = useState<ItemCarrito[]>([]);
   const [showCarrito, setShowCarrito] = useState(false);
@@ -78,9 +79,20 @@ export default function CajaPage() {
   const [passCargando, setPassCargando] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
+  // productosVersion depende de Providers: se re-lee la lista cuando el sync
+  // inicial (o cualquier sync posterior) termina de escribir productos
+  // frescos en IndexedDB. Sin esto, el primer fetch de esta pantalla puede
+  // ganarle la carrera al sync y quedarse con una lista vacía para siempre
+  // (el efecto solo corría una vez, al montar).
   useEffect(() => {
-    getProductos().then(setProductos);
-  }, []);
+    let cancelado = false;
+    getProductos().then(p => {
+      if (cancelado) return;
+      setProductos(p);
+      setCargandoProductos(false);
+    });
+    return () => { cancelado = true; };
+  }, [productosVersion]);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -300,12 +312,17 @@ export default function CajaPage() {
           className="flex items-center gap-1.5 min-w-0 text-left"
           aria-label="Ver perfil del negocio"
         >
-          <h1 className="text-xl font-bold truncate">
-            Caja
-            {negocioNombre && (
-              <span className="font-normal text-emerald-200"> · {negocioNombre}</span>
+          <div className="min-w-0">
+            <h1 className="text-xl font-bold truncate">
+              Caja
+              {negocioNombre && (
+                <span className="font-normal text-emerald-200"> · {negocioNombre}</span>
+              )}
+            </h1>
+            {userNombre && (
+              <p className="text-emerald-200 text-xs truncate leading-tight">{userNombre}</p>
             )}
-          </h1>
+          </div>
           <svg
             className={`w-4 h-4 text-emerald-200 flex-shrink-0 transition-transform ${showPerfil ? 'rotate-180' : ''}`}
             fill="none" viewBox="0 0 24 24" stroke="currentColor"
@@ -402,7 +419,15 @@ export default function CajaPage() {
 
       {/* Product list */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
-        {productos.length === 0 ? (
+        {cargandoProductos ? (
+          <div className="text-center text-gray-400 py-16">
+            <svg className="w-8 h-8 mx-auto mb-3 text-emerald-400 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            <p className="text-sm">Cargando productos...</p>
+          </div>
+        ) : productos.length === 0 ? (
           <div className="text-center text-gray-400 py-16">
             <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
@@ -768,15 +793,18 @@ export default function CajaPage() {
               </button>
             </div>
 
-            {/* Avatar + negocio */}
+            {/* Avatar + usuario en sesión */}
             <div className="flex flex-col items-center py-5 px-6">
-              <div className="w-20 h-20 rounded-full bg-emerald-600 flex items-center justify-center mb-3 shadow-md">
+              <div className={`w-20 h-20 rounded-full ${avatarColor(userNombre || negocioNombre || 'U')} flex items-center justify-center mb-3 shadow-md`}>
                 <span className="text-white text-3xl font-bold">
-                  {(negocioNombre || 'N').charAt(0).toUpperCase()}
+                  {(userNombre || negocioNombre || 'U').charAt(0).toUpperCase()}
                 </span>
               </div>
-              <p className="text-xl font-bold text-gray-900 dark:text-white">{negocioNombre || 'Negocio'}</p>
-              <p className="text-sm text-gray-400 mt-0.5">Sistema de punto de venta</p>
+              <p className="text-xl font-bold text-gray-900 dark:text-white">{userNombre || 'Usuario'}</p>
+              <p className="text-sm text-gray-400 mt-0.5">
+                {negocioNombre || 'Negocio'}
+                {rol && ` · ${rol === 'admin' ? 'Admin' : 'Cajero'}`}
+              </p>
             </div>
 
             <div className="border-t border-gray-100 dark:border-slate-700 mx-4" />

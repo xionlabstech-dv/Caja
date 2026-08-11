@@ -51,8 +51,9 @@ const PRODUCTO_VACIO = {
 
 export default function InventarioPage() {
   useGuardarRuta();
-  const { tasa, isOnline, negocioId } = useApp();
+  const { tasa, isOnline, negocioId, productosVersion } = useApp();
   const [productos, setProductos] = useState<Producto[]>([]);
+  const [cargandoProductos, setCargandoProductos] = useState(true);
   const [busqueda, setBusqueda] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editando, setEditando] = useState<Producto | null>(null);
@@ -67,9 +68,12 @@ export default function InventarioPage() {
   const cargar = async () => {
     const prods = await getProductos();
     setProductos(prods);
+    setCargandoProductos(false);
   };
 
-  useEffect(() => { cargar(); }, []);
+  // productosVersion: ver comentario en src/app/page.tsx — misma corrida de
+  // carrera entre el sync inicial de Providers y el primer fetch local.
+  useEffect(() => { cargar(); }, [productosVersion]);
 
   const filtrados = busqueda
     ? productos.filter(
@@ -230,7 +234,15 @@ export default function InventarioPage() {
       </div>
 
       <div className="p-4 space-y-2">
-        {filtrados.length === 0 ? (
+        {cargandoProductos ? (
+          <div className="text-center text-gray-400 py-16">
+            <svg className="w-8 h-8 mx-auto mb-3 text-emerald-400 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            <p className="text-sm">Cargando productos...</p>
+          </div>
+        ) : filtrados.length === 0 ? (
           <div className="text-center text-gray-400 py-16">
             <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}

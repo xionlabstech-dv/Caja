@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useApp } from '@/components/Providers';
 import { useGuardarRuta } from '@/lib/useGuardarRuta';
 import { LIMITE_USUARIOS_POR_NEGOCIO } from '@/lib/roles';
-import { listarUsuarios, crearUsuario, cambiarRol, cambiarActivo, UsuarioNegocio } from '@/lib/usuarios';
+import { listarUsuarios, crearUsuario, cambiarRol, cambiarActivo, eliminarUsuario, UsuarioNegocio } from '@/lib/usuarios';
 import { Rol } from '@/types';
 import ThemeToggle from '@/components/ThemeToggle';
 
@@ -26,6 +26,9 @@ export default function UsuariosPage() {
   const [form, setForm] = useState(FORM_VACIO);
   const [creando, setCreando] = useState(false);
   const [errorForm, setErrorForm] = useState('');
+
+  const [confirmEliminar, setConfirmEliminar] = useState<UsuarioNegocio | null>(null);
+  const [eliminando, setEliminando] = useState(false);
 
   const [toast, setToast] = useState('');
   const showToast = (msg: string) => {
@@ -116,6 +119,20 @@ export default function UsuariosPage() {
     }
   };
 
+  const handleEliminar = async () => {
+    if (!confirmEliminar || confirmEliminar.id === user?.id) return; // nunca eliminarse a sí mismo
+    setEliminando(true);
+    const resultado = await eliminarUsuario(confirmEliminar.id);
+    setEliminando(false);
+    if (resultado.ok) {
+      setUsuarios(list => list?.filter(x => x.id !== confirmEliminar.id) ?? null);
+      showToast('Usuario eliminado');
+      setConfirmEliminar(null);
+    } else {
+      showToast(resultado.error);
+    }
+  };
+
   return (
     <div>
       <header className="bg-emerald-600 text-white px-4 pt-4 pb-3 flex items-center justify-between">
@@ -182,11 +199,25 @@ export default function UsuariosPage() {
                         </div>
                         <p className="text-xs text-gray-400 font-mono">{usernameDe(u.email)}</p>
                       </div>
-                      <span className={`flex-shrink-0 text-xs font-semibold px-2 py-1 rounded-full ${
-                        u.activo ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-gray-100 text-gray-500 dark:bg-slate-700 dark:text-gray-400'
-                      }`}>
-                        {u.activo ? 'Activo' : 'Inactivo'}
-                      </span>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
+                          u.activo ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-gray-100 text-gray-500 dark:bg-slate-700 dark:text-gray-400'
+                        }`}>
+                          {u.activo ? 'Activo' : 'Inactivo'}
+                        </span>
+                        {!esYo && (
+                          <button
+                            onClick={() => setConfirmEliminar(u)}
+                            className="p-1 text-gray-300 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400"
+                            aria-label={`Eliminar a ${u.nombre || usernameDe(u.email)}`}
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100 dark:border-slate-700">
@@ -220,7 +251,7 @@ export default function UsuariosPage() {
                     </div>
                     {esYo && (
                       <p className="text-xs text-gray-400 mt-2">
-                        No puedes cambiar tu propio rol ni desactivarte — pídeselo a otro admin.
+                        No puedes cambiar tu propio rol, desactivarte ni eliminarte — pídeselo a otro admin.
                       </p>
                     )}
                   </div>
@@ -322,6 +353,45 @@ export default function UsuariosPage() {
               >
                 {creando ? 'Creando...' : 'Crear usuario'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Eliminar usuario */}
+      {confirmEliminar && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => { if (!eliminando) setConfirmEliminar(null); }}
+          />
+          <div className="relative bg-white dark:bg-slate-800 rounded-2xl w-full max-w-sm shadow-xl overflow-hidden">
+            <div className="p-5">
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Eliminar usuario</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
+                Se eliminará a <strong>{confirmEliminar.nombre || usernameDe(confirmEliminar.email)}</strong> definitivamente.
+                No podrá volver a iniciar sesión.
+              </p>
+              <p className="text-xs text-gray-400 mb-4">
+                Sus ventas y cierres anteriores se conservan en el historial con su nombre.
+              </p>
+              <p className="text-xs text-gray-400 text-center mb-4">Esta acción no se puede deshacer.</p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setConfirmEliminar(null)}
+                  disabled={eliminando}
+                  className="flex-1 py-3 rounded-xl bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 font-semibold disabled:opacity-40"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleEliminar}
+                  disabled={eliminando}
+                  className="flex-1 py-3 rounded-xl bg-red-600 text-white font-bold disabled:opacity-40"
+                >
+                  {eliminando ? 'Eliminando...' : 'Eliminar'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

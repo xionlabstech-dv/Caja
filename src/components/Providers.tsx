@@ -39,6 +39,13 @@ interface AppContextType {
   pendientesCount: number;
   syncStatus: EstadoSync;
   sincronizarAhora: () => void;
+  // Se incrementa cada vez que Providers termina de escribir productos
+  // frescos en IndexedDB. Las pantallas que leen productos (Caja,
+  // Inventario) dependen de este valor para volver a leer cuando los datos
+  // cambian — sin esto, el fetch inicial de esas pantallas puede ganarle la
+  // carrera al sync de Providers y quedarse con una lista vacía para
+  // siempre (nunca hay un segundo render que la corrija).
+  productosVersion: number;
 }
 
 const AppContext = createContext<AppContextType>({
@@ -58,6 +65,7 @@ const AppContext = createContext<AppContextType>({
   pendientesCount: 0,
   syncStatus: 'online',
   sincronizarAhora: () => {},
+  productosVersion: 0,
 });
 
 export function useApp() {
@@ -147,6 +155,7 @@ export default function Providers({ children }: { children: ReactNode }) {
   const [authLoading, setAuthLoading] = useState(true);
   const [pendientesCount, setPendientesCount] = useState(0);
   const [sincronizando, setSincronizando] = useState(false);
+  const [productosVersion, setProductosVersion] = useState(0);
   const [motivoDeslogueo, setMotivoDeslogueo] = useState<string | null>(null);
 
   useEffect(() => {
@@ -267,6 +276,10 @@ export default function Providers({ children }: { children: ReactNode }) {
         setTasaState(config.tasa);
         setConfiguracion(config);
       }
+      // syncFromSupabase ya escribió productos en IndexedDB para este punto
+      // (con o sin config): avisar a quien esté leyendo productos que hay
+      // datos nuevos que releer.
+      setProductosVersion(v => v + 1);
     };
 
     // Procesa la cola de pendientes y refresca desde Supabase para reconciliar.
@@ -376,7 +389,7 @@ export default function Providers({ children }: { children: ReactNode }) {
     <AppContext.Provider value={{
       tasa, setTasa, isOnline, configuracion, theme, toggleTheme,
       user, negocioId, negocioNombre, rol, userNombre, authLoading, signOut,
-      pendientesCount, syncStatus, sincronizarAhora,
+      pendientesCount, syncStatus, sincronizarAhora, productosVersion,
     }}>
       {children}
     </AppContext.Provider>
