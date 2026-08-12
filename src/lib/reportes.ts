@@ -4,6 +4,12 @@ export interface TotalesPeriodo {
   total_bs: number;
   total_usd: number;
   cantidad_ventas: number;
+  // Todos null si quien llama no es admin o el negocio no usa_costos — la
+  // función RPC lo verifica server-side, no es solo una omisión del cliente.
+  ganancia_usd: number | null;
+  monto_con_costo_usd: number | null;
+  items_con_costo: number | null;
+  items_totales: number | null;
 }
 
 export interface DesglosePorMetodo {
@@ -22,7 +28,12 @@ export interface TopProducto {
   es_por_peso: boolean;
   cantidad_total: number;
   monto_total: number;
+  // null si no hay costo registrado para ningún item vendido de este
+  // producto en el período, o si quien llama no es admin / no usa_costos.
+  ganancia_usd: number | null;
 }
+
+export type OrdenTopProductos = 'cantidad' | 'ganancia';
 
 export interface VentasPorDiaSemana {
   dia_semana: number; // 0=domingo .. 6=sábado (extract(dow))
@@ -65,13 +76,20 @@ export async function fetchPorMetodo(negocioId: string, desde: Date, hasta: Date
   }
 }
 
-export async function fetchTopProductos(negocioId: string, desde: Date, hasta: Date, limite = 10): Promise<TopProducto[] | null> {
+export async function fetchTopProductos(
+  negocioId: string,
+  desde: Date,
+  hasta: Date,
+  limite = 10,
+  orden: OrdenTopProductos = 'cantidad',
+): Promise<TopProducto[] | null> {
   try {
     const { data, error } = await supabase.rpc('reportes_top_productos', {
       p_negocio_id: negocioId,
       p_desde: desde.toISOString(),
       p_hasta: hasta.toISOString(),
       p_limite: limite,
+      p_orden: orden,
     });
     if (error) throw error;
     return (data ?? []) as TopProducto[];

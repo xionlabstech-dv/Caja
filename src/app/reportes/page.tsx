@@ -12,6 +12,7 @@ import {
   DesglosePorMetodo,
   TopProducto,
   VentasPorDiaSemana,
+  OrdenTopProductos,
 } from '@/lib/reportes';
 import { formatBS, formatUSD } from '@/lib/precio';
 import { useGuardarRuta } from '@/lib/useGuardarRuta';
@@ -52,7 +53,7 @@ function formatearNombre(nombre: string): string {
 
 export default function ReportesPage() {
   useGuardarRuta();
-  const { negocioId, isOnline } = useApp();
+  const { negocioId, isOnline, rol, usaCostos, tasa } = useApp();
   const [periodoTipo, setPeriodoTipo] = useState<TipoPeriodo>('mes');
   const [loading, setLoading] = useState(true);
   const [huboError, setHuboError] = useState(false);
@@ -61,6 +62,9 @@ export default function ReportesPage() {
   const [porMetodo, setPorMetodo] = useState<DesglosePorMetodo[]>([]);
   const [topProductos, setTopProductos] = useState<TopProducto[]>([]);
   const [porDiaSemana, setPorDiaSemana] = useState<VentasPorDiaSemana[]>([]);
+  // Solo tiene sentido si podría haber ganancia que mostrar — ver también el
+  // gate de renderizado más abajo (mostrarGanancia).
+  const [ordenTop, setOrdenTop] = useState<OrdenTopProductos>('cantidad');
 
   useEffect(() => {
     if (!isOnline || !negocioId) {
@@ -79,7 +83,7 @@ export default function ReportesPage() {
       fetchTotales(negocioId, desde, hasta),
       fetchTotales(negocioId, desdeAnt, hastaAnt),
       fetchPorMetodo(negocioId, desde, hasta),
-      fetchTopProductos(negocioId, desde, hasta, 10),
+      fetchTopProductos(negocioId, desde, hasta, 10, ordenTop),
       fetchPorDiaSemana(negocioId, desde, hasta),
     ]).then(([tot, totAnt, metodo, top, dias]) => {
       if (cancelado) return;
@@ -97,7 +101,7 @@ export default function ReportesPage() {
     });
 
     return () => { cancelado = true; };
-  }, [periodoTipo, isOnline, negocioId]);
+  }, [periodoTipo, isOnline, negocioId, ordenTop]);
 
   const ticketPromedioBs = totales && totales.cantidad_ventas > 0 ? totales.total_bs / totales.cantidad_ventas : 0;
   const ticketPromedioUsd = totales && totales.cantidad_ventas > 0 ? totales.total_usd / totales.cantidad_ventas : 0;
@@ -108,6 +112,20 @@ export default function ReportesPage() {
       : null;
 
   const totalGeneral = porMetodo.reduce((s, m) => s + m.total_bs, 0);
+
+  // Gate por rol Y por preferencia del negocio — aunque la RPC ya devuelve
+  // null en ganancia_usd para un no-admin, esta pantalla nunca debe intentar
+  // renderizar nada de costo/ganancia basándose solo en "el campo vino con
+  // dato": se verifica explícitamente quién está mirando.
+  const mostrarGanancia = rol === 'admin' && usaCostos;
+  const hayGanancia = mostrarGanancia && totales?.items_con_costo != null && totales.items_con_costo > 0;
+  const gananciaBs = hayGanancia ? totales!.ganancia_usd! * tasa : 0;
+  const margenPeriodoPct =
+    hayGanancia && totales!.monto_con_costo_usd! > 0
+      ? (totales!.ganancia_usd! / totales!.monto_con_costo_usd!) * 100
+      : null;
+  const coberturaParcial =
+    hayGanancia && totales!.items_totales != null && totales!.items_con_costo! < totales!.items_totales;
 
   return (
     <div>
@@ -190,6 +208,22 @@ export default function ReportesPage() {
                   <p className="text-xs text-gray-400">{formatUSD(ticketPromedioUsd)}</p>
                 </div>
               </div>
+
+              {hayGanancia && (
+                <div className="mt-4 pt-4 border-t border-gray-100 dark:border-slate-700">
+                  <p className="text-emerald-600 dark:text-emerald-400 font-semibold">
+                    Ganancia estimada: {formatBS(gananciaBs)}
+                    {margenPeriodoPct !== null && (
+                      <span> ({margenPeriodoPct.toLocaleString('es-VE', { maximumFractionDigits: 1 })}%)</span>
+                    )}
+                  </p>
+                  {coberturaParcial && (
+                    <p className="text-xs text-gray-400 mt-1">
+                      Basado en {totales!.items_con_costo} de {totales!.items_totales} productos vendidos
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Comparación con período anterior */}
@@ -244,7 +278,29 @@ export default function ReportesPage() {
             {/* Top 10 productos */}
             {topProductos.length > 0 && (
               <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-slate-700">
-                <h2 className="font-semibold text-gray-700 dark:text-gray-300 mb-3">Productos más vendidos</h2>
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="font-semibold text-gray-700 dark:text-gray-300">Productos más vendidos</h2>
+                  {mostrarGanancia && (
+                    <div className="flex gap-1 bg-gray-100 dark:bg-slate-700 rounded-full p-0.5">
+                      {([
+                        ['cantidad', 'Cantidad'],
+                        ['ganancia', 'Ganancia'],
+                      ] as [OrdenTopProductos, string][]).map(([valor, label]) => (
+                        <button
+                          key={valor}
+                          onClick={() => setOrdenTop(valor)}
+                          className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                            ordenTop === valor
+                              ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-400 shadow-sm'
+                              : 'text-gray-500 dark:text-gray-400'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <div className="space-y-2.5">
                   {topProductos.map((p, i) => (
                     <div key={p.producto_id ?? p.nombre} className="flex items-center gap-3">
@@ -259,7 +315,14 @@ export default function ReportesPage() {
                             : `${Math.round(p.cantidad_total)} vendidos`}
                         </p>
                       </div>
-                      <span className="font-bold text-sm text-gray-800 dark:text-gray-100 flex-shrink-0">{formatBS(p.monto_total)}</span>
+                      <div className="text-right flex-shrink-0">
+                        <span className="font-bold text-sm text-gray-800 dark:text-gray-100 block">{formatBS(p.monto_total)}</span>
+                        {mostrarGanancia && p.ganancia_usd != null && (
+                          <span className={`text-xs ${p.ganancia_usd >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500'}`}>
+                            {p.ganancia_usd >= 0 ? '+' : ''}{formatBS(p.ganancia_usd * tasa)}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>

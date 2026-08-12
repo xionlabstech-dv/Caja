@@ -47,11 +47,12 @@ const PRODUCTO_VACIO = {
   moneda: 'USD' as 'USD' | 'VES',
   activo: true,
   por_peso: false,
+  costo: '',
 };
 
 export default function InventarioPage() {
   useGuardarRuta();
-  const { tasa, isOnline, negocioId, productosVersion } = useApp();
+  const { tasa, isOnline, negocioId, productosVersion, rol, usaCostos } = useApp();
   const [productos, setProductos] = useState<Producto[]>([]);
   const [cargandoProductos, setCargandoProductos] = useState(true);
   const [busqueda, setBusqueda] = useState('');
@@ -99,6 +100,7 @@ export default function InventarioPage() {
       moneda: p.moneda,
       activo: p.activo,
       por_peso: p.por_peso ?? false,
+      costo: p.costo != null ? String(p.costo) : '',
     });
     setError('');
     setShowModal(true);
@@ -129,10 +131,24 @@ export default function InventarioPage() {
       }
     }
 
+    let costo: number | null = null;
+    if (usaCostos && rol === 'admin' && form.costo.trim()) {
+      costo = parseFloat(form.costo);
+      if (isNaN(costo) || costo < 0) { setError('El costo no es válido'); return; }
+    }
+
     setGuardando(true);
     setError('');
 
-    const datos = {
+    const datos: {
+      nombre: string;
+      codigo_barra: string | null;
+      precio: number;
+      moneda: 'USD' | 'VES';
+      activo: boolean;
+      por_peso: boolean;
+      costo?: number | null;
+    } = {
       nombre: form.nombre.trim(),
       codigo_barra: codigoBarra,
       precio,
@@ -140,6 +156,13 @@ export default function InventarioPage() {
       activo: true,
       por_peso: form.por_peso,
     };
+    // El campo costo solo se toca si de verdad estaba visible y editable en
+    // este guardado — si usa_costos está apagado (o el rol no es admin), NO
+    // se incluye la llave en absoluto, para no pisar con null un costo que
+    // ya estaba guardado de cuando el control de costos sí estaba activo.
+    if (usaCostos && rol === 'admin') {
+      datos.costo = costo;
+    }
 
     // Offline-first: se guarda en IndexedDB de inmediato (la UI responde al
     // instante) y se encola para Supabase — ahora mismo si hay red, o al
@@ -182,6 +205,18 @@ export default function InventarioPage() {
     setConfirmDelete(null);
     showToast(isOnline ? 'Producto eliminado' : 'Eliminado localmente — se sincronizará cuando haya conexión');
   };
+
+  // Margen en vivo mientras se escribe — margen sobre venta (precio-costo)/
+  // precio, el estándar comercial, no margen sobre costo. Solo se calcula si
+  // hay un precio y un costo válidos; costo vacío no es un error, simplemente
+  // no hay nada que mostrar todavía.
+  const mostrarCosto = usaCostos && rol === 'admin';
+  const precioFormNum = parseFloat(form.precio);
+  const costoFormNum = form.costo.trim() ? parseFloat(form.costo) : null;
+  const margenValido = mostrarCosto && precioFormNum > 0 && costoFormNum !== null && !isNaN(costoFormNum);
+  const margenPct = margenValido ? ((precioFormNum - costoFormNum!) / precioFormNum) * 100 : null;
+  const gananciaUnidad = margenValido ? precioFormNum - costoFormNum! : null;
+  const costoMayorQuePrecio = margenValido && costoFormNum! > precioFormNum;
 
   return (
     <div>
@@ -448,6 +483,34 @@ export default function InventarioPage() {
                   </p>
                 )}
               </div>
+
+              {mostrarCosto && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    {form.por_peso ? 'Costo por kilo' : 'Costo'} ({form.moneda})
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={form.costo}
+                    onChange={e => setForm(f => ({ ...f, costo: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none focus:border-emerald-400"
+                    placeholder="Opcional"
+                  />
+                  {margenValido && (
+                    <p className="text-sm text-gray-500 mt-1">
+                      Margen: {margenPct!.toLocaleString('es-VE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%
+                      {' · '}Ganancia: {form.moneda === 'USD' ? formatUSD(gananciaUnidad!) : formatBS(gananciaUnidad!)}
+                      {form.por_peso ? ' por kilo' : ' por unidad'}
+                    </p>
+                  )}
+                  {costoMayorQuePrecio && (
+                    <p className="text-sm text-red-500 font-medium mt-1">
+                      El costo es mayor que el precio de venta
+                    </p>
+                  )}
+                </div>
+              )}
 
               {error && <p className="text-red-500 text-sm">{error}</p>}
             </div>

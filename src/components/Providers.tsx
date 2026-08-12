@@ -13,6 +13,8 @@ import {
   setCachedRol,
   getCachedUsuarioNombre,
   setCachedUsuarioNombre,
+  getCachedUsaCostos,
+  setCachedUsaCostos,
   clearTenantData,
   contarPendientes,
 } from '@/lib/db';
@@ -34,6 +36,11 @@ interface AppContextType {
   negocioNombre: string;
   rol: Rol | null;
   userNombre: string;
+  // Preferencia del negocio: si lleva control de costos y márgenes de
+  // ganancia. Cacheada en IndexedDB (igual que rol) para que la UI que
+  // depende de esto (Inventario, Reportes) sepa qué mostrar sin red.
+  usaCostos: boolean;
+  setUsaCostos: (v: boolean) => void;
   authLoading: boolean;
   signOut: () => Promise<void>;
   pendientesCount: number;
@@ -60,6 +67,8 @@ const AppContext = createContext<AppContextType>({
   negocioNombre: '',
   rol: null,
   userNombre: '',
+  usaCostos: false,
+  setUsaCostos: () => {},
   authLoading: true,
   signOut: async () => {},
   pendientesCount: 0,
@@ -77,6 +86,7 @@ interface PerfilResuelto {
   negocioNombre: string;
   rol: Rol;
   userNombre: string;
+  usaCostos: boolean;
 }
 
 async function fetchPerfil(uid: string): Promise<PerfilResuelto | 'desactivado' | null> {
@@ -92,7 +102,7 @@ async function fetchPerfil(uid: string): Promise<PerfilResuelto | 'desactivado' 
 
     const { data: negocio } = await supabase
       .from('negocios')
-      .select('nombre')
+      .select('nombre, usa_costos')
       .eq('id', perfil.negocio_id)
       .single();
 
@@ -103,6 +113,7 @@ async function fetchPerfil(uid: string): Promise<PerfilResuelto | 'desactivado' 
       negocioNombre: negocio.nombre,
       rol: (perfil.rol as Rol) ?? 'cajero',
       userNombre: perfil.nombre ?? '',
+      usaCostos: negocio.usa_costos ?? false,
     };
   } catch {
     return null;
@@ -124,21 +135,24 @@ async function resolverPerfil(uid: string): Promise<PerfilResuelto | 'desactivad
     await setCachedNegocioNombre(perfil.negocioNombre);
     await setCachedRol(perfil.rol);
     await setCachedUsuarioNombre(perfil.userNombre);
+    await setCachedUsaCostos(perfil.usaCostos);
     return perfil;
   }
 
   const cachedId = await getCachedNegocioId();
   if (!cachedId) return null;
-  const [cachedNombre, cachedRol, cachedUserNombre] = await Promise.all([
+  const [cachedNombre, cachedRol, cachedUserNombre, cachedUsaCostos] = await Promise.all([
     getCachedNegocioNombre(),
     getCachedRol(),
     getCachedUsuarioNombre(),
+    getCachedUsaCostos(),
   ]);
   return {
     negocioId: cachedId,
     negocioNombre: cachedNombre ?? '',
     rol: cachedRol ?? 'cajero',
     userNombre: cachedUserNombre ?? '',
+    usaCostos: cachedUsaCostos,
   };
 }
 
@@ -152,6 +166,7 @@ export default function Providers({ children }: { children: ReactNode }) {
   const [negocioNombre, setNegocioNombre] = useState('');
   const [rol, setRol] = useState<Rol | null>(null);
   const [userNombre, setUserNombre] = useState('');
+  const [usaCostos, setUsaCostos] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [pendientesCount, setPendientesCount] = useState(0);
   const [sincronizando, setSincronizando] = useState(false);
@@ -199,6 +214,7 @@ export default function Providers({ children }: { children: ReactNode }) {
     setNegocioNombre('');
     setRol(null);
     setUserNombre('');
+    setUsaCostos(false);
     setTasaState(0);
     setConfiguracion(null);
     setPendientesCount(0);
@@ -221,6 +237,7 @@ export default function Providers({ children }: { children: ReactNode }) {
       setNegocioNombre('');
       setRol(null);
       setUserNombre('');
+      setUsaCostos(false);
       setMotivoDeslogueo('Tu usuario fue desactivado. Contacta al administrador de tu negocio.');
     };
 
@@ -236,6 +253,7 @@ export default function Providers({ children }: { children: ReactNode }) {
         setNegocioNombre(perfil.negocioNombre);
         setRol(perfil.rol);
         setUserNombre(perfil.userNombre);
+        setUsaCostos(perfil.usaCostos);
       }
     };
 
@@ -255,6 +273,7 @@ export default function Providers({ children }: { children: ReactNode }) {
         setNegocioNombre('');
         setRol(null);
         setUserNombre('');
+        setUsaCostos(false);
       }
       // Otros eventos con session null (ej. refresh fallido sin red) se
       // ignoran a propósito: mantenemos la sesión local intacta.
@@ -388,7 +407,7 @@ export default function Providers({ children }: { children: ReactNode }) {
   return (
     <AppContext.Provider value={{
       tasa, setTasa, isOnline, configuracion, theme, toggleTheme,
-      user, negocioId, negocioNombre, rol, userNombre, authLoading, signOut,
+      user, negocioId, negocioNombre, rol, userNombre, usaCostos, setUsaCostos, authLoading, signOut,
       pendientesCount, syncStatus, sincronizarAhora, productosVersion,
     }}>
       {children}
