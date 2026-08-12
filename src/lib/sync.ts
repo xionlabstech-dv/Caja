@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 import { saveProductos, saveConfiguracion, getConfiguracion as getConfigDB } from './db';
-import { Producto, Configuracion, CierreCaja, Venta } from '@/types';
+import { Producto, Configuracion, CierreCaja, Venta, VentaItem } from '@/types';
 
 export async function syncFromSupabase(negocioId: string): Promise<Configuracion | null> {
   try {
@@ -123,6 +123,8 @@ export async function sincronizarCierre(cierre: CierreCaja, negocioId: string): 
       desglose_metodos: cierre.desglose_metodos,
       tasa_cierre: cierre.tasa_cierre,
       creado_en: cierre.creado_en,
+      usuario_id: cierre.usuario_id ?? null,
+      usuario_nombre: cierre.usuario_nombre ?? null,
     });
     if (error) {
       // Mismo id ya insertado en un intento previo (retry de la cola offline):
@@ -147,6 +149,8 @@ export async function sincronizarVenta(venta: Venta, negocioId: string): Promise
       total_usd: venta.total_usd,
       tasa: venta.tasa_usada,
       vendida_en: venta.fecha,
+      usuario_id: venta.usuario_id ?? null,
+      usuario_nombre: venta.usuario_nombre ?? null,
     });
 
     if (ventaError && (ventaError as { code?: string }).code !== '23505') {
@@ -194,5 +198,91 @@ export async function actualizarCierreIdVentas(ventaIds: string[], cierreId: str
     return true;
   } catch {
     return false;
+  }
+}
+
+// Trae las ventas del NEGOCIO ENTERO sin cerrar (cierre_id is null), no solo
+// las de este dispositivo — sin esto, un admin no ve lo que venden sus
+// cajeros en otros teléfonos, y cerrar caja solo archiva lo local dejando el
+// resto del negocio sin cerrar. Devuelve null si no se pudo consultar (sin
+// red, error de Supabase), para que quien llama sepa distinguir "el negocio
+// no tiene más ventas pendientes" de "no se pudo confirmar".
+export async function getVentasPendientesRemoto(negocioId: string): Promise<Venta[] | null> {
+  try {
+    const { data: ventasData, error } = await supabase
+      .from('ventas')
+      .select('*')
+      .eq('negocio_id', negocioId)
+      .is('cierre_id', null);
+    if (error) throw error;
+    if (!ventasData || ventasData.length === 0) return [];
+
+    const ids = ventasData.map(v => v.id as string);
+    const { data: itemsData } = await supabase
+      .from('venta_items')
+      .select('*')
+      .in('venta_id', ids);
+
+    const itemsPorVenta = new Map<string, VentaItem[]>();
+    for (const it of itemsData ?? []) {
+      const lista = itemsPorVenta.get(it.venta_id) ?? [];
+      // venta_items.precio_bs es el unitario (o por kg) y venta_items.cantidad
+      // es unidades o kg según es_por_peso — igual que arma confirmarVenta().
+      // Para items por peso, el modelo local usa cantidad=1 (dummy) y guarda
+      // el peso real en gramos; hay que deshacer aquí la conversión a kg que
+      // hizo sincronizarVenta() al insertar, o "cantidad" quedaría en kg en
+      // vez de 1 y desalinearía cualquier código que la use como # de items.
+      const esPorPeso = Boolean(it.es_por_peso);
+      lista.push({
+        id: it.id,
+        producto_id: it.producto_id,
+        nombre: it.nombre,
+        precio_bs: it.precio_bs,
+        cantidad: esPorPeso ? 1 : it.cantidad,
+        subtotal_bs: it.precio_bs * it.cantidad,
+        gramos: it.gramos ?? undefined,
+        precioUnitarioBs: it.precio_bs,
+        precioUnitarioUsd: it.precio_usd,
+      });
+      itemsPorVenta.set(it.venta_id, lista);
+    }
+
+    return ventasData.map(v => ({
+      id: v.id,
+      fecha: v.vendida_en,
+      fecha_dia: (v.vendida_en as string).split('T')[0],
+      items: itemsPorVenta.get(v.id) ?? [],
+      metodo_pago: v.metodo_pago,
+      total_bs: v.total_bs,
+      total_usd: v.total_usd,
+      tasa_usada: v.tasa,
+      cierre_id: v.cierre_id ?? undefined,
+      sincronizada: true,
+      usuario_id: v.usuario_id ?? undefined,
+      usuario_nombre: v.usuario_nombre ?? undefined,
+    }));
+  } catch {
+    return null;
+  }
+}
+
+// Ventas que este dispositivo cree pendientes (sincronizadas, cierre_id
+// null localmente) pero que otro dispositivo ya cerró en Supabase mientras
+// tanto. Sin esto, esas ventas quedarían "atrapadas" en el período local
+// para siempre: cada vez que ESTE dispositivo cierra caja las volvería a
+// incluir, duplicando totales entre cierres reales. Devuelve el cierre_id
+// real de cada una para poder aplicarlo localmente.
+export async function reconciliarCierresLocal(ventaIds: string[]): Promise<Map<string, string>> {
+  if (ventaIds.length === 0) return new Map();
+  try {
+    const { data, error } = await supabase
+      .from('ventas')
+      .select('id, cierre_id')
+      .in('id', ventaIds)
+      .not('cierre_id', 'is', null);
+    if (error) throw error;
+    return new Map((data ?? []).map(v => [v.id as string, v.cierre_id as string]));
+  } catch {
+    return new Map();
   }
 }

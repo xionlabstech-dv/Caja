@@ -1,13 +1,26 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 
-export default function LoginScreen() {
+interface LoginScreenProps {
+  // Mensaje a mostrar de entrada (ej. "tu usuario fue desactivado") — viene
+  // de Providers, que renderiza LoginScreen fuera de su propio contexto, así
+  // que no puede leerse vía useApp().
+  mensajeInicial?: string | null;
+  onMensajeVisto?: () => void;
+}
+
+export default function LoginScreen({ mensajeInicial, onMensajeVisto }: LoginScreenProps) {
   const [usuario, setUsuario] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(mensajeInicial ?? '');
+
+  useEffect(() => {
+    if (mensajeInicial) onMensajeVisto?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

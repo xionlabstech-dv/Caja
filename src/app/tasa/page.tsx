@@ -4,9 +4,11 @@ import { useState } from 'react';
 import { saveConfiguracion } from '@/lib/db';
 import { encolarActualizarTasa } from '@/lib/outbox';
 import { useApp } from '@/components/Providers';
+import { useGuardarRuta } from '@/lib/useGuardarRuta';
 import ThemeToggle from '@/components/ThemeToggle';
 
 export default function TasaPage() {
+  useGuardarRuta();
   const { tasa, setTasa, configuracion, isOnline, negocioId } = useApp();
   const [input, setInput] = useState('');
   const [guardando, setGuardando] = useState(false);

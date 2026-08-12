@@ -9,6 +9,7 @@ import {
   getUltimoCierre,
   setUltimoCierre,
 } from '@/lib/db';
+import { getVentasPendientesRemoto, reconciliarCierresLocal } from '@/lib/sync';
 import { encolarCerrarCaja, encolarActualizarCierreVentas } from '@/lib/outbox';
 import { formatBS, formatUSD } from '@/lib/precio';
 import { Venta, MetodoPago, CierreCaja, DesgloseCierre } from '@/types';
@@ -81,7 +82,7 @@ function formatearNombre(nombre: string): string {
 }
 
 export default function ResumenPage() {
-  const { tasa, negocioId, isOnline } = useApp();
+  const { tasa, negocioId, isOnline, user, userNombre } = useApp();
   const [ventas, setVentas] = useState<Venta[]>([]);
   const [cierres, setCierres] = useState<CierreCaja[]>([]);
   const [ultimoCierre, setUltimoCierreState] = useState<string | null>(null);
@@ -89,19 +90,66 @@ export default function ResumenPage() {
   const [expandidoCierre, setExpandidoCierre] = useState<string | null>(null);
   const [showConfirmCierre, setShowConfirmCierre] = useState(false);
   const [cerrando, setCerrando] = useState(false);
+  // false apenas se confirma que tenemos la foto completa del negocio (se
+  // pudo consultar Supabase); true si por ahora solo podemos confiar en lo
+  // que hay en este dispositivo (sin red, o falló la consulta remota).
+  const [soloDispositivo, setSoloDispositivo] = useState(false);
+  const [confirmoSoloDispositivo, setConfirmoSoloDispositivo] = useState(false);
 
   const cargar = async () => {
-    const [v, c, uc] = await Promise.all([
+    const [vLocal, c, uc] = await Promise.all([
       getVentasSinCerrar(),
       getCierres(),
       getUltimoCierre(),
     ]);
-    setVentas(v);
+
+    // Reconciliación: ventas que este dispositivo cree pendientes pero que
+    // otro dispositivo ya cerró en Supabase mientras tanto. Sin esto se
+    // arrastrarían para siempre en el período local, duplicando totales en
+    // el próximo cierre hecho desde aquí.
+    let vigentes = vLocal;
+    if (isOnline) {
+      const sincronizadas = vLocal.filter(v => v.sincronizada).map(v => v.id);
+      const cierresRemotos = await reconciliarCierresLocal(sincronizadas);
+      if (cierresRemotos.size > 0) {
+        await Promise.all(
+          Array.from(cierresRemotos.entries()).map(([ventaId, cierreId]) =>
+            tagVentasConCierre([ventaId], cierreId)
+          )
+        );
+        vigentes = vLocal.filter(v => !cierresRemotos.has(v.id));
+      }
+    }
+
+    // Base offline-first: lo local siempre se muestra. Si hay conexión, se
+    // completa con las ventas de TODO el negocio (otros dispositivos) que
+    // este dispositivo nunca vio — sin esto, cerrar caja solo archiva lo
+    // propio y deja ventas de otros cajeros sueltas para siempre.
+    let ventasFinal = vigentes;
+    let completo = false;
+    if (isOnline && negocioId) {
+      const remotas = await getVentasPendientesRemoto(negocioId);
+      if (remotas !== null) {
+        completo = true;
+        const porId = new Map(vigentes.map(v => [v.id, v]));
+        for (const r of remotas) {
+          if (!porId.has(r.id)) porId.set(r.id, r);
+        }
+        ventasFinal = Array.from(porId.values());
+      }
+    }
+
+    setVentas(ventasFinal);
+    setSoloDispositivo(!completo);
     setCierres(c);
     setUltimoCierreState(uc);
   };
 
-  useEffect(() => { cargar(); }, []);
+  // Se re-consulta al recuperar conexión: si esta pantalla se abrió offline
+  // solo tenía lo local, y al reconectar debe completarse con el resto del
+  // negocio sin que el usuario tenga que salir y volver a entrar.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { cargar(); }, [isOnline]);
 
   const totalBS = ventas.reduce((s, v) => s + v.total_bs, 0);
   const totalUSD = tasa > 0 ? totalBS / tasa : 0;
@@ -131,6 +179,7 @@ export default function ResumenPage() {
   const ventasParaMostrar = [...ventasPorFecha].reverse();
 
   const confirmarCierre = async () => {
+    if (!isOnline && !confirmoSoloDispositivo) return;
     setCerrando(true);
     const now = new Date().toISOString();
 
@@ -155,6 +204,8 @@ export default function ResumenPage() {
       desglose_metodos: desglose,
       tasa_cierre: tasa,
       creado_en: now,
+      usuario_id: user?.id,
+      usuario_nombre: userNombre || undefined,
     };
 
     await saveCierre(cierre);
@@ -196,7 +247,7 @@ export default function ResumenPage() {
             <ThemeToggle />
             {ventas.length > 0 && (
               <button
-                onClick={() => setShowConfirmCierre(true)}
+                onClick={() => { setConfirmoSoloDispositivo(false); setShowConfirmCierre(true); }}
                 className="bg-white text-emerald-700 px-3 py-2 rounded-xl font-semibold text-sm flex items-center gap-1.5"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -208,6 +259,12 @@ export default function ResumenPage() {
           </div>
         </div>
       </header>
+
+      {soloDispositivo && (
+        <div className="mx-4 mt-3 p-2.5 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl text-gray-600 dark:text-gray-300 text-xs text-center">
+          Mostrando solo las ventas de este dispositivo — puede haber más ventas de otros usuarios
+        </div>
+      )}
 
       <div className="p-4 space-y-4">
         {/* Total del período */}
@@ -295,6 +352,10 @@ export default function ResumenPage() {
                         <span className="text-gray-500">Tasa usada</span>
                         <span className="text-gray-600">Bs {venta.tasa_usada.toLocaleString('es-VE')}</span>
                       </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">Vendida por</span>
+                        <span className="text-gray-600">{venta.usuario_nombre || '—'}</span>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -369,6 +430,10 @@ export default function ResumenPage() {
                           Bs {cierre.tasa_cierre.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
                       </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">Cerrado por</span>
+                        <span className="text-gray-600">{cierre.usuario_nombre || '—'}</span>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -415,8 +480,22 @@ export default function ResumenPage() {
               )}
 
               {!isOnline && (
-                <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-sm text-center">
-                  Sin conexión — el cierre se guarda en el dispositivo y se sincroniza al reconectar
+                <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-sm">
+                  <p className="font-semibold text-center mb-1">Sin conexión</p>
+                  <p className="text-center">
+                    Solo se cerrarán las ventas de este dispositivo. Si hay otros
+                    cajeros vendiendo en este momento, sus ventas quedarán fuera
+                    de este cierre. Si puedes, espera a tener conexión.
+                  </p>
+                  <label className="flex items-start gap-2 mt-3 text-left cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={confirmoSoloDispositivo}
+                      onChange={e => setConfirmoSoloDispositivo(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 flex-shrink-0"
+                    />
+                    <span>Entiendo que solo se cerrarán las ventas de este dispositivo</span>
+                  </label>
                 </div>
               )}
 
@@ -432,7 +511,7 @@ export default function ResumenPage() {
                 </button>
                 <button
                   onClick={confirmarCierre}
-                  disabled={cerrando}
+                  disabled={cerrando || (!isOnline && !confirmoSoloDispositivo)}
                   className="flex-1 py-3 rounded-xl bg-emerald-600 text-white font-bold disabled:opacity-40"
                 >
                   {cerrando ? 'Cerrando...' : 'Confirmar cierre'}
