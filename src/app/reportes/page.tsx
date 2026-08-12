@@ -120,10 +120,11 @@ export default function ReportesPage() {
   const mostrarGanancia = rol === 'admin' && usaCostos;
   const hayGanancia = mostrarGanancia && totales?.items_con_costo != null && totales.items_con_costo > 0;
   const gananciaBs = hayGanancia ? totales!.ganancia_usd! * tasa : 0;
-  const margenPeriodoPct =
-    hayGanancia && totales!.monto_con_costo_usd! > 0
-      ? (totales!.ganancia_usd! / totales!.monto_con_costo_usd!) * 100
-      : null;
+  // Margen SOBRE EL COSTO (markup), igual definición que el formulario de
+  // producto: costo = monto_con_costo_usd - ganancia_usd (precio - ganancia
+  // = costo), y el % es ganancia / costo, no ganancia / venta.
+  const costoTotalUsd = hayGanancia ? totales!.monto_con_costo_usd! - totales!.ganancia_usd! : 0;
+  const margenPeriodoPct = hayGanancia && costoTotalUsd > 0 ? (totales!.ganancia_usd! / costoTotalUsd) * 100 : null;
   const coberturaParcial =
     hayGanancia && totales!.items_totales != null && totales!.items_con_costo! < totales!.items_totales;
 

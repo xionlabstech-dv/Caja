@@ -48,7 +48,16 @@ const PRODUCTO_VACIO = {
   activo: true,
   por_peso: false,
   costo: '',
+  margen: '',
 };
+
+const MARGENES_RAPIDOS = [10, 20, 30, 50];
+
+// Acepta coma o punto como separador decimal (el margen se escribe a mano,
+// a diferencia de costo/precio que usan <input type="number">).
+function parseNum(s: string): number {
+  return parseFloat(s.trim().replace(',', '.'));
+}
 
 export default function InventarioPage() {
   useGuardarRuta();
@@ -59,6 +68,11 @@ export default function InventarioPage() {
   const [showModal, setShowModal] = useState(false);
   const [editando, setEditando] = useState<Producto | null>(null);
   const [form, setForm] = useState(PRODUCTO_VACIO);
+  // Cuál de margen/precio editó el usuario por última vez — el otro es el
+  // que se recalcula cuando cambia el costo. Mientras el usuario escribe en
+  // un campo, ESE campo nunca se sobreescribe a sí mismo; solo se recalcula
+  // el que no está tocando en el momento (evita bucles de recálculo).
+  const [campoActivo, setCampoActivo] = useState<'margen' | 'precio'>('precio');
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<Producto | null>(null);
@@ -87,12 +101,20 @@ export default function InventarioPage() {
   const abrirNuevo = () => {
     setEditando(null);
     setForm(PRODUCTO_VACIO);
+    setCampoActivo('precio');
     setError('');
     setShowModal(true);
   };
 
   const abrirEditar = (p: Producto) => {
     setEditando(p);
+    // Margen sobre costo (markup), derivado del costo y precio ya guardados
+    // — no se persiste en Supabase, se recalcula cada vez que se abre el
+    // formulario.
+    const margenInicial =
+      p.costo != null && p.costo > 0
+        ? (((p.precio - p.costo) / p.costo) * 100).toFixed(1)
+        : '';
     setForm({
       nombre: p.nombre,
       codigo_barra: p.codigo_barra || '',
@@ -101,7 +123,12 @@ export default function InventarioPage() {
       activo: p.activo,
       por_peso: p.por_peso ?? false,
       costo: p.costo != null ? String(p.costo) : '',
+      margen: margenInicial,
     });
+    // precio es el valor ya confirmado del producto; si el admin edita el
+    // costo sin tocar nada más, se recalcula el margen y se preserva el
+    // precio existente (no al revés).
+    setCampoActivo('precio');
     setError('');
     setShowModal(true);
   };
@@ -109,6 +136,59 @@ export default function InventarioPage() {
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(''), 2500);
+  };
+
+  // Margen SOBRE EL COSTO (markup) — costo 10, margen 50% → precio 15. Es
+  // como razona un comerciante minorista, a diferencia del margen sobre
+  // venta que se usaba antes. Debe quedar consistente con Reportes.
+  const handleCostoChange = (v: string) => {
+    setForm(f => {
+      const nuevo = { ...f, costo: v };
+      const costoNum = v.trim() ? parseFloat(v) : NaN;
+      if (isNaN(costoNum) || costoNum < 0) return nuevo;
+      if (campoActivo === 'margen' && f.margen.trim()) {
+        const margenNum = parseNum(f.margen);
+        if (!isNaN(margenNum)) {
+          nuevo.precio = (costoNum * (1 + margenNum / 100)).toFixed(2);
+        }
+      } else if (campoActivo === 'precio' && f.precio.trim() && costoNum > 0) {
+        const precioNum = parseFloat(f.precio);
+        if (!isNaN(precioNum)) {
+          nuevo.margen = (((precioNum - costoNum) / costoNum) * 100).toFixed(1);
+        }
+      }
+      return nuevo;
+    });
+  };
+
+  const handleMargenChange = (v: string) => {
+    setCampoActivo('margen');
+    setForm(f => {
+      const nuevo = { ...f, margen: v };
+      const costoNum = f.costo.trim() ? parseFloat(f.costo) : NaN;
+      const margenNum = v.trim() ? parseNum(v) : NaN;
+      // Si el margen queda vacío o inválido, NO se toca el precio — se deja
+      // el último valor calculado, tal como pide el ajuste.
+      if (!isNaN(costoNum) && costoNum >= 0 && !isNaN(margenNum)) {
+        nuevo.precio = (costoNum * (1 + margenNum / 100)).toFixed(2);
+      }
+      return nuevo;
+    });
+  };
+
+  const aplicarMargenRapido = (pct: number) => handleMargenChange(String(pct));
+
+  const handlePrecioChange = (v: string) => {
+    setCampoActivo('precio');
+    setForm(f => {
+      const nuevo = { ...f, precio: v };
+      const costoNum = f.costo.trim() ? parseFloat(f.costo) : NaN;
+      const precioNum = v.trim() ? parseFloat(v) : NaN;
+      if (!isNaN(costoNum) && costoNum > 0 && !isNaN(precioNum)) {
+        nuevo.margen = (((precioNum - costoNum) / costoNum) * 100).toFixed(1);
+      }
+      return nuevo;
+    });
   };
 
   const guardar = async () => {
@@ -206,15 +286,14 @@ export default function InventarioPage() {
     showToast(isOnline ? 'Producto eliminado' : 'Eliminado localmente — se sincronizará cuando haya conexión');
   };
 
-  // Margen en vivo mientras se escribe — margen sobre venta (precio-costo)/
-  // precio, el estándar comercial, no margen sobre costo. Solo se calcula si
-  // hay un precio y un costo válidos; costo vacío no es un error, simplemente
-  // no hay nada que mostrar todavía.
+  // Ganancia en vivo mientras se escribe. El % de margen ya lo muestra su
+  // propio campo (editable) — acá solo se deriva la ganancia en dinero, con
+  // costo y precio tal como estén en el formulario en ese momento. Costo
+  // vacío no es un error, simplemente no hay nada que mostrar todavía.
   const mostrarCosto = usaCostos && rol === 'admin';
   const precioFormNum = parseFloat(form.precio);
   const costoFormNum = form.costo.trim() ? parseFloat(form.costo) : null;
   const margenValido = mostrarCosto && precioFormNum > 0 && costoFormNum !== null && !isNaN(costoFormNum);
-  const margenPct = margenValido ? ((precioFormNum - costoFormNum!) / precioFormNum) * 100 : null;
   const gananciaUnidad = margenValido ? precioFormNum - costoFormNum! : null;
   const costoMayorQuePrecio = margenValido && costoFormNum! > precioFormNum;
 
@@ -462,51 +541,100 @@ export default function InventarioPage() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  {form.por_peso ? 'Precio por kilo' : 'Precio'} ({form.moneda}) <span className="text-red-400">*</span>
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={form.precio}
-                  onChange={e => setForm(f => ({ ...f, precio: e.target.value }))}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none focus:border-emerald-400"
-                  placeholder="0.00"
-                />
-                {tasa > 0 && form.precio && parseFloat(form.precio) > 0 && (
-                  <p className="text-sm text-gray-400 mt-1">
-                    {form.moneda === 'USD'
-                      ? `Bs ${(parseFloat(form.precio) * tasa).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                      : `$ ${(parseFloat(form.precio) / tasa).toFixed(2)}`}
-                    {form.por_peso ? ' / kg' : ''}
-                  </p>
-                )}
-              </div>
+              {mostrarCosto ? (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      {form.por_peso ? 'Costo por kilo' : 'Costo'} ({form.moneda})
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={form.costo}
+                      onChange={e => handleCostoChange(e.target.value)}
+                      className="w-full border border-gray-200 rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none focus:border-emerald-400"
+                      placeholder="Opcional"
+                    />
+                  </div>
 
-              {mostrarCosto && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Margen sobre costo (%)
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={form.margen}
+                      onChange={e => handleMargenChange(e.target.value)}
+                      className="w-full border border-gray-200 rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none focus:border-emerald-400"
+                      placeholder="Ej: 33,5"
+                    />
+                    <div className="flex gap-2 mt-2">
+                      {MARGENES_RAPIDOS.map(pct => (
+                        <button
+                          key={pct}
+                          type="button"
+                          onClick={() => aplicarMargenRapido(pct)}
+                          className="flex-1 py-1.5 rounded-lg text-xs font-semibold bg-gray-100 text-gray-600"
+                        >
+                          {pct}%
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      {form.por_peso ? 'Precio por kilo' : 'Precio'} ({form.moneda}) <span className="text-red-400">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={form.precio}
+                      onChange={e => handlePrecioChange(e.target.value)}
+                      className="w-full border border-gray-200 rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none focus:border-emerald-400"
+                      placeholder="0.00"
+                    />
+                    {tasa > 0 && form.precio && parseFloat(form.precio) > 0 && (
+                      <p className="text-sm text-gray-400 mt-1">
+                        {form.moneda === 'USD'
+                          ? `Bs ${(parseFloat(form.precio) * tasa).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : `$ ${(parseFloat(form.precio) / tasa).toFixed(2)}`}
+                        {form.por_peso ? ' / kg' : ''}
+                      </p>
+                    )}
+                    {margenValido && (
+                      <p className="text-sm text-gray-500 mt-1">
+                        Ganancia: {form.moneda === 'USD' ? formatUSD(gananciaUnidad!) : formatBS(gananciaUnidad!)}
+                        {form.por_peso ? ' por kilo' : ' por unidad'}
+                      </p>
+                    )}
+                    {costoMayorQuePrecio && (
+                      <p className="text-sm text-red-500 font-medium mt-1">
+                        El costo es mayor que el precio de venta
+                      </p>
+                    )}
+                  </div>
+                </>
+              ) : (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    {form.por_peso ? 'Costo por kilo' : 'Costo'} ({form.moneda})
+                    {form.por_peso ? 'Precio por kilo' : 'Precio'} ({form.moneda}) <span className="text-red-400">*</span>
                   </label>
                   <input
                     type="number"
                     step="0.01"
-                    value={form.costo}
-                    onChange={e => setForm(f => ({ ...f, costo: e.target.value }))}
+                    value={form.precio}
+                    onChange={e => setForm(f => ({ ...f, precio: e.target.value }))}
                     className="w-full border border-gray-200 rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none focus:border-emerald-400"
-                    placeholder="Opcional"
+                    placeholder="0.00"
                   />
-                  {margenValido && (
-                    <p className="text-sm text-gray-500 mt-1">
-                      Margen: {margenPct!.toLocaleString('es-VE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%
-                      {' · '}Ganancia: {form.moneda === 'USD' ? formatUSD(gananciaUnidad!) : formatBS(gananciaUnidad!)}
-                      {form.por_peso ? ' por kilo' : ' por unidad'}
-                    </p>
-                  )}
-                  {costoMayorQuePrecio && (
-                    <p className="text-sm text-red-500 font-medium mt-1">
-                      El costo es mayor que el precio de venta
+                  {tasa > 0 && form.precio && parseFloat(form.precio) > 0 && (
+                    <p className="text-sm text-gray-400 mt-1">
+                      {form.moneda === 'USD'
+                        ? `Bs ${(parseFloat(form.precio) * tasa).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                        : `$ ${(parseFloat(form.precio) / tasa).toFixed(2)}`}
+                      {form.por_peso ? ' / kg' : ''}
                     </p>
                   )}
                 </div>
