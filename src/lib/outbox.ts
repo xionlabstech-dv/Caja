@@ -11,6 +11,7 @@ import {
   updateProductoSupabase,
   softDeleteProducto,
   updateTasa,
+  updateUsaCostos,
   sincronizarCierre,
   sincronizarVenta,
   actualizarCierreIdVentas,
@@ -26,6 +27,7 @@ import {
   PayloadCerrarCaja,
   PayloadRegistrarVenta,
   PayloadActualizarCierreVentas,
+  PayloadActualizarUsaCostos,
   Producto,
   CierreCaja,
 } from '@/types';
@@ -91,6 +93,12 @@ export async function encolarActualizarCierreVentas(ventaIds: string[], cierreId
   await encolar('actualizar_cierre_ventas', payload, `cierre-ventas-${cierreId}`);
 }
 
+export async function encolarActualizarUsaCostos(usaCostos: boolean, negocioId: string): Promise<void> {
+  const payload: PayloadActualizarUsaCostos = { usaCostos, negocioId };
+  // id fijo: varios toggles seguidos sin red dejan solo el último en cola.
+  await encolar('actualizar_usa_costos', payload, 'usa-costos-pendiente');
+}
+
 async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
   switch (op.tipo) {
     case 'crear_producto': {
@@ -130,6 +138,10 @@ async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
     case 'actualizar_cierre_ventas': {
       const { ventaIds, cierreId } = op.payload as PayloadActualizarCierreVentas;
       return await actualizarCierreIdVentas(ventaIds, cierreId);
+    }
+    case 'actualizar_usa_costos': {
+      const { usaCostos, negocioId } = op.payload as PayloadActualizarUsaCostos;
+      return await updateUsaCostos(usaCostos, negocioId);
     }
     default:
       return true;

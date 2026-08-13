@@ -200,6 +200,17 @@ export async function setCachedUsuarioNombre(nombre: string): Promise<void> {
   await db.put('meta', { key: 'usuario_nombre', value: nombre });
 }
 
+export async function getCachedUsaCostos(): Promise<boolean> {
+  const db = await getDB();
+  const item = await db.get('meta', 'usa_costos');
+  return item?.value === 'true';
+}
+
+export async function setCachedUsaCostos(usaCostos: boolean): Promise<void> {
+  const db = await getDB();
+  await db.put('meta', { key: 'usa_costos', value: String(usaCostos) });
+}
+
 export async function clearTenantData(): Promise<void> {
   const db = await getDB();
   const tx = db.transaction(

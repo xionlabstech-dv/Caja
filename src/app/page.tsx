@@ -3,9 +3,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Producto, ItemCarrito, MetodoPago, Venta, VentaItem } from '@/types';
-import { getProductos, getProductoPorCodigo, saveVenta } from '@/lib/db';
-import { encolarRegistrarVenta } from '@/lib/outbox';
-import { precioBS, precioUSD, formatBS, formatUSD } from '@/lib/precio';
+import { getProductos, getProductoPorCodigo, saveVenta, setCachedUsaCostos } from '@/lib/db';
+import { encolarRegistrarVenta, encolarActualizarUsaCostos } from '@/lib/outbox';
+import { precioBS, precioUSD, costoUSD, formatBS, formatUSD } from '@/lib/precio';
 import { useApp } from '@/components/Providers';
 import Scanner from '@/components/Scanner';
 import ThemeToggle from '@/components/ThemeToggle';
@@ -56,7 +56,7 @@ const METODOS_PAGO: { id: MetodoPago; label: string }[] = [
 ];
 
 export default function CajaPage() {
-  const { tasa, isOnline, negocioNombre, signOut, user, pendientesCount, negocioId, rol, userNombre, productosVersion } = useApp();
+  const { tasa, isOnline, negocioNombre, signOut, user, pendientesCount, negocioId, rol, userNombre, productosVersion, usaCostos, setUsaCostos } = useApp();
   const router = useRouter();
   const [productos, setProductos] = useState<Producto[]>([]);
   const [cargandoProductos, setCargandoProductos] = useState(true);
@@ -97,6 +97,18 @@ export default function CajaPage() {
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(''), 2500);
+  };
+
+  // Offline-first, igual que actualizar la tasa: se aplica local de inmediato
+  // (estado + cache) y se encola para Supabase — ahora si hay red, o al
+  // reconectar si no la hay.
+  const handleToggleUsaCostos = async () => {
+    if (!negocioId) return;
+    const nuevo = !usaCostos;
+    await setCachedUsaCostos(nuevo);
+    await encolarActualizarUsaCostos(nuevo, negocioId);
+    setUsaCostos(nuevo);
+    showToast(nuevo ? 'Control de costos activado' : 'Control de costos desactivado');
   };
 
   const abrirPerfil = () => {
@@ -238,6 +250,11 @@ export default function CajaPage() {
           // espera venta_items para poder recalcular cantidad × precio.
           precioUnitarioBs: precioBS(item.producto, tasa),
           precioUnitarioUsd: precioUSD(item.producto, tasa),
+          // Snapshot del costo (por kg si aplica) en USD al momento de la
+          // venta — null si el producto no tiene costo registrado. Se
+          // calcula igual en ambas ramas para que registrar una venta
+          // funcione igual con o sin control de costos activado.
+          costo_usd: costoUSD(item.producto, tasa),
         };
       }
       const precio_bs = precioBS(item.producto, tasa);
@@ -250,6 +267,7 @@ export default function CajaPage() {
         subtotal_bs: precio_bs * item.cantidad,
         precioUnitarioBs: precio_bs,
         precioUnitarioUsd: precioUSD(item.producto, tasa),
+        costo_usd: costoUSD(item.producto, tasa),
       };
     });
 
@@ -852,6 +870,33 @@ export default function CajaPage() {
 
             {rol === 'admin' && (
               <>
+                <div className="border-t border-gray-100 dark:border-slate-700 mx-4" />
+                <div className="p-4 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                      Llevar control de costos y ganancias
+                    </p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      Agrega costo a productos y ganancia a reportes
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={usaCostos}
+                    onClick={handleToggleUsaCostos}
+                    className={`relative inline-flex w-11 h-6 rounded-full transition-colors flex-shrink-0 ${
+                      usaCostos ? 'bg-emerald-600' : 'bg-gray-200 dark:bg-slate-600'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block w-5 h-5 m-0.5 bg-white rounded-full shadow-sm transition-transform ${
+                        usaCostos ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+
                 <div className="border-t border-gray-100 dark:border-slate-700 mx-4" />
                 <div className="p-4">
                   <button

@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { saveProductos, saveConfiguracion, getConfiguracion as getConfigDB } from './db';
+import { saveProductos, saveConfiguracion, getConfiguracion as getConfigDB, setCachedUsaCostos } from './db';
 import { Producto, Configuracion, CierreCaja, Venta, VentaItem } from '@/types';
 
 export async function syncFromSupabase(negocioId: string): Promise<Configuracion | null> {
@@ -54,6 +54,20 @@ export async function updateTasa(tasa: number, negocioId: string): Promise<boole
     if (error) throw error;
 
     await saveConfiguracion({ id: 1, tasa, tasa_actualizada_en: now });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function updateUsaCostos(usaCostos: boolean, negocioId: string): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from('negocios')
+      .update({ usa_costos: usaCostos })
+      .eq('id', negocioId);
+    if (error) throw error;
+    await setCachedUsaCostos(usaCostos);
     return true;
   } catch {
     return false;
@@ -171,6 +185,7 @@ export async function sincronizarVenta(venta: Venta, negocioId: string): Promise
         precio_usd: item.precioUnitarioUsd,
         es_por_peso: esPorPeso,
         gramos: item.gramos ?? null,
+        costo_usd: item.costo_usd ?? null,
       };
     });
 
@@ -218,9 +233,12 @@ export async function getVentasPendientesRemoto(negocioId: string): Promise<Vent
     if (!ventasData || ventasData.length === 0) return [];
 
     const ids = ventasData.map(v => v.id as string);
+    // Columnas explícitas SIN costo_usd: Resumen (admin o cajero) nunca
+    // muestra costo/ganancia por venta, así que no hay razón para que ese
+    // dato viaje hasta el cliente en esta consulta.
     const { data: itemsData } = await supabase
       .from('venta_items')
-      .select('*')
+      .select('id, venta_id, producto_id, nombre, cantidad, precio_bs, precio_usd, es_por_peso, gramos')
       .in('venta_id', ids);
 
     const itemsPorVenta = new Map<string, VentaItem[]>();

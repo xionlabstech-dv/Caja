@@ -6,6 +6,11 @@ export interface Producto {
   precio: number;
   activo: boolean;
   por_peso: boolean;
+  // Costo de adquisición, en la MISMA moneda que `precio` (por kilo si
+  // por_peso). null = sin costo registrado. Información sensible del dueño
+  // — nunca se muestra a un cajero, verificado por rol en cada pantalla que
+  // la toca (no solo ocultada visualmente).
+  costo?: number | null;
 }
 
 export interface Configuracion {
@@ -27,6 +32,11 @@ export interface VentaItem {
   // "unitario × cantidad", no el subtotal ya calculado que usa la UI local).
   precioUnitarioBs: number;
   precioUnitarioUsd: number;
+  // Snapshot del costo unitario (o por kg) en USD al momento de la venta —
+  // igual que nombre/usuario_nombre, congelado para siempre: si el costo del
+  // producto cambia después, las ganancias históricas no se recalculan.
+  // null si el producto no tenía costo registrado en ese momento.
+  costo_usd?: number | null;
 }
 
 export type MetodoPago = 'efectivo_bs' | 'pago_movil' | 'biopago' | 'tarjeta' | 'efectivo_usd';
@@ -89,7 +99,8 @@ export type TipoPendiente =
   | 'actualizar_tasa'
   | 'cerrar_caja'
   | 'registrar_venta'
-  | 'actualizar_cierre_ventas';
+  | 'actualizar_cierre_ventas'
+  | 'actualizar_usa_costos';
 
 export interface PayloadCrearProducto {
   producto: Producto;
@@ -125,6 +136,11 @@ export interface PayloadActualizarCierreVentas {
   cierreId: string;
 }
 
+export interface PayloadActualizarUsaCostos {
+  usaCostos: boolean;
+  negocioId: string;
+}
+
 export type PayloadPendiente =
   | PayloadCrearProducto
   | PayloadEditarProducto
@@ -132,7 +148,8 @@ export type PayloadPendiente =
   | PayloadActualizarTasa
   | PayloadCerrarCaja
   | PayloadRegistrarVenta
-  | PayloadActualizarCierreVentas;
+  | PayloadActualizarCierreVentas
+  | PayloadActualizarUsaCostos;
 
 export interface OperacionPendiente {
   id: string;
