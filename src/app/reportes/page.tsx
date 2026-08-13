@@ -54,7 +54,7 @@ function formatearNombre(nombre: string): string {
 export default function ReportesPage() {
   useGuardarRuta();
   const { negocioId, isOnline, rol, usaCostos, tasa } = useApp();
-  const [periodoTipo, setPeriodoTipo] = useState<TipoPeriodo>('mes');
+  const [periodoTipo, setPeriodoTipo] = useState<TipoPeriodo>('hoy');
   const [loading, setLoading] = useState(true);
   const [huboError, setHuboError] = useState(false);
   const [totales, setTotales] = useState<TotalesPeriodo | null>(null);
