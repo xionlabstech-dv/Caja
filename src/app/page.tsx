@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Producto, ItemCarrito, MetodoPago, Venta, VentaItem } from '@/types';
 import { getProductos, getProductoPorCodigo, saveVenta, setCachedUsaCostos } from '@/lib/db';
 import { encolarRegistrarVenta, encolarActualizarUsaCostos } from '@/lib/outbox';
+import { updateUsaCostos } from '@/lib/sync';
 import { precioBS, precioUSD, costoUSD, formatBS, formatUSD } from '@/lib/precio';
 import { useApp } from '@/components/Providers';
 import Scanner from '@/components/Scanner';
@@ -99,15 +100,35 @@ export default function CajaPage() {
     setTimeout(() => setToast(''), 2500);
   };
 
-  // Offline-first, igual que actualizar la tasa: se aplica local de inmediato
-  // (estado + cache) y se encola para Supabase — ahora si hay red, o al
-  // reconectar si no la hay.
+  // El switch responde al instante (estado + cache local), pero solo se da
+  // por guardado cuando hay confirmación real: con red, se espera el
+  // resultado verificado de la escritura; sin red, no hay forma de
+  // confirmar nada ahora mismo, así que se encola para reintentar al
+  // reconectar (offline-first, igual que la tasa).
   const handleToggleUsaCostos = async () => {
     if (!negocioId) return;
+    const anterior = usaCostos;
     const nuevo = !usaCostos;
     await setCachedUsaCostos(nuevo);
-    await encolarActualizarUsaCostos(nuevo, negocioId);
     setUsaCostos(nuevo);
+
+    if (!isOnline) {
+      await encolarActualizarUsaCostos(nuevo, negocioId);
+      showToast('Guardado localmente — se sincronizará cuando haya conexión');
+      return;
+    }
+
+    // updateUsaCostos ahora verifica que el UPDATE haya afectado una fila de
+    // verdad (ver comentario en sync.ts) — si no, no hubo guardado real
+    // (ej. RLS lo bloqueó en silencio) y no hay que dejar el switch
+    // mostrando un estado que nunca se persistió.
+    const ok = await updateUsaCostos(nuevo, negocioId);
+    if (!ok) {
+      await setCachedUsaCostos(anterior);
+      setUsaCostos(anterior);
+      showToast('No se pudo guardar el cambio. Intenta de nuevo.');
+      return;
+    }
     showToast(nuevo ? 'Control de costos activado' : 'Control de costos desactivado');
   };
 

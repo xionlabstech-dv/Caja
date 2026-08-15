@@ -43,15 +43,25 @@ export async function syncFromSupabase(negocioId: string): Promise<Configuracion
   }
 }
 
+// Un UPDATE bloqueado por RLS (o que simplemente no matchea ninguna fila) NO
+// lanza excepción: Postgres/PostgREST devuelven 200 con data vacía. Sin pedir
+// de vuelta las filas realmente afectadas (.select()) no hay forma de
+// distinguir eso de un éxito real — así fue como el switch de usa_costos se
+// guardaba "bien" sin haber tocado la base (faltaba la policy de UPDATE en
+// negocios). Todo UPDATE de este archivo pide sus filas de vuelta y trata
+// data vacía como fallo, nunca como éxito.
+
 export async function updateTasa(tasa: number, negocioId: string): Promise<boolean> {
   try {
     const now = new Date().toISOString();
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('configuracion')
       .update({ tasa, tasa_actualizada_en: now })
-      .eq('negocio_id', negocioId);
+      .eq('negocio_id', negocioId)
+      .select('negocio_id');
 
     if (error) throw error;
+    if (!data || data.length === 0) return false;
 
     await saveConfiguracion({ id: 1, tasa, tasa_actualizada_en: now });
     return true;
@@ -62,11 +72,13 @@ export async function updateTasa(tasa: number, negocioId: string): Promise<boole
 
 export async function updateUsaCostos(usaCostos: boolean, negocioId: string): Promise<boolean> {
   try {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('negocios')
       .update({ usa_costos: usaCostos })
-      .eq('id', negocioId);
+      .eq('id', negocioId)
+      .select('id');
     if (error) throw error;
+    if (!data || data.length === 0) return false;
     await setCachedUsaCostos(usaCostos);
     return true;
   } catch {
@@ -100,9 +112,9 @@ export async function updateProductoSupabase(
   producto: Partial<Producto>
 ): Promise<boolean | 'duplicate'> {
   try {
-    const { error } = await supabase.from('productos').update(producto).eq('id', id);
+    const { data, error } = await supabase.from('productos').update(producto).eq('id', id).select('id');
     if (error) throw error;
-    return true;
+    return !!data && data.length > 0;
   } catch (err) {
     if ((err as { code?: string }).code === '23505') return 'duplicate';
     return false;
@@ -111,12 +123,13 @@ export async function updateProductoSupabase(
 
 export async function softDeleteProducto(id: string): Promise<boolean> {
   try {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('productos')
       .update({ activo: false })
-      .eq('id', id);
+      .eq('id', id)
+      .select('id');
     if (error) throw error;
-    return true;
+    return !!data && data.length > 0;
   } catch {
     return false;
   }
@@ -205,12 +218,18 @@ export async function sincronizarVenta(venta: Venta, negocioId: string): Promise
 export async function actualizarCierreIdVentas(ventaIds: string[], cierreId: string): Promise<boolean> {
   if (ventaIds.length === 0) return true;
   try {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('ventas')
       .update({ cierre_id: cierreId })
-      .in('id', ventaIds);
+      .in('id', ventaIds)
+      .select('id');
     if (error) throw error;
-    return true;
+    // Update masivo: RLS puede bloquear algunas filas del lote y dejar pasar
+    // otras sin lanzar error — se compara cuántas se pidieron contra cuántas
+    // realmente se tocaron. Un reintento completo es seguro: re-aplicar
+    // cierre_id sobre una fila ya actualizada es un no-op idempotente.
+    const actualizadas = new Set((data ?? []).map(v => v.id as string));
+    return ventaIds.every(id => actualizadas.has(id));
   } catch {
     return false;
   }

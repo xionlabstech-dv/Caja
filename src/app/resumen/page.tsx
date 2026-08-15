@@ -8,9 +8,10 @@ import {
   getCierres,
   getUltimoCierre,
   setUltimoCierre,
+  getPendientes,
 } from '@/lib/db';
 import { getVentasPendientesRemoto, reconciliarCierresLocal } from '@/lib/sync';
-import { encolarCerrarCaja, encolarActualizarCierreVentas } from '@/lib/outbox';
+import { encolarCerrarCaja, encolarActualizarCierreVentas, procesarCola } from '@/lib/outbox';
 import { formatBS, formatUSD } from '@/lib/precio';
 import { Venta, MetodoPago, CierreCaja, DesgloseCierre } from '@/types';
 import { useApp } from '@/components/Providers';
@@ -95,6 +96,12 @@ export default function ResumenPage() {
   // que hay en este dispositivo (sin red, o falló la consulta remota).
   const [soloDispositivo, setSoloDispositivo] = useState(false);
   const [confirmoSoloDispositivo, setConfirmoSoloDispositivo] = useState(false);
+  const [toast, setToast] = useState('');
+
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(''), 5000);
+  };
 
   const cargar = async () => {
     const [vLocal, c, uc] = await Promise.all([
@@ -229,6 +236,26 @@ export default function ResumenPage() {
     setUltimoCierreState(now);
     setShowConfirmCierre(false);
     setCerrando(false);
+
+    // El cierre ya quedó guardado en este dispositivo — no se revierte
+    // automáticamente si la confirmación con Supabase falla: deshacer un
+    // cierre que el cajero ya dio por hecho sería más confuso que útil, y
+    // la cola sigue reintentando solo. Pero si hay red y aun así no se pudo
+    // confirmar (ej. RLS bloqueó el UPDATE de cierre_id en algunas ventas
+    // sin lanzar error — ver comentario en sync.ts), hay que avisar en vez
+    // de dejar que el usuario asuma en silencio que ya quedó respaldado.
+    if (isOnline) {
+      await procesarCola();
+      const pendientes = await getPendientes();
+      const sigueSinConfirmar = pendientes.some(
+        p => p.id === cierre.id || p.id === `cierre-ventas-${cierre.id}`
+      );
+      if (sigueSinConfirmar) {
+        showToast(
+          'El cierre se guardó en este dispositivo, pero no se pudo confirmar con el servidor todavía. Se reintentará automáticamente.'
+        );
+      }
+    }
   };
 
   return (
@@ -519,6 +546,13 @@ export default function ResumenPage() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-5 py-2.5 rounded-xl text-sm font-medium z-50 shadow-lg max-w-xs text-center">
+          {toast}
         </div>
       )}
     </div>
