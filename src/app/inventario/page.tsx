@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { Producto } from '@/types';
 import { getProductos, saveProducto, deleteProductoDB } from '@/lib/db';
 import { encolarCrearProducto, encolarEditarProducto, encolarEliminarProducto } from '@/lib/outbox';
+import { createProductoSupabase, updateProductoSupabase, softDeleteProducto } from '@/lib/sync';
 import { precioBS, precioUSD, formatBS, formatUSD } from '@/lib/precio';
 import { useApp } from '@/components/Providers';
 import { useGuardarRuta } from '@/lib/useGuardarRuta';
@@ -244,23 +245,63 @@ export default function InventarioPage() {
       datos.costo = costo;
     }
 
-    // Offline-first: se guarda en IndexedDB de inmediato (la UI responde al
-    // instante) y se encola para Supabase — ahora mismo si hay red, o al
-    // reconectar si no la hay.
+    // Optimista: se guarda en IndexedDB de inmediato (la UI responde al
+    // instante). Sin red, no hay forma de confirmar nada ahora — se encola
+    // para reintentar al reconectar. Con red, se espera la confirmación
+    // real de Supabase antes de cerrar el modal; si la escritura no afectó
+    // ninguna fila (ej. RLS la bloqueó en silencio), se revierte el
+    // catálogo local en vez de dejarlo mostrando un cambio que nunca se
+    // persistió.
     if (editando) {
+      const original = editando;
       const actualizado = { ...editando, ...datos };
       await saveProducto(actualizado);
-      await encolarEditarProducto(editando.id, datos);
+
+      if (!isOnline) {
+        await encolarEditarProducto(editando.id, datos);
+        await cargar();
+        setShowModal(false);
+        setGuardando(false);
+        showToast('Guardado localmente — se sincronizará cuando haya conexión');
+        return;
+      }
+
+      const resultado = await updateProductoSupabase(editando.id, datos);
+      setGuardando(false);
+      if (resultado === false) {
+        await saveProducto(original);
+        await cargar();
+        setError('No se pudo guardar el producto. Intenta de nuevo.');
+        return;
+      }
+      await cargar();
+      setShowModal(false);
+      showToast('Producto guardado');
     } else {
       const nuevo: Producto = { id: crypto.randomUUID(), ...datos };
       await saveProducto(nuevo);
-      await encolarCrearProducto(nuevo, negocioId!);
-    }
 
-    await cargar();
-    setShowModal(false);
-    setGuardando(false);
-    showToast(isOnline ? 'Producto guardado' : 'Guardado localmente — se sincronizará cuando haya conexión');
+      if (!isOnline) {
+        await encolarCrearProducto(nuevo, negocioId!);
+        await cargar();
+        setShowModal(false);
+        setGuardando(false);
+        showToast('Guardado localmente — se sincronizará cuando haya conexión');
+        return;
+      }
+
+      const resultado = await createProductoSupabase(nuevo, negocioId!);
+      setGuardando(false);
+      if (resultado === null) {
+        await deleteProductoDB(nuevo.id);
+        await cargar();
+        setError('No se pudo guardar el producto. Intenta de nuevo.');
+        return;
+      }
+      await cargar();
+      setShowModal(false);
+      showToast('Producto guardado');
+    }
   };
 
   const handleScanInventario = (codigo: string) => {
@@ -280,10 +321,26 @@ export default function InventarioPage() {
 
   const eliminar = async (p: Producto) => {
     await deleteProductoDB(p.id);
-    await encolarEliminarProducto(p.id);
-    await cargar();
     setConfirmDelete(null);
-    showToast(isOnline ? 'Producto eliminado' : 'Eliminado localmente — se sincronizará cuando haya conexión');
+
+    if (!isOnline) {
+      await encolarEliminarProducto(p.id);
+      await cargar();
+      showToast('Eliminado localmente — se sincronizará cuando haya conexión');
+      return;
+    }
+
+    const ok = await softDeleteProducto(p.id);
+    if (!ok) {
+      // No se borró de verdad (ej. RLS lo bloqueó en silencio) — restaurar
+      // en vez de dejarlo desaparecido de la lista sin haberse eliminado.
+      await saveProducto(p);
+      await cargar();
+      showToast('No se pudo eliminar el producto. Intenta de nuevo.');
+      return;
+    }
+    await cargar();
+    showToast('Producto eliminado');
   };
 
   // Ganancia en vivo mientras se escribe. El % de margen ya lo muestra su

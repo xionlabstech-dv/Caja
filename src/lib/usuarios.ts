@@ -66,11 +66,15 @@ export async function eliminarUsuario(usuarioId: string): Promise<ResultadoFunci
   return invocarFuncion('eliminar-usuario', { usuarioId }, 'No se pudo eliminar el usuario');
 }
 
+// Un UPDATE bloqueado por RLS no lanza excepción, solo devuelve data vacía —
+// pedir las filas de vuelta (.select()) es la única forma de distinguir eso
+// de un éxito real (ver el mismo comentario en sync.ts, donde vivió el bug
+// original con usa_costos).
 export async function cambiarRol(id: string, rol: Rol): Promise<boolean> {
   try {
-    const { error } = await supabase.from('perfiles').update({ rol }).eq('id', id);
+    const { data, error } = await supabase.from('perfiles').update({ rol }).eq('id', id).select('id');
     if (error) throw error;
-    return true;
+    return !!data && data.length > 0;
   } catch {
     return false;
   }
@@ -78,9 +82,9 @@ export async function cambiarRol(id: string, rol: Rol): Promise<boolean> {
 
 export async function cambiarActivo(id: string, activo: boolean): Promise<boolean> {
   try {
-    const { error } = await supabase.from('perfiles').update({ activo }).eq('id', id);
+    const { data, error } = await supabase.from('perfiles').update({ activo }).eq('id', id).select('id');
     if (error) throw error;
-    return true;
+    return !!data && data.length > 0;
   } catch {
     return false;
   }

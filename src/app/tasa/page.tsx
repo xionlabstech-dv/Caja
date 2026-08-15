@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { saveConfiguracion } from '@/lib/db';
+import { saveConfiguracion, deleteConfiguracion } from '@/lib/db';
 import { encolarActualizarTasa } from '@/lib/outbox';
+import { updateTasa } from '@/lib/sync';
 import { useApp } from '@/components/Providers';
 import { useGuardarRuta } from '@/lib/useGuardarRuta';
 import ThemeToggle from '@/components/ThemeToggle';
@@ -25,15 +26,41 @@ export default function TasaPage() {
     setGuardando(true);
     setError('');
 
-    // Offline-first: se aplica localmente de inmediato y se encola para
-    // sincronizar con Supabase apenas haya conexión (o ahora mismo si ya la hay).
+    const tasaAnterior = tasa;
+    const configAnterior = configuracion;
     const now = new Date().toISOString();
+
+    // Optimista: se aplica local de inmediato para que la UI responda al
+    // instante.
     await saveConfiguracion({ id: 1, tasa: nueva, tasa_actualizada_en: now });
-    await encolarActualizarTasa(nueva, negocioId!);
     setTasa(nueva);
-    setInput('');
+
+    if (!isOnline) {
+      // Sin red no hay forma de confirmar el guardado ahora — se encola
+      // para reintentar al reconectar. El estado local ya quedó aplicado.
+      await encolarActualizarTasa(nueva, negocioId!);
+      setInput('');
+      setGuardando(false);
+      setMensaje('Guardada localmente — se sincronizará cuando haya conexión');
+      setTimeout(() => setMensaje(''), 3000);
+      return;
+    }
+
+    // Con red: se confirma la escritura antes de dar el guardado por hecho.
+    // updateTasa ahora verifica que el UPDATE haya afectado una fila real
+    // (ver comentario en sync.ts) — si no, no hay que dejar la UI mostrando
+    // una tasa que nunca se persistió.
+    const ok = await updateTasa(nueva, negocioId!);
     setGuardando(false);
-    setMensaje(isOnline ? 'Tasa actualizada correctamente' : 'Guardada localmente — se sincronizará cuando haya conexión');
+    if (!ok) {
+      if (configAnterior) await saveConfiguracion(configAnterior);
+      else await deleteConfiguracion();
+      setTasa(tasaAnterior);
+      setError('No se pudo guardar la tasa. Intenta de nuevo.');
+      return;
+    }
+    setInput('');
+    setMensaje('Tasa actualizada correctamente');
     setTimeout(() => setMensaje(''), 3000);
   };
 

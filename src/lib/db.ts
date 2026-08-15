@@ -102,6 +102,13 @@ export async function getConfiguracion(): Promise<Configuracion | undefined> {
   return db.get('configuracion', 1);
 }
 
+// Para revertir un guardado optimista de la tasa cuando nunca había existido
+// configuración local previa (no hay a qué "volver", solo deshacer).
+export async function deleteConfiguracion(): Promise<void> {
+  const db = await getDB();
+  await db.delete('configuracion', 1);
+}
+
 export async function saveVenta(venta: Venta) {
   const db = await getDB();
   await db.put('ventas', venta);
