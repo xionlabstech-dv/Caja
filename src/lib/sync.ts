@@ -1,6 +1,14 @@
 import { supabase } from './supabase';
-import { saveProductos, saveConfiguracion, getConfiguracion as getConfigDB, setCachedUsaCostos } from './db';
-import { Producto, Configuracion, CierreCaja, Venta, VentaItem } from '@/types';
+import {
+  saveProductos,
+  saveConfiguracion,
+  getConfiguracion as getConfigDB,
+  setCachedUsaCostos,
+  setCachedUsaStock,
+  setCachedUltimaSincronizacion,
+  actualizarStockLocal,
+} from './db';
+import { Producto, Configuracion, CierreCaja, Venta, VentaItem, MovimientoStock } from '@/types';
 
 export async function syncFromSupabase(negocioId: string): Promise<Configuracion | null> {
   try {
@@ -24,6 +32,11 @@ export async function syncFromSupabase(negocioId: string): Promise<Configuracion
     if (allProducts.length > 0) {
       await saveProductos(allProducts);
     }
+
+    // Marca de "hasta acá se pudo confirmar con el servidor" — la regla de
+    // confiabilidad del stock (Parte 5, ver src/lib/stock.ts) depende de
+    // esto para decidir si un número de stock bajo todavía es creíble.
+    await setCachedUltimaSincronizacion(new Date().toISOString());
 
     const { data: configData } = await supabase
       .from('configuracion')
@@ -80,6 +93,22 @@ export async function updateUsaCostos(usaCostos: boolean, negocioId: string): Pr
     if (error) throw error;
     if (!data || data.length === 0) return false;
     await setCachedUsaCostos(usaCostos);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function updateUsaStock(usaStock: boolean, negocioId: string): Promise<boolean> {
+  try {
+    const { data, error } = await supabase
+      .from('negocios')
+      .update({ usa_stock: usaStock })
+      .eq('id', negocioId)
+      .select('id');
+    if (error) throw error;
+    if (!data || data.length === 0) return false;
+    await setCachedUsaStock(usaStock);
     return true;
   } catch {
     return false;
@@ -298,6 +327,75 @@ export async function getVentasPendientesRemoto(negocioId: string): Promise<Vent
       usuario_id: v.usuario_id ?? undefined,
       usuario_nombre: v.usuario_nombre ?? undefined,
     }));
+  } catch {
+    return null;
+  }
+}
+
+// Aplica un movimiento de stock vía la RPC atómica e idempotente — nunca un
+// UPDATE directo. Si el mismo id ya se aplicó (reintento de la cola
+// offline), la función devuelve el stock actual sin volver a descontar. El
+// resultado (número o excepción) siempre es definitivo, a diferencia de un
+// UPDATE de tabla: no hace falta verificar filas afectadas por separado.
+export async function aplicarMovimientoStockRemoto(m: MovimientoStock): Promise<number | null> {
+  try {
+    const { data, error } = await supabase.rpc('aplicar_movimiento_stock', {
+      p_id: m.id,
+      p_producto_id: m.producto_id,
+      p_tipo: m.tipo,
+      p_motivo: m.motivo,
+      p_cantidad: m.cantidad,
+      p_ocurrido_en: m.ocurrido_en,
+      p_venta_id: m.venta_id ?? null,
+      p_nota: m.nota ?? null,
+    });
+    if (error) throw error;
+    const nuevoStock = data as number;
+    // El stock local se corrige al valor autoritativo que devuelve la RPC
+    // (no simplemente al que se calculó de forma optimista al encolar) —
+    // cubre el caso de que otro dispositivo haya aplicado movimientos
+    // propios entre medio.
+    await actualizarStockLocal(m.producto_id, nuevoStock);
+    return nuevoStock;
+  } catch {
+    return null;
+  }
+}
+
+// Historial de movimientos de TODO el negocio (no solo los de este
+// dispositivo) — un admin necesita ver entradas/salidas/ventas registradas
+// desde cualquier aparato, igual que ya pasa con las ventas pendientes.
+export async function getMovimientosRemoto(negocioId: string, limite = 300): Promise<MovimientoStock[] | null> {
+  try {
+    const { data, error } = await supabase
+      .from('movimientos_stock')
+      .select(
+        'id, producto_id, tipo, motivo, cantidad, stock_resultante, venta_id, usuario_id, usuario_nombre, nota, ocurrido_en, productos(nombre)'
+      )
+      .eq('negocio_id', negocioId)
+      .order('ocurrido_en', { ascending: false })
+      .limit(limite);
+    if (error) throw error;
+
+    return (data ?? []).map(m => {
+      const productoEmbed = m.productos as unknown as { nombre: string } | { nombre: string }[] | null;
+      const nombre = Array.isArray(productoEmbed) ? productoEmbed[0]?.nombre : productoEmbed?.nombre;
+      return {
+        id: m.id,
+        producto_id: m.producto_id,
+        producto_nombre: nombre ?? '(producto eliminado)',
+        tipo: m.tipo,
+        motivo: m.motivo,
+        cantidad: m.cantidad,
+        stock_resultante: m.stock_resultante ?? undefined,
+        venta_id: m.venta_id ?? undefined,
+        usuario_id: m.usuario_id ?? undefined,
+        usuario_nombre: m.usuario_nombre ?? undefined,
+        nota: m.nota ?? undefined,
+        ocurrido_en: m.ocurrido_en,
+        sincronizado: true,
+      } as MovimientoStock;
+    });
   } catch {
     return null;
   }

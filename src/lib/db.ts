@@ -1,5 +1,5 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
-import { Producto, Configuracion, Venta, CierreCaja, OperacionPendiente, Rol } from '@/types';
+import { Producto, Configuracion, Venta, CierreCaja, OperacionPendiente, Rol, MovimientoStock } from '@/types';
 
 interface MetaItem {
   key: string;
@@ -34,6 +34,11 @@ interface CajaDBSchema extends DBSchema {
     value: OperacionPendiente;
     indexes: { 'by-timestamp': string };
   };
+  movimientos: {
+    key: string;
+    value: MovimientoStock;
+    indexes: { 'by-producto': string };
+  };
 }
 
 let dbPromise: Promise<IDBPDatabase<CajaDBSchema>> | null = null;
@@ -41,7 +46,7 @@ let dbPromise: Promise<IDBPDatabase<CajaDBSchema>> | null = null;
 function getDB() {
   if (typeof window === 'undefined') throw new Error('IDB solo disponible en el browser');
   if (!dbPromise) {
-    dbPromise = openDB<CajaDBSchema>('caja-db', 3, {
+    dbPromise = openDB<CajaDBSchema>('caja-db', 4, {
       upgrade(db, oldVersion) {
         if (oldVersion < 1) {
           const productosStore = db.createObjectStore('productos', { keyPath: 'id' });
@@ -57,6 +62,10 @@ function getDB() {
         if (oldVersion < 3) {
           const pendientesStore = db.createObjectStore('pendientes', { keyPath: 'id' });
           pendientesStore.createIndex('by-timestamp', 'timestamp');
+        }
+        if (oldVersion < 4) {
+          const movimientosStore = db.createObjectStore('movimientos', { keyPath: 'id' });
+          movimientosStore.createIndex('by-producto', 'producto_id');
         }
       },
     });
@@ -218,10 +227,68 @@ export async function setCachedUsaCostos(usaCostos: boolean): Promise<void> {
   await db.put('meta', { key: 'usa_costos', value: String(usaCostos) });
 }
 
+export async function getCachedUsaStock(): Promise<boolean> {
+  const db = await getDB();
+  const item = await db.get('meta', 'usa_stock');
+  return item?.value === 'true';
+}
+
+export async function setCachedUsaStock(usaStock: boolean): Promise<void> {
+  const db = await getDB();
+  await db.put('meta', { key: 'usa_stock', value: String(usaStock) });
+}
+
+// Marca temporal de la última vez que se refrescó el catálogo desde
+// Supabase con éxito — la regla de confiabilidad del stock (Parte 5) la usa
+// para decidir si un número de stock bajo todavía es creíble o hay que
+// mostrar "Consultar" en su lugar.
+export async function getCachedUltimaSincronizacion(): Promise<string | null> {
+  const db = await getDB();
+  const item = await db.get('meta', 'ultima_sincronizacion');
+  return item?.value ?? null;
+}
+
+export async function setCachedUltimaSincronizacion(ts: string): Promise<void> {
+  const db = await getDB();
+  await db.put('meta', { key: 'ultima_sincronizacion', value: ts });
+}
+
+// --- Movimientos de stock ---
+
+export async function saveMovimiento(m: MovimientoStock): Promise<void> {
+  const db = await getDB();
+  await db.put('movimientos', m);
+}
+
+export async function getMovimiento(id: string): Promise<MovimientoStock | undefined> {
+  const db = await getDB();
+  return db.get('movimientos', id);
+}
+
+export async function getMovimientos(): Promise<MovimientoStock[]> {
+  const db = await getDB();
+  const all = await db.getAll('movimientos');
+  return all.sort((a, b) => b.ocurrido_en.localeCompare(a.ocurrido_en));
+}
+
+export async function getMovimientosPorProducto(productoId: string): Promise<MovimientoStock[]> {
+  const db = await getDB();
+  const all = await db.getAllFromIndex('movimientos', 'by-producto', productoId);
+  return all.sort((a, b) => b.ocurrido_en.localeCompare(a.ocurrido_en));
+}
+
+// Aplica el resultado de un movimiento al stock local del producto de
+// inmediato (optimista) — sin esperar a que la cola offline sincronice.
+export async function actualizarStockLocal(productoId: string, nuevoStock: number): Promise<void> {
+  const db = await getDB();
+  const producto = await db.get('productos', productoId);
+  if (producto) await db.put('productos', { ...producto, stock: nuevoStock });
+}
+
 export async function clearTenantData(): Promise<void> {
   const db = await getDB();
   const tx = db.transaction(
-    ['productos', 'configuracion', 'ventas', 'cierres', 'meta', 'pendientes'],
+    ['productos', 'configuracion', 'ventas', 'cierres', 'meta', 'pendientes', 'movimientos'],
     'readwrite',
   );
   await Promise.all([
@@ -231,6 +298,7 @@ export async function clearTenantData(): Promise<void> {
     tx.objectStore('cierres').clear(),
     tx.objectStore('meta').clear(),
     tx.objectStore('pendientes').clear(),
+    tx.objectStore('movimientos').clear(),
     tx.done,
   ]);
 }

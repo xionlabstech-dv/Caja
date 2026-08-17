@@ -2,14 +2,28 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Producto, ItemCarrito, MetodoPago, Venta, VentaItem } from '@/types';
-import { getProductos, getProductoPorCodigo, saveVenta, setCachedUsaCostos } from '@/lib/db';
-import { encolarRegistrarVenta, encolarActualizarUsaCostos } from '@/lib/outbox';
-import { updateUsaCostos } from '@/lib/sync';
+import { Producto, ItemCarrito, MetodoPago, Venta, VentaItem, MovimientoStock } from '@/types';
+import {
+  getProductos,
+  getProductoPorCodigo,
+  saveVenta,
+  setCachedUsaCostos,
+  setCachedUsaStock,
+  saveMovimiento,
+  actualizarStockLocal,
+} from '@/lib/db';
+import {
+  encolarRegistrarVenta,
+  encolarActualizarUsaCostos,
+  encolarActualizarUsaStock,
+  encolarAplicarMovimientoStock,
+} from '@/lib/outbox';
+import { updateUsaCostos, updateUsaStock } from '@/lib/sync';
 import { precioBS, precioUSD, costoUSD, formatBS, formatUSD } from '@/lib/precio';
 import { useApp } from '@/components/Providers';
 import Scanner from '@/components/Scanner';
 import ThemeToggle from '@/components/ThemeToggle';
+import StockBadge from '@/components/StockBadge';
 import { supabase } from '@/lib/supabase';
 
 function avatarColor(nombre: string): string {
@@ -57,7 +71,10 @@ const METODOS_PAGO: { id: MetodoPago; label: string }[] = [
 ];
 
 export default function CajaPage() {
-  const { tasa, isOnline, negocioNombre, signOut, user, pendientesCount, negocioId, rol, userNombre, productosVersion, usaCostos, setUsaCostos } = useApp();
+  const {
+    tasa, isOnline, negocioNombre, signOut, user, pendientesCount, negocioId, rol, userNombre,
+    productosVersion, usaCostos, setUsaCostos, usaStock, setUsaStock, ultimaSincronizacion,
+  } = useApp();
   const router = useRouter();
   const [productos, setProductos] = useState<Producto[]>([]);
   const [cargandoProductos, setCargandoProductos] = useState(true);
@@ -78,6 +95,7 @@ export default function CajaPage() {
   const [passConfirmar, setPassConfirmar] = useState('');
   const [passError, setPassError] = useState('');
   const [passCargando, setPassCargando] = useState(false);
+  const [showConfirmStock, setShowConfirmStock] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   // productosVersion depende de Providers: se re-lee la lista cuando el sync
@@ -130,6 +148,45 @@ export default function CajaPage() {
       return;
     }
     showToast(nuevo ? 'Control de costos activado' : 'Control de costos desactivado');
+  };
+
+  // Activar pide confirmación explícita (el compromiso de registrar toda la
+  // mercancía que entra); desactivar no la necesita — no borra datos, solo
+  // deja de mostrarlos.
+  const handleToggleUsaStock = () => {
+    if (!usaStock) {
+      setShowConfirmStock(true);
+      return;
+    }
+    aplicarUsaStock(false);
+  };
+
+  const confirmarActivarStock = () => {
+    setShowConfirmStock(false);
+    aplicarUsaStock(true);
+  };
+
+  // Mismo patrón offline-first + verificación que usa_costos.
+  const aplicarUsaStock = async (nuevo: boolean) => {
+    if (!negocioId) return;
+    const anterior = usaStock;
+    await setCachedUsaStock(nuevo);
+    setUsaStock(nuevo);
+
+    if (!isOnline) {
+      await encolarActualizarUsaStock(nuevo, negocioId);
+      showToast('Guardado localmente — se sincronizará cuando haya conexión');
+      return;
+    }
+
+    const ok = await updateUsaStock(nuevo, negocioId);
+    if (!ok) {
+      await setCachedUsaStock(anterior);
+      setUsaStock(anterior);
+      showToast('No se pudo guardar el cambio. Intenta de nuevo.');
+      return;
+    }
+    showToast(nuevo ? 'Control de inventario activado' : 'Control de inventario desactivado');
   };
 
   const abrirPerfil = () => {
@@ -188,6 +245,14 @@ export default function CajaPage() {
     return precioBS(item.producto, tasa) * item.cantidad;
   }, [tasa]);
 
+  // Aviso discreto (un toast más, nada bloqueante) cuando el producto ya
+  // está en cero o negativo — informa sin interrumpir el cobro, que es la
+  // decisión de diseño explícita: nunca se bloquea una venta por falta de
+  // stock.
+  const sinExistencia = useCallback((producto: Producto) =>
+    usaStock && producto.controla_stock !== false && producto.stock != null && producto.stock <= 0,
+  [usaStock]);
+
   const agregarAlCarrito = useCallback((producto: Producto) => {
     if (producto.por_peso) {
       setProductoPeso(producto);
@@ -204,9 +269,9 @@ export default function CajaPage() {
       }
       return [...prev, { lineId: producto.id, producto, cantidad: 1 }];
     });
-    showToast(`${producto.nombre} agregado`);
+    showToast(sinExistencia(producto) ? 'Sin existencia registrada' : `${producto.nombre} agregado`);
     reproducirBeep();
-  }, []);
+  }, [sinExistencia]);
 
   const agregarPorPeso = () => {
     if (!productoPeso) return;
@@ -222,8 +287,8 @@ export default function CajaPage() {
       precioCalculadoBase,
     }]);
     setShowPeso(false);
+    showToast(sinExistencia(productoPeso) ? 'Sin existencia registrada' : `${productoPeso.nombre} ${g}g agregado`);
     setProductoPeso(null);
-    showToast(`${productoPeso.nombre} ${g}g agregado`);
     reproducirBeep();
   };
 
@@ -311,6 +376,38 @@ export default function CajaPage() {
     // o al reconectar si no la hay.
     await saveVenta(venta);
     if (negocioId) await encolarRegistrarVenta(venta.id, negocioId);
+
+    // Descuento de stock: un movimiento tipo 'venta' por cada item cuyo
+    // producto lleva control de existencias. Nunca bloquea el cobro — ya se
+    // guardó la venta arriba pase lo que pase acá. Se aplica local de
+    // inmediato (mismo criterio offline-first) y se sincroniza por su
+    // cuenta vía la RPC atómica e idempotente (aplicar_movimiento_stock).
+    if (usaStock && negocioId) {
+      for (const item of carrito) {
+        if (item.producto.controla_stock === false) continue;
+        const cantidadDescontar = item.esPorPeso ? (item.gramos ?? 0) / 1000 : item.cantidad;
+        if (cantidadDescontar <= 0) continue;
+
+        const stockDespues = (item.producto.stock ?? 0) - cantidadDescontar;
+        const movimiento: MovimientoStock = {
+          id: crypto.randomUUID(),
+          producto_id: item.producto.id,
+          producto_nombre: item.producto.nombre,
+          tipo: 'venta',
+          motivo: 'venta',
+          cantidad: -cantidadDescontar,
+          stock_resultante: stockDespues,
+          venta_id: venta.id,
+          usuario_id: user?.id,
+          usuario_nombre: userNombre || undefined,
+          ocurrido_en: now.toISOString(),
+          sincronizado: false,
+        };
+        await saveMovimiento(movimiento);
+        await actualizarStockLocal(item.producto.id, stockDespues);
+        await encolarAplicarMovimientoStock(movimiento.id, negocioId);
+      }
+    }
 
     setCarrito([]);
     setShowPago(false);
@@ -523,6 +620,18 @@ export default function CajaPage() {
                       {producto.precio.toLocaleString('es-VE')} {producto.moneda}
                       {producto.por_peso ? ' / kg' : ''} · tasa no configurada
                     </p>
+                  )}
+                  {usaStock && (
+                    <div className="mt-1">
+                      <StockBadge
+                        stock={producto.stock}
+                        stockMinimo={producto.stock_minimo}
+                        controlaStock={producto.controla_stock}
+                        esPorPeso={producto.por_peso}
+                        isOnline={isOnline}
+                        ultimaSincronizacion={ultimaSincronizacion}
+                      />
+                    </div>
                   )}
                 </div>
 
@@ -919,6 +1028,33 @@ export default function CajaPage() {
                 </div>
 
                 <div className="border-t border-gray-100 dark:border-slate-700 mx-4" />
+                <div className="p-4 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                      Control de inventario
+                    </p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      Descuenta existencias al vender y avisa stock bajo
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={usaStock}
+                    onClick={handleToggleUsaStock}
+                    className={`relative inline-flex w-11 h-6 rounded-full transition-colors flex-shrink-0 ${
+                      usaStock ? 'bg-emerald-600' : 'bg-gray-200 dark:bg-slate-600'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block w-5 h-5 m-0.5 bg-white rounded-full shadow-sm transition-transform ${
+                        usaStock ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="border-t border-gray-100 dark:border-slate-700 mx-4" />
                 <div className="p-4">
                   <button
                     onClick={() => { setShowPerfil(false); router.push('/usuarios'); }}
@@ -943,6 +1079,35 @@ export default function CajaPage() {
                 className="w-full py-3 rounded-xl font-semibold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20"
               >
                 Cerrar sesión
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmar activación de control de inventario */}
+      {showConfirmStock && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowConfirmStock(false)} />
+          <div className="relative bg-white dark:bg-slate-800 rounded-2xl w-full max-w-sm shadow-xl p-5">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Activar control de inventario</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
+              El control de inventario solo funciona si registras la mercancía que entra.
+              Si no lo haces, las existencias dejarán de ser confiables en pocas semanas.
+              ¿Activar?
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowConfirmStock(false)}
+                className="flex-1 py-3 rounded-xl bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 font-semibold"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmarActivarStock}
+                className="flex-1 py-3 rounded-xl bg-emerald-600 text-white font-bold"
+              >
+                Sí, activar
               </button>
             </div>
           </div>

@@ -11,6 +11,16 @@ export interface Producto {
   // — nunca se muestra a un cajero, verificado por rol en cada pantalla que
   // la toca (no solo ocultada visualmente).
   costo?: number | null;
+  // Existencia actual (unidades, o kilos si por_peso). null = nunca se
+  // inicializó — distinto de cero, no dispara alertas de stock bajo.
+  // Puede quedar negativo: se permite vender sin existencia, nunca se
+  // bloquea la venta.
+  stock?: number | null;
+  // Umbral de alerta: cuando stock <= stock_minimo se considera "bajo".
+  stock_minimo?: number | null;
+  // Permite excluir productos puntuales del control (granel, servicios).
+  // Solo aplica si el negocio tiene usa_stock activo. Default true.
+  controla_stock?: boolean;
 }
 
 export interface Configuracion {
@@ -92,6 +102,43 @@ export interface ItemCarrito {
   precioCalculadoBase?: number;
 }
 
+export type TipoMovimiento = 'entrada' | 'salida' | 'ajuste' | 'venta';
+
+export type MotivoMovimiento =
+  | 'compra'
+  | 'devolucion_cliente'
+  | 'consumo_propio'
+  | 'dano'
+  | 'vencido'
+  | 'perdida'
+  | 'devolucion_proveedor'
+  | 'conteo_fisico'
+  | 'correccion'
+  | 'venta';
+
+export interface MovimientoStock {
+  id: string;
+  producto_id: string;
+  // Snapshot solo local (movimientos_stock en Supabase no tiene esta
+  // columna, se resuelve ahí vía join con productos) — evita depender de
+  // que el producto siga existiendo/con el mismo nombre para mostrar el
+  // historial offline.
+  producto_nombre: string;
+  tipo: TipoMovimiento;
+  motivo: MotivoMovimiento;
+  // Positiva en entradas, negativa en salidas y ventas. En ajustes por
+  // conteo es la diferencia ya calculada (puede ser + o -).
+  cantidad: number;
+  stock_resultante?: number | null;
+  venta_id?: string;
+  usuario_id?: string;
+  usuario_nombre?: string;
+  nota?: string;
+  ocurrido_en: string;
+  // Marca si ya se respaldó en Supabase (mismo patrón que Venta.sincronizada).
+  sincronizado?: boolean;
+}
+
 export type TipoPendiente =
   | 'crear_producto'
   | 'editar_producto'
@@ -100,7 +147,9 @@ export type TipoPendiente =
   | 'cerrar_caja'
   | 'registrar_venta'
   | 'actualizar_cierre_ventas'
-  | 'actualizar_usa_costos';
+  | 'actualizar_usa_costos'
+  | 'actualizar_usa_stock'
+  | 'aplicar_movimiento_stock';
 
 export interface PayloadCrearProducto {
   producto: Producto;
@@ -141,6 +190,16 @@ export interface PayloadActualizarUsaCostos {
   negocioId: string;
 }
 
+export interface PayloadActualizarUsaStock {
+  usaStock: boolean;
+  negocioId: string;
+}
+
+export interface PayloadAplicarMovimientoStock {
+  movimientoId: string;
+  negocioId: string;
+}
+
 export type PayloadPendiente =
   | PayloadCrearProducto
   | PayloadEditarProducto
@@ -149,7 +208,9 @@ export type PayloadPendiente =
   | PayloadCerrarCaja
   | PayloadRegistrarVenta
   | PayloadActualizarCierreVentas
-  | PayloadActualizarUsaCostos;
+  | PayloadActualizarUsaCostos
+  | PayloadActualizarUsaStock
+  | PayloadAplicarMovimientoStock;
 
 export interface OperacionPendiente {
   id: string;

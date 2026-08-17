@@ -15,6 +15,9 @@ import {
   setCachedUsuarioNombre,
   getCachedUsaCostos,
   setCachedUsaCostos,
+  getCachedUsaStock,
+  setCachedUsaStock,
+  getCachedUltimaSincronizacion,
   clearTenantData,
   contarPendientes,
 } from '@/lib/db';
@@ -41,6 +44,14 @@ interface AppContextType {
   // depende de esto (Inventario, Reportes) sepa qué mostrar sin red.
   usaCostos: boolean;
   setUsaCostos: (v: boolean) => void;
+  // Preferencia del negocio: si lleva control de inventario (stock). Mismo
+  // patrón que usaCostos.
+  usaStock: boolean;
+  setUsaStock: (v: boolean) => void;
+  // Última vez que se refrescó el catálogo con éxito desde Supabase (ISO) —
+  // null si nunca se ha logrado sincronizar en este dispositivo. La usa la
+  // regla de confiabilidad del stock (Parte 5, ver src/lib/stock.ts).
+  ultimaSincronizacion: string | null;
   authLoading: boolean;
   signOut: () => Promise<void>;
   pendientesCount: number;
@@ -69,6 +80,9 @@ const AppContext = createContext<AppContextType>({
   userNombre: '',
   usaCostos: false,
   setUsaCostos: () => {},
+  usaStock: false,
+  setUsaStock: () => {},
+  ultimaSincronizacion: null,
   authLoading: true,
   signOut: async () => {},
   pendientesCount: 0,
@@ -87,6 +101,7 @@ interface PerfilResuelto {
   rol: Rol;
   userNombre: string;
   usaCostos: boolean;
+  usaStock: boolean;
 }
 
 async function fetchPerfil(uid: string): Promise<PerfilResuelto | 'desactivado' | null> {
@@ -102,7 +117,7 @@ async function fetchPerfil(uid: string): Promise<PerfilResuelto | 'desactivado' 
 
     const { data: negocio } = await supabase
       .from('negocios')
-      .select('nombre, usa_costos')
+      .select('nombre, usa_costos, usa_stock')
       .eq('id', perfil.negocio_id)
       .single();
 
@@ -114,6 +129,7 @@ async function fetchPerfil(uid: string): Promise<PerfilResuelto | 'desactivado' 
       rol: (perfil.rol as Rol) ?? 'cajero',
       userNombre: perfil.nombre ?? '',
       usaCostos: negocio.usa_costos ?? false,
+      usaStock: negocio.usa_stock ?? false,
     };
   } catch {
     return null;
@@ -136,16 +152,18 @@ async function resolverPerfil(uid: string): Promise<PerfilResuelto | 'desactivad
     await setCachedRol(perfil.rol);
     await setCachedUsuarioNombre(perfil.userNombre);
     await setCachedUsaCostos(perfil.usaCostos);
+    await setCachedUsaStock(perfil.usaStock);
     return perfil;
   }
 
   const cachedId = await getCachedNegocioId();
   if (!cachedId) return null;
-  const [cachedNombre, cachedRol, cachedUserNombre, cachedUsaCostos] = await Promise.all([
+  const [cachedNombre, cachedRol, cachedUserNombre, cachedUsaCostos, cachedUsaStock] = await Promise.all([
     getCachedNegocioNombre(),
     getCachedRol(),
     getCachedUsuarioNombre(),
     getCachedUsaCostos(),
+    getCachedUsaStock(),
   ]);
   return {
     negocioId: cachedId,
@@ -153,6 +171,7 @@ async function resolverPerfil(uid: string): Promise<PerfilResuelto | 'desactivad
     rol: cachedRol ?? 'cajero',
     userNombre: cachedUserNombre ?? '',
     usaCostos: cachedUsaCostos,
+    usaStock: cachedUsaStock,
   };
 }
 
@@ -167,6 +186,8 @@ export default function Providers({ children }: { children: ReactNode }) {
   const [rol, setRol] = useState<Rol | null>(null);
   const [userNombre, setUserNombre] = useState('');
   const [usaCostos, setUsaCostos] = useState(false);
+  const [usaStock, setUsaStock] = useState(false);
+  const [ultimaSincronizacion, setUltimaSincronizacion] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [pendientesCount, setPendientesCount] = useState(0);
   const [sincronizando, setSincronizando] = useState(false);
@@ -215,6 +236,7 @@ export default function Providers({ children }: { children: ReactNode }) {
     setRol(null);
     setUserNombre('');
     setUsaCostos(false);
+    setUsaStock(false);
     setTasaState(0);
     setConfiguracion(null);
     setPendientesCount(0);
@@ -238,6 +260,7 @@ export default function Providers({ children }: { children: ReactNode }) {
       setRol(null);
       setUserNombre('');
       setUsaCostos(false);
+      setUsaStock(false);
       setMotivoDeslogueo('Tu usuario fue desactivado. Contacta al administrador de tu negocio.');
     };
 
@@ -254,6 +277,7 @@ export default function Providers({ children }: { children: ReactNode }) {
         setRol(perfil.rol);
         setUserNombre(perfil.userNombre);
         setUsaCostos(perfil.usaCostos);
+        setUsaStock(perfil.usaStock);
       }
     };
 
@@ -274,6 +298,7 @@ export default function Providers({ children }: { children: ReactNode }) {
         setRol(null);
         setUserNombre('');
         setUsaCostos(false);
+        setUsaStock(false);
       }
       // Otros eventos con session null (ej. refresh fallido sin red) se
       // ignoran a propósito: mantenemos la sesión local intacta.
@@ -299,6 +324,11 @@ export default function Providers({ children }: { children: ReactNode }) {
       // (con o sin config): avisar a quien esté leyendo productos que hay
       // datos nuevos que releer.
       setProductosVersion(v => v + 1);
+      // syncFromSupabase actualiza esta marca en IndexedDB al refrescar el
+      // catálogo con éxito — se relee acá para que el estado de React (del
+      // que depende la regla "Consultar" de stock) quede al día.
+      const ultima = await getCachedUltimaSincronizacion();
+      if (ultima) setUltimaSincronizacion(ultima);
     };
 
     // Procesa la cola de pendientes y refresca desde Supabase para reconciliar.
@@ -342,6 +372,12 @@ export default function Providers({ children }: { children: ReactNode }) {
         setConfiguracion(localConfig);
       }
 
+      // Se lee de una vez al arrancar (incluso offline) para que la regla
+      // "Consultar" de stock sepa desde el primer render cuán vieja es la
+      // última sincronización real, sin esperar a un sync nuevo.
+      const ultima = await getCachedUltimaSincronizacion();
+      if (ultima) setUltimaSincronizacion(ultima);
+
       setPendientesCount(await contarPendientes());
 
       if (navigator.onLine) {
@@ -373,6 +409,8 @@ export default function Providers({ children }: { children: ReactNode }) {
       })
       .finally(async () => {
         setPendientesCount(await contarPendientes());
+        const ultima = await getCachedUltimaSincronizacion();
+        if (ultima) setUltimaSincronizacion(ultima);
         setSincronizando(false);
       });
   };
@@ -407,7 +445,8 @@ export default function Providers({ children }: { children: ReactNode }) {
   return (
     <AppContext.Provider value={{
       tasa, setTasa, isOnline, configuracion, theme, toggleTheme,
-      user, negocioId, negocioNombre, rol, userNombre, usaCostos, setUsaCostos, authLoading, signOut,
+      user, negocioId, negocioNombre, rol, userNombre, usaCostos, setUsaCostos,
+      usaStock, setUsaStock, ultimaSincronizacion, authLoading, signOut,
       pendientesCount, syncStatus, sincronizarAhora, productosVersion,
     }}>
       {children}

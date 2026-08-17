@@ -7,10 +7,11 @@ import { Rol } from '@/types';
 // cliente que lo define.
 export const LIMITE_USUARIOS_POR_NEGOCIO = 3;
 
-// Único lugar que decide qué pestañas/rutas puede ver cada rol. /usuarios no
-// es una pestaña de BottomNav (se llega desde el mini perfil), pero sí debe
-// estar acá para que la guía de rutas la bloquee a un cajero por URL directa.
-const RUTAS_ADMIN = ['/', '/resumen', '/reportes', '/tasa', '/inventario', '/usuarios'];
+// Único lugar que decide qué pestañas/rutas puede ver cada rol. /usuarios y
+// /movimientos no son pestañas de BottomNav (se llega desde el mini perfil
+// e Inventario respectivamente), pero sí deben estar acá para que la guía
+// de rutas las bloquee a un cajero por URL directa.
+const RUTAS_ADMIN = ['/', '/resumen', '/reportes', '/tasa', '/inventario', '/usuarios', '/movimientos'];
 const RUTAS_CAJERO = ['/', '/resumen'];
 
 export function rutasPermitidas(rol: Rol | null): string[] {
