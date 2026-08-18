@@ -20,6 +20,7 @@ import {
 } from '@/lib/outbox';
 import { updateUsaCostos, updateUsaStock } from '@/lib/sync';
 import { precioBS, precioUSD, costoUSD, formatBS, formatUSD } from '@/lib/precio';
+import { pareceCodigoBarra } from '@/lib/barcode';
 import { useApp } from '@/components/Providers';
 import Scanner from '@/components/Scanner';
 import ThemeToggle from '@/components/ThemeToggle';
@@ -328,7 +329,11 @@ export default function CajaPage() {
   const handleBuscadorKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== 'Enter') return;
     const codigo = busqueda.trim();
-    if (!codigo) return;
+    // Antes de tratar el texto como código, verificar que "parezca" uno —
+    // evita que buscar un producto por nombre y dar Enter dispare el flujo
+    // de código (que en Caja solo importa por consistencia con Inventario,
+    // donde sí abría "producto nuevo" con el nombre como código).
+    if (!codigo || !pareceCodigoBarra(codigo)) return;
     const producto = await getProductoPorCodigo(codigo);
     if (!producto) return;
     const now = Date.now();

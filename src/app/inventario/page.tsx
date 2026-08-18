@@ -8,6 +8,7 @@ import { encolarCrearProducto, encolarEditarProducto, encolarEliminarProducto } 
 import { createProductoSupabase, updateProductoSupabase, softDeleteProducto } from '@/lib/sync';
 import { precioBS, precioUSD, formatBS, formatUSD } from '@/lib/precio';
 import { stockBajo } from '@/lib/stock';
+import { pareceCodigoBarra } from '@/lib/barcode';
 import { useApp } from '@/components/Providers';
 import { useGuardarRuta } from '@/lib/useGuardarRuta';
 import Scanner from '@/components/Scanner';
@@ -505,7 +506,7 @@ export default function InventarioPage() {
             value={busqueda}
             onChange={e => setBusqueda(e.target.value)}
             onKeyDown={e => {
-              if (e.key === 'Enter' && busqueda.trim()) handleScanInventario(busqueda.trim());
+              if (e.key === 'Enter' && pareceCodigoBarra(busqueda)) handleScanInventario(busqueda.trim());
             }}
             placeholder="Buscar por nombre o código..."
             className="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-emerald-400"
