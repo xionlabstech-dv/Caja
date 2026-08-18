@@ -504,6 +504,9 @@ export default function InventarioPage() {
             type="text"
             value={busqueda}
             onChange={e => setBusqueda(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && busqueda.trim()) handleScanInventario(busqueda.trim());
+            }}
             placeholder="Buscar por nombre o código..."
             className="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-emerald-400"
           />
