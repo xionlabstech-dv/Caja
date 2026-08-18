@@ -1,15 +1,18 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Producto } from '@/types';
 import { getProductos, saveProducto, deleteProductoDB } from '@/lib/db';
 import { encolarCrearProducto, encolarEditarProducto, encolarEliminarProducto } from '@/lib/outbox';
 import { createProductoSupabase, updateProductoSupabase, softDeleteProducto } from '@/lib/sync';
 import { precioBS, precioUSD, formatBS, formatUSD } from '@/lib/precio';
+import { stockBajo } from '@/lib/stock';
 import { useApp } from '@/components/Providers';
 import { useGuardarRuta } from '@/lib/useGuardarRuta';
 import Scanner from '@/components/Scanner';
 import ThemeToggle from '@/components/ThemeToggle';
+import StockBadge from '@/components/StockBadge';
 
 function formatearNombre(nombre: string): string {
   return nombre
@@ -50,6 +53,9 @@ const PRODUCTO_VACIO = {
   por_peso: false,
   costo: '',
   margen: '',
+  stock: '',
+  stock_minimo: '',
+  controla_stock: true,
 };
 
 const MARGENES_RAPIDOS = [10, 20, 30, 50];
@@ -62,10 +68,12 @@ function parseNum(s: string): number {
 
 export default function InventarioPage() {
   useGuardarRuta();
-  const { tasa, isOnline, negocioId, productosVersion, rol, usaCostos } = useApp();
+  const router = useRouter();
+  const { tasa, isOnline, negocioId, productosVersion, rol, usaCostos, usaStock, ultimaSincronizacion } = useApp();
   const [productos, setProductos] = useState<Producto[]>([]);
   const [cargandoProductos, setCargandoProductos] = useState(true);
   const [busqueda, setBusqueda] = useState('');
+  const [soloStockBajo, setSoloStockBajo] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editando, setEditando] = useState<Producto | null>(null);
   const [form, setForm] = useState(PRODUCTO_VACIO);
@@ -91,13 +99,14 @@ export default function InventarioPage() {
   // carrera entre el sync inicial de Providers y el primer fetch local.
   useEffect(() => { cargar(); }, [productosVersion]);
 
-  const filtrados = busqueda
-    ? productos.filter(
-        p =>
-          p.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
+  const filtrados = productos
+    .filter(p =>
+      busqueda
+        ? p.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
           (p.codigo_barra && p.codigo_barra.includes(busqueda))
-      )
-    : productos;
+        : true
+    )
+    .filter(p => (soloStockBajo ? p.controla_stock !== false && stockBajo(p.stock, p.stock_minimo) : true));
 
   const abrirNuevo = () => {
     setEditando(null);
@@ -125,6 +134,9 @@ export default function InventarioPage() {
       por_peso: p.por_peso ?? false,
       costo: p.costo != null ? String(p.costo) : '',
       margen: margenInicial,
+      stock: p.stock != null ? String(p.stock) : '',
+      stock_minimo: p.stock_minimo != null ? String(p.stock_minimo) : '',
+      controla_stock: p.controla_stock ?? true,
     });
     // precio es el valor ya confirmado del producto; si el admin edita el
     // costo sin tocar nada más, se recalcula el margen y se preserva el
@@ -218,6 +230,19 @@ export default function InventarioPage() {
       if (isNaN(costo) || costo < 0) { setError('El costo no es válido'); return; }
     }
 
+    let stock: number | null = null;
+    let stockMinimo: number | null = null;
+    if (usaStock && rol === 'admin' && form.controla_stock) {
+      if (form.stock.trim()) {
+        stock = parseFloat(form.stock);
+        if (isNaN(stock)) { setError('La existencia no es válida'); return; }
+      }
+      if (form.stock_minimo.trim()) {
+        stockMinimo = parseFloat(form.stock_minimo);
+        if (isNaN(stockMinimo) || stockMinimo < 0) { setError('El umbral de alerta no es válido'); return; }
+      }
+    }
+
     setGuardando(true);
     setError('');
 
@@ -229,6 +254,9 @@ export default function InventarioPage() {
       activo: boolean;
       por_peso: boolean;
       costo?: number | null;
+      stock?: number | null;
+      stock_minimo?: number | null;
+      controla_stock?: boolean;
     } = {
       nombre: form.nombre.trim(),
       codigo_barra: codigoBarra,
@@ -243,6 +271,18 @@ export default function InventarioPage() {
     // ya estaba guardado de cuando el control de costos sí estaba activo.
     if (usaCostos && rol === 'admin') {
       datos.costo = costo;
+    }
+    // Mismo criterio para stock: controla_stock siempre se guarda si el
+    // bloque estaba visible (el admin lo apagó o dejó prendido a
+    // propósito), pero stock/stock_minimo solo se tocan si controla_stock
+    // estaba activo — si lo apagó, sus cantidades existentes se preservan
+    // por si se reactiva el control más adelante.
+    if (usaStock && rol === 'admin') {
+      datos.controla_stock = form.controla_stock;
+      if (form.controla_stock) {
+        datos.stock = stock;
+        datos.stock_minimo = stockMinimo;
+      }
     }
 
     // Optimista: se guarda en IndexedDB de inmediato (la UI responde al
@@ -363,6 +403,18 @@ export default function InventarioPage() {
         </div>
         <div className="flex items-center gap-2">
           <ThemeToggle />
+          {usaStock && rol === 'admin' && (
+            <button
+              onClick={() => router.push('/movimientos')}
+              className="bg-white/20 text-white p-2.5 rounded-xl flex items-center justify-center"
+              aria-label="Movimientos de stock"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M8 7h12m0 0l-4-4m4 4l-4 4M16 17H4m0 0l4 4m-4-4l4-4" />
+              </svg>
+            </button>
+          )}
           <button
             onClick={abrirNuevo}
             className="bg-white text-emerald-700 px-4 py-2 rounded-xl font-semibold text-sm flex items-center gap-1.5"
@@ -403,6 +455,19 @@ export default function InventarioPage() {
           </svg>
         </button>
       </div>
+
+      {usaStock && (
+        <div className="px-4 py-2 bg-white border-b border-gray-100">
+          <button
+            onClick={() => setSoloStockBajo(v => !v)}
+            className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${
+              soloStockBajo ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'
+            }`}
+          >
+            Stock bajo
+          </button>
+        </div>
+      )}
 
       <div className="p-4 space-y-2">
         {cargandoProductos ? (
@@ -457,6 +522,18 @@ export default function InventarioPage() {
                     <p className="text-sm text-gray-400 mt-1">
                       {p.precio} {p.moneda}{p.por_peso ? ' / kg' : ''}
                     </p>
+                  )}
+                  {usaStock && (
+                    <div className="mt-1">
+                      <StockBadge
+                        stock={p.stock}
+                        stockMinimo={p.stock_minimo}
+                        controlaStock={p.controla_stock}
+                        esPorPeso={p.por_peso}
+                        isOnline={isOnline}
+                        ultimaSincronizacion={ultimaSincronizacion}
+                      />
+                    </div>
                   )}
                 </div>
                 <div className="flex gap-2 flex-shrink-0">
@@ -693,6 +770,63 @@ export default function InventarioPage() {
                         : `$ ${(parseFloat(form.precio) / tasa).toFixed(2)}`}
                       {form.por_peso ? ' / kg' : ''}
                     </p>
+                  )}
+                </div>
+              )}
+
+              {usaStock && rol === 'admin' && (
+                <div className="space-y-4 pt-1 border-t border-gray-100">
+                  <div className="flex items-center justify-between py-1 pt-3">
+                    <div>
+                      <p className="text-sm font-medium text-gray-700">Llevar control de este producto</p>
+                      <p className="text-xs text-gray-400 mt-0.5">Apágalo para granel o servicios</p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={form.controla_stock}
+                      onClick={() => setForm(f => ({ ...f, controla_stock: !f.controla_stock }))}
+                      className={`relative inline-flex w-11 h-6 rounded-full transition-colors flex-shrink-0 ${
+                        form.controla_stock ? 'bg-emerald-600' : 'bg-gray-200'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block w-5 h-5 m-0.5 bg-white rounded-full shadow-sm transition-transform ${
+                          form.controla_stock ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {form.controla_stock && (
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Existencia actual {form.por_peso ? '(kilos)' : ''}
+                        </label>
+                        <input
+                          type="number"
+                          step="0.001"
+                          value={form.stock}
+                          onChange={e => setForm(f => ({ ...f, stock: e.target.value }))}
+                          className="w-full border border-gray-200 rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none focus:border-emerald-400"
+                          placeholder="Opcional"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Alerta cuando quede menos de {form.por_peso ? '(kilos)' : ''}
+                        </label>
+                        <input
+                          type="number"
+                          step="0.001"
+                          value={form.stock_minimo}
+                          onChange={e => setForm(f => ({ ...f, stock_minimo: e.target.value }))}
+                          className="w-full border border-gray-200 rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none focus:border-emerald-400"
+                          placeholder="Opcional"
+                        />
+                      </div>
+                    </>
                   )}
                 </div>
               )}

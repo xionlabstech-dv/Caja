@@ -8,11 +8,15 @@ import {
   fetchPorMetodo,
   fetchTopProductos,
   fetchPorDiaSemana,
+  fetchStockBajo,
+  fetchMermas,
   TotalesPeriodo,
   DesglosePorMetodo,
   TopProducto,
   VentasPorDiaSemana,
   OrdenTopProductos,
+  StockBajoProducto,
+  MermaPorMotivo,
 } from '@/lib/reportes';
 import { formatBS, formatUSD } from '@/lib/precio';
 import { useGuardarRuta } from '@/lib/useGuardarRuta';
@@ -43,6 +47,12 @@ function metodoInfo(metodoPago: string): MetodoInfo {
 const DIAS_SEMANA = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 const ORDEN_LUNES_A_DOMINGO = [1, 2, 3, 4, 5, 6, 0];
 
+const MERMA_MOTIVO_LABELS: Record<string, string> = {
+  dano: 'Daño',
+  vencido: 'Vencido',
+  consumo_propio: 'Consumo propio',
+};
+
 function formatearNombre(nombre: string): string {
   return nombre
     .toLowerCase()
@@ -53,7 +63,7 @@ function formatearNombre(nombre: string): string {
 
 export default function ReportesPage() {
   useGuardarRuta();
-  const { negocioId, isOnline, rol, usaCostos, tasa } = useApp();
+  const { negocioId, isOnline, rol, usaCostos, usaStock, tasa } = useApp();
   const [periodoTipo, setPeriodoTipo] = useState<TipoPeriodo>('hoy');
   const [loading, setLoading] = useState(true);
   const [huboError, setHuboError] = useState(false);
@@ -62,6 +72,8 @@ export default function ReportesPage() {
   const [porMetodo, setPorMetodo] = useState<DesglosePorMetodo[]>([]);
   const [topProductos, setTopProductos] = useState<TopProducto[]>([]);
   const [porDiaSemana, setPorDiaSemana] = useState<VentasPorDiaSemana[]>([]);
+  const [stockBajoList, setStockBajoList] = useState<StockBajoProducto[]>([]);
+  const [mermasList, setMermasList] = useState<MermaPorMotivo[]>([]);
   // Solo tiene sentido si podría haber ganancia que mostrar — ver también el
   // gate de renderizado más abajo (mostrarGanancia).
   const [ordenTop, setOrdenTop] = useState<OrdenTopProductos>('cantidad');
@@ -85,7 +97,11 @@ export default function ReportesPage() {
       fetchPorMetodo(negocioId, desde, hasta),
       fetchTopProductos(negocioId, desde, hasta, 10, ordenTop),
       fetchPorDiaSemana(negocioId, desde, hasta),
-    ]).then(([tot, totAnt, metodo, top, dias]) => {
+      // Solo se piden si el negocio usa_stock — evita una consulta al
+      // pedo para negocios que no llevan control de inventario.
+      usaStock ? fetchStockBajo(negocioId) : Promise.resolve(null),
+      usaStock ? fetchMermas(negocioId, desde, hasta) : Promise.resolve(null),
+    ]).then(([tot, totAnt, metodo, top, dias, stockBajoData, mermasData]) => {
       if (cancelado) return;
       if (tot === null) {
         setHuboError(true);
@@ -97,11 +113,13 @@ export default function ReportesPage() {
       setPorMetodo(metodo ?? []);
       setTopProductos(top ?? []);
       setPorDiaSemana(dias ?? []);
+      setStockBajoList(stockBajoData ?? []);
+      setMermasList(mermasData ?? []);
       setLoading(false);
     });
 
     return () => { cancelado = true; };
-  }, [periodoTipo, isOnline, negocioId, ordenTop]);
+  }, [periodoTipo, isOnline, negocioId, ordenTop, usaStock]);
 
   const ticketPromedioBs = totales && totales.cantidad_ventas > 0 ? totales.total_bs / totales.cantidad_ventas : 0;
   const ticketPromedioUsd = totales && totales.cantidad_ventas > 0 ? totales.total_usd / totales.cantidad_ventas : 0;
@@ -127,6 +145,11 @@ export default function ReportesPage() {
   const margenPeriodoPct = hayGanancia && costoTotalUsd > 0 ? (totales!.ganancia_usd! / costoTotalUsd) * 100 : null;
   const coberturaParcial =
     hayGanancia && totales!.items_totales != null && totales!.items_con_costo! < totales!.items_totales;
+
+  // Stock bajo y mermas no dependen de si hubo ventas en el período — un
+  // negocio puede no haber vendido nada hoy y aun así tener existencias
+  // bajas o una merma por daño. Se muestran fuera del estado "sin ventas".
+  const mostrarStock = rol === 'admin' && usaStock;
 
   return (
     <div>
@@ -182,16 +205,60 @@ export default function ReportesPage() {
             <p className="font-medium">No se pudieron cargar los reportes</p>
             <p className="text-sm mt-1">Intenta de nuevo en unos segundos</p>
           </div>
-        ) : !totales || totales.cantidad_ventas === 0 ? (
-          <div className="text-center text-gray-400 py-16">
-            <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-            </svg>
-            <p className="font-medium">Sin ventas registradas en este período</p>
-          </div>
         ) : (
           <>
+            {/* Stock bajo y mermas: no dependen de si hubo ventas en el
+                período, así que van antes de ese gate. */}
+            {mostrarStock && stockBajoList.length > 0 && (
+              <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-slate-700">
+                <h2 className="font-semibold text-gray-700 dark:text-gray-300 mb-3">Stock bajo o agotado</h2>
+                <div className="space-y-2">
+                  {stockBajoList.map(p => (
+                    <div key={p.producto_id} className="flex items-center justify-between text-sm gap-3">
+                      <span className="text-gray-700 dark:text-gray-200 truncate">{formatearNombre(p.nombre)}</span>
+                      <span className={`font-bold flex-shrink-0 ${p.stock <= 0 ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                        {p.stock.toLocaleString('es-VE', { maximumFractionDigits: p.es_por_peso ? 2 : 0 })}{p.es_por_peso ? ' kg' : ''}
+                        <span className="text-gray-400 font-normal text-xs"> / mín {p.stock_minimo.toLocaleString('es-VE', { maximumFractionDigits: p.es_por_peso ? 2 : 0 })}</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {mostrarStock && mermasList.length > 0 && (
+              <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-slate-700">
+                <h2 className="font-semibold text-gray-700 dark:text-gray-300 mb-3">Mermas del período</h2>
+                <div className="space-y-2">
+                  {mermasList.map(m => (
+                    <div key={m.motivo} className="flex items-center justify-between text-sm">
+                      <span className="text-gray-600 dark:text-gray-300">{MERMA_MOTIVO_LABELS[m.motivo] ?? m.motivo}</span>
+                      <div className="text-right">
+                        <span className="font-bold text-gray-800 dark:text-gray-100">
+                          {m.cantidad.toLocaleString('es-VE', { maximumFractionDigits: 3 })}
+                        </span>
+                        {m.valor_usd != null && (
+                          <span className="text-xs text-red-500 dark:text-red-400 ml-1.5">
+                            −{formatBS(m.valor_usd * tasa)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {!totales || totales.cantidad_ventas === 0 ? (
+              <div className="text-center text-gray-400 py-16">
+                <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                    d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+                <p className="font-medium">Sin ventas registradas en este período</p>
+              </div>
+            ) : (
+              <>
             {/* Totales del período */}
             <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-slate-700 text-center">
               <p className="text-gray-500 dark:text-gray-400 text-sm mb-1">Total vendido</p>
@@ -353,6 +420,8 @@ export default function ReportesPage() {
                   })}
                 </div>
               </div>
+            )}
+              </>
             )}
           </>
         )}

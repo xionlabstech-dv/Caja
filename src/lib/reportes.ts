@@ -43,6 +43,22 @@ export interface VentasPorDiaSemana {
   promedio_bs: number;
 }
 
+export interface StockBajoProducto {
+  producto_id: string;
+  nombre: string;
+  es_por_peso: boolean;
+  stock: number;
+  stock_minimo: number;
+}
+
+export interface MermaPorMotivo {
+  motivo: string;
+  cantidad: number;
+  // null si no hay costo registrado para ninguna merma de ese motivo en el
+  // período, o si quien llama no es admin / no usa_costos.
+  valor_usd: number | null;
+}
+
 // Todas las funciones agregan del lado de Supabase (funciones RPC en SQL) —
 // nunca traen las filas crudas al cliente para sumarlas en JS. Devuelven
 // null ante cualquier fallo (típicamente sin conexión); la página decide
@@ -107,6 +123,30 @@ export async function fetchPorDiaSemana(negocioId: string, desde: Date, hasta: D
     });
     if (error) throw error;
     return (data ?? []) as VentasPorDiaSemana[];
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchStockBajo(negocioId: string): Promise<StockBajoProducto[] | null> {
+  try {
+    const { data, error } = await supabase.rpc('reportes_stock_bajo', { p_negocio_id: negocioId });
+    if (error) throw error;
+    return (data ?? []) as StockBajoProducto[];
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchMermas(negocioId: string, desde: Date, hasta: Date): Promise<MermaPorMotivo[] | null> {
+  try {
+    const { data, error } = await supabase.rpc('reportes_mermas', {
+      p_negocio_id: negocioId,
+      p_desde: desde.toISOString(),
+      p_hasta: hasta.toISOString(),
+    });
+    if (error) throw error;
+    return (data ?? []) as MermaPorMotivo[];
   } catch {
     return null;
   }

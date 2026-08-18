@@ -5,6 +5,8 @@ import {
   contarPendientes,
   getVenta,
   saveVenta,
+  getMovimiento,
+  saveMovimiento,
 } from './db';
 import {
   createProductoSupabase,
@@ -12,9 +14,11 @@ import {
   softDeleteProducto,
   updateTasa,
   updateUsaCostos,
+  updateUsaStock,
   sincronizarCierre,
   sincronizarVenta,
   actualizarCierreIdVentas,
+  aplicarMovimientoStockRemoto,
 } from './sync';
 import {
   OperacionPendiente,
@@ -28,6 +32,8 @@ import {
   PayloadRegistrarVenta,
   PayloadActualizarCierreVentas,
   PayloadActualizarUsaCostos,
+  PayloadActualizarUsaStock,
+  PayloadAplicarMovimientoStock,
   Producto,
   CierreCaja,
 } from '@/types';
@@ -99,6 +105,18 @@ export async function encolarActualizarUsaCostos(usaCostos: boolean, negocioId: 
   await encolar('actualizar_usa_costos', payload, 'usa-costos-pendiente');
 }
 
+export async function encolarActualizarUsaStock(usaStock: boolean, negocioId: string): Promise<void> {
+  const payload: PayloadActualizarUsaStock = { usaStock, negocioId };
+  await encolar('actualizar_usa_stock', payload, 'usa-stock-pendiente');
+}
+
+export async function encolarAplicarMovimientoStock(movimientoId: string, negocioId: string): Promise<void> {
+  const payload: PayloadAplicarMovimientoStock = { movimientoId, negocioId };
+  // id fijo = id del movimiento: la RPC ya es idempotente por su cuenta,
+  // pero esto además evita encolar el mismo movimiento dos veces.
+  await encolar('aplicar_movimiento_stock', payload, movimientoId);
+}
+
 async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
   switch (op.tipo) {
     case 'crear_producto': {
@@ -142,6 +160,21 @@ async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
     case 'actualizar_usa_costos': {
       const { usaCostos, negocioId } = op.payload as PayloadActualizarUsaCostos;
       return await updateUsaCostos(usaCostos, negocioId);
+    }
+    case 'actualizar_usa_stock': {
+      const { usaStock, negocioId } = op.payload as PayloadActualizarUsaStock;
+      return await updateUsaStock(usaStock, negocioId);
+    }
+    case 'aplicar_movimiento_stock': {
+      const { movimientoId } = op.payload as PayloadAplicarMovimientoStock;
+      // Se relee de IndexedDB en vez de guardar una copia congelada en el
+      // payload — mismo patrón que 'registrar_venta'.
+      const movimiento = await getMovimiento(movimientoId);
+      if (!movimiento) return true; // no hay nada que sincronizar
+      const nuevoStock = await aplicarMovimientoStockRemoto(movimiento);
+      if (nuevoStock === null) return false;
+      await saveMovimiento({ ...movimiento, sincronizado: true });
+      return true;
     }
     default:
       return true;
