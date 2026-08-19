@@ -8,6 +8,7 @@ import { encolarCrearProducto, encolarEditarProducto, encolarEliminarProducto } 
 import { createProductoSupabase, updateProductoSupabase, softDeleteProducto } from '@/lib/sync';
 import { precioBS, precioUSD, formatBS, formatUSD } from '@/lib/precio';
 import { stockBajo } from '@/lib/stock';
+import { pareceCodigoBarra } from '@/lib/barcode';
 import { useApp } from '@/components/Providers';
 import { useGuardarRuta } from '@/lib/useGuardarRuta';
 import Scanner from '@/components/Scanner';
@@ -53,6 +54,7 @@ const PRODUCTO_VACIO = {
   por_peso: false,
   costo: '',
   margen: '',
+  ganancia: '',
   stock: '',
   stock_minimo: '',
   controla_stock: true,
@@ -77,17 +79,23 @@ export default function InventarioPage() {
   const [showModal, setShowModal] = useState(false);
   const [editando, setEditando] = useState<Producto | null>(null);
   const [form, setForm] = useState(PRODUCTO_VACIO);
-  // Cuál de margen/precio editó el usuario por última vez — el otro es el
-  // que se recalcula cuando cambia el costo. Mientras el usuario escribe en
-  // un campo, ESE campo nunca se sobreescribe a sí mismo; solo se recalcula
-  // el que no está tocando en el momento (evita bucles de recálculo).
-  const [campoActivo, setCampoActivo] = useState<'margen' | 'precio'>('precio');
+  // Cuál de margen/precio/ganancia editó el usuario por última vez — los
+  // otros dos son los que se recalculan cuando cambia el costo. Mientras el
+  // usuario escribe en un campo, ESE campo nunca se sobreescribe a sí mismo;
+  // solo se recalculan los que no está tocando en el momento (evita bucles
+  // de recálculo).
+  const [campoActivo, setCampoActivo] = useState<'margen' | 'precio' | 'ganancia'>('precio');
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<Producto | null>(null);
   const [showScanner, setShowScanner] = useState(false);
   const [showScannerBuscar, setShowScannerBuscar] = useState(false);
   const [toast, setToast] = useState('');
+  // Calculadora auxiliar "costo desde caja/bulto" — nada de esto se
+  // persiste, solo el costo unitario resultante se escribe en form.costo.
+  const [showCalcCaja, setShowCalcCaja] = useState(false);
+  const [unidadesCaja, setUnidadesCaja] = useState('');
+  const [costoCaja, setCostoCaja] = useState('');
 
   const cargar = async () => {
     const prods = await getProductos();
@@ -112,19 +120,23 @@ export default function InventarioPage() {
     setEditando(null);
     setForm(PRODUCTO_VACIO);
     setCampoActivo('precio');
+    setShowCalcCaja(false);
+    setUnidadesCaja('');
+    setCostoCaja('');
     setError('');
     setShowModal(true);
   };
 
   const abrirEditar = (p: Producto) => {
     setEditando(p);
-    // Margen sobre costo (markup), derivado del costo y precio ya guardados
-    // — no se persiste en Supabase, se recalcula cada vez que se abre el
-    // formulario.
+    // Margen y ganancia sobre costo (markup), derivados del costo y precio
+    // ya guardados — no se persisten en Supabase, se recalculan cada vez
+    // que se abre el formulario.
     const margenInicial =
       p.costo != null && p.costo > 0
         ? (((p.precio - p.costo) / p.costo) * 100).toFixed(1)
         : '';
+    const gananciaInicial = p.costo != null ? (p.precio - p.costo).toFixed(2) : '';
     setForm({
       nombre: p.nombre,
       codigo_barra: p.codigo_barra || '',
@@ -134,14 +146,18 @@ export default function InventarioPage() {
       por_peso: p.por_peso ?? false,
       costo: p.costo != null ? String(p.costo) : '',
       margen: margenInicial,
+      ganancia: gananciaInicial,
       stock: p.stock != null ? String(p.stock) : '',
       stock_minimo: p.stock_minimo != null ? String(p.stock_minimo) : '',
       controla_stock: p.controla_stock ?? true,
     });
     // precio es el valor ya confirmado del producto; si el admin edita el
-    // costo sin tocar nada más, se recalcula el margen y se preserva el
-    // precio existente (no al revés).
+    // costo sin tocar nada más, se recalculan margen y ganancia, y se
+    // preserva el precio existente (no al revés).
     setCampoActivo('precio');
+    setShowCalcCaja(false);
+    setUnidadesCaja('');
+    setCostoCaja('');
     setError('');
     setShowModal(true);
   };
@@ -154,6 +170,12 @@ export default function InventarioPage() {
   // Margen SOBRE EL COSTO (markup) — costo 10, margen 50% → precio 15. Es
   // como razona un comerciante minorista, a diferencia del margen sobre
   // venta que se usaba antes. Debe quedar consistente con Reportes.
+  //
+  // Costo, margen%, ganancia y precio se calculan entre sí. campoActivo
+  // guarda cuál de los tres (margen/precio/ganancia) editó el usuario por
+  // última vez — es la pareja "costo + campoActivo" la que manda; los otros
+  // dos se derivan de esa pareja. Así, escribir en costo nunca pisa el
+  // campo que el usuario acaba de tocar.
   const handleCostoChange = (v: string) => {
     setForm(f => {
       const nuevo = { ...f, costo: v };
@@ -162,12 +184,22 @@ export default function InventarioPage() {
       if (campoActivo === 'margen' && f.margen.trim()) {
         const margenNum = parseNum(f.margen);
         if (!isNaN(margenNum)) {
-          nuevo.precio = (costoNum * (1 + margenNum / 100)).toFixed(2);
+          const precioNum = costoNum * (1 + margenNum / 100);
+          nuevo.precio = precioNum.toFixed(2);
+          nuevo.ganancia = (precioNum - costoNum).toFixed(2);
+        }
+      } else if (campoActivo === 'ganancia' && f.ganancia.trim()) {
+        const gananciaNum = parseNum(f.ganancia);
+        if (!isNaN(gananciaNum)) {
+          const precioNum = costoNum + gananciaNum;
+          nuevo.precio = precioNum.toFixed(2);
+          nuevo.margen = costoNum > 0 ? ((gananciaNum / costoNum) * 100).toFixed(1) : '';
         }
       } else if (campoActivo === 'precio' && f.precio.trim() && costoNum > 0) {
         const precioNum = parseFloat(f.precio);
         if (!isNaN(precioNum)) {
           nuevo.margen = (((precioNum - costoNum) / costoNum) * 100).toFixed(1);
+          nuevo.ganancia = (precioNum - costoNum).toFixed(2);
         }
       }
       return nuevo;
@@ -180,16 +212,35 @@ export default function InventarioPage() {
       const nuevo = { ...f, margen: v };
       const costoNum = f.costo.trim() ? parseFloat(f.costo) : NaN;
       const margenNum = v.trim() ? parseNum(v) : NaN;
-      // Si el margen queda vacío o inválido, NO se toca el precio — se deja
-      // el último valor calculado, tal como pide el ajuste.
+      // Si el margen queda vacío o inválido, NO se tocan precio/ganancia —
+      // se dejan los últimos valores calculados, tal como pide el ajuste.
       if (!isNaN(costoNum) && costoNum >= 0 && !isNaN(margenNum)) {
-        nuevo.precio = (costoNum * (1 + margenNum / 100)).toFixed(2);
+        const precioNum = costoNum * (1 + margenNum / 100);
+        nuevo.precio = precioNum.toFixed(2);
+        nuevo.ganancia = (precioNum - costoNum).toFixed(2);
       }
       return nuevo;
     });
   };
 
   const aplicarMargenRapido = (pct: number) => handleMargenChange(String(pct));
+
+  const handleGananciaChange = (v: string) => {
+    setCampoActivo('ganancia');
+    setForm(f => {
+      const nuevo = { ...f, ganancia: v };
+      const costoNum = f.costo.trim() ? parseFloat(f.costo) : NaN;
+      const gananciaNum = v.trim() ? parseNum(v) : NaN;
+      // Igual que con margen: si la ganancia queda vacía o inválida, no se
+      // tocan precio/margen.
+      if (!isNaN(costoNum) && costoNum >= 0 && !isNaN(gananciaNum)) {
+        const precioNum = costoNum + gananciaNum;
+        nuevo.precio = precioNum.toFixed(2);
+        nuevo.margen = costoNum > 0 ? ((gananciaNum / costoNum) * 100).toFixed(1) : '';
+      }
+      return nuevo;
+    });
+  };
 
   const handlePrecioChange = (v: string) => {
     setCampoActivo('precio');
@@ -199,6 +250,7 @@ export default function InventarioPage() {
       const precioNum = v.trim() ? parseFloat(v) : NaN;
       if (!isNaN(costoNum) && costoNum > 0 && !isNaN(precioNum)) {
         nuevo.margen = (((precioNum - costoNum) / costoNum) * 100).toFixed(1);
+        nuevo.ganancia = (precioNum - costoNum).toFixed(2);
       }
       return nuevo;
     });
@@ -383,16 +435,33 @@ export default function InventarioPage() {
     showToast('Producto eliminado');
   };
 
-  // Ganancia en vivo mientras se escribe. El % de margen ya lo muestra su
-  // propio campo (editable) — acá solo se deriva la ganancia en dinero, con
-  // costo y precio tal como estén en el formulario en ese momento. Costo
-  // vacío no es un error, simplemente no hay nada que mostrar todavía.
   const mostrarCosto = usaCostos && rol === 'admin';
   const precioFormNum = parseFloat(form.precio);
   const costoFormNum = form.costo.trim() ? parseFloat(form.costo) : null;
-  const margenValido = mostrarCosto && precioFormNum > 0 && costoFormNum !== null && !isNaN(costoFormNum);
-  const gananciaUnidad = margenValido ? precioFormNum - costoFormNum! : null;
-  const costoMayorQuePrecio = margenValido && costoFormNum! > precioFormNum;
+  const costoMayorQuePrecio =
+    mostrarCosto && precioFormNum > 0 && costoFormNum !== null && !isNaN(costoFormNum) && costoFormNum > precioFormNum;
+
+  // Calculadora "costo desde caja/bulto": costo unitario en vivo, redondeado
+  // a 2 decimales. Nunca se persiste — solo alimenta el campo Costo cuando
+  // el usuario confirma con "Usar este costo".
+  const unidadesCajaNum = unidadesCaja.trim() ? parseNum(unidadesCaja) : NaN;
+  const costoCajaNum = costoCaja.trim() ? parseNum(costoCaja) : NaN;
+  const costoUnitarioCaja =
+    !isNaN(unidadesCajaNum) && unidadesCajaNum > 0 && !isNaN(costoCajaNum) && costoCajaNum >= 0
+      ? (costoCajaNum / unidadesCajaNum).toFixed(2)
+      : null;
+
+  const cerrarCalcCaja = () => {
+    setShowCalcCaja(false);
+    setUnidadesCaja('');
+    setCostoCaja('');
+  };
+
+  const usarCostoDeCaja = () => {
+    if (costoUnitarioCaja === null) return;
+    handleCostoChange(costoUnitarioCaja);
+    cerrarCalcCaja();
+  };
 
   return (
     <div>
@@ -436,6 +505,9 @@ export default function InventarioPage() {
             type="text"
             value={busqueda}
             onChange={e => setBusqueda(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && pareceCodigoBarra(busqueda)) handleScanInventario(busqueda.trim());
+            }}
             placeholder="Buscar por nombre o código..."
             className="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-emerald-400"
           />
@@ -678,9 +750,18 @@ export default function InventarioPage() {
               {mostrarCosto ? (
                 <>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      {form.por_peso ? 'Costo por kilo' : 'Costo'} ({form.moneda})
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-sm font-medium text-gray-700">
+                        {form.por_peso ? 'Costo por kilo' : 'Costo'} ({form.moneda})
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => (showCalcCaja ? cerrarCalcCaja() : setShowCalcCaja(true))}
+                        className="text-xs font-semibold text-emerald-600"
+                      >
+                        {form.por_peso ? 'Calcular desde bulto' : 'Calcular desde caja'}
+                      </button>
+                    </div>
                     <input
                       type="number"
                       step="0.01"
@@ -689,6 +770,56 @@ export default function InventarioPage() {
                       className="w-full border border-gray-200 rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none focus:border-emerald-400"
                       placeholder="Opcional"
                     />
+                    {showCalcCaja && (
+                      <div className="mt-2 p-3 bg-gray-50 border border-gray-200 rounded-xl space-y-2">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">
+                            {form.por_peso ? 'Kilos por bulto' : 'Unidades por caja'}
+                          </label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={unidadesCaja}
+                            onChange={e => setUnidadesCaja(e.target.value)}
+                            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-400"
+                            placeholder={form.por_peso ? 'Ej: 20' : 'Ej: 24'}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">
+                            {form.por_peso ? 'Costo total del bulto' : 'Costo total de la caja'} ({form.moneda})
+                          </label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={costoCaja}
+                            onChange={e => setCostoCaja(e.target.value)}
+                            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-400"
+                            placeholder="Ej: 18,00"
+                          />
+                        </div>
+                        <p className="text-sm text-gray-600">
+                          {form.por_peso ? 'Costo por kilo' : 'Costo por unidad'}: {costoUnitarioCaja ?? '—'}
+                        </p>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={cerrarCalcCaja}
+                            className="flex-1 py-2 rounded-lg text-xs font-semibold bg-gray-200 text-gray-600"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            type="button"
+                            disabled={costoUnitarioCaja === null}
+                            onClick={usarCostoDeCaja}
+                            className="flex-1 py-2 rounded-lg text-xs font-semibold bg-emerald-600 text-white disabled:opacity-40"
+                          >
+                            Usar este costo
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div>
@@ -719,6 +850,20 @@ export default function InventarioPage() {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Ganancia {form.por_peso ? 'por kilo' : ''} ({form.moneda})
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={form.ganancia}
+                      onChange={e => handleGananciaChange(e.target.value)}
+                      className="w-full border border-gray-200 rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none focus:border-emerald-400"
+                      placeholder="Ej: 1,50"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
                       {form.por_peso ? 'Precio por kilo' : 'Precio'} ({form.moneda}) <span className="text-red-400">*</span>
                     </label>
                     <input
@@ -735,12 +880,6 @@ export default function InventarioPage() {
                           ? `Bs ${(parseFloat(form.precio) * tasa).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                           : `$ ${(parseFloat(form.precio) / tasa).toFixed(2)}`}
                         {form.por_peso ? ' / kg' : ''}
-                      </p>
-                    )}
-                    {margenValido && (
-                      <p className="text-sm text-gray-500 mt-1">
-                        Ganancia: {form.moneda === 'USD' ? formatUSD(gananciaUnidad!) : formatBS(gananciaUnidad!)}
-                        {form.por_peso ? ' por kilo' : ' por unidad'}
                       </p>
                     )}
                     {costoMayorQuePrecio && (

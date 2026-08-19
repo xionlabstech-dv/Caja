@@ -20,6 +20,7 @@ import {
 } from '@/lib/outbox';
 import { updateUsaCostos, updateUsaStock } from '@/lib/sync';
 import { precioBS, precioUSD, costoUSD, formatBS, formatUSD } from '@/lib/precio';
+import { pareceCodigoBarra } from '@/lib/barcode';
 import { useApp } from '@/components/Providers';
 import Scanner from '@/components/Scanner';
 import ThemeToggle from '@/components/ThemeToggle';
@@ -318,6 +319,32 @@ export default function CajaPage() {
     return null;
   }, [agregarAlCarrito]);
 
+  // Lector físico de código de barras: se comporta como un teclado que
+  // escribe el código en el buscador y envía Enter. Mismo cooldown (1200ms
+  // por código) que usa el escáner de cámara en modo continuo, para el caso
+  // de que el lector dispare dos veces. Si el texto no matchea un código
+  // exacto, no se toca nada — cae al filtro normal por nombre.
+  const buscadorCooldownRef = useRef<{ codigo: string; timestamp: number } | null>(null);
+
+  const handleBuscadorKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter') return;
+    const codigo = busqueda.trim();
+    // Antes de tratar el texto como código, verificar que "parezca" uno —
+    // evita que buscar un producto por nombre y dar Enter dispare el flujo
+    // de código (que en Caja solo importa por consistencia con Inventario,
+    // donde sí abría "producto nuevo" con el nombre como código).
+    if (!codigo || !pareceCodigoBarra(codigo)) return;
+    const producto = await getProductoPorCodigo(codigo);
+    if (!producto) return;
+    const now = Date.now();
+    const cd = buscadorCooldownRef.current;
+    if (cd && cd.codigo === codigo && now - cd.timestamp < 1200) return;
+    buscadorCooldownRef.current = { codigo, timestamp: now };
+    agregarAlCarrito(producto);
+    setBusqueda('');
+    searchRef.current?.focus();
+  };
+
   const confirmarVenta = async () => {
     if (!metodo) return;
     const now = new Date();
@@ -512,6 +539,7 @@ export default function CajaPage() {
             type="text"
             value={busqueda}
             onChange={e => setBusqueda(e.target.value)}
+            onKeyDown={handleBuscadorKeyDown}
             placeholder="Buscar producto..."
             className="w-full pl-9 pr-8 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-emerald-400"
           />
