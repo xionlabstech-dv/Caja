@@ -367,7 +367,11 @@ export default function CajaPage() {
   const sumaPagosMixtosUsd = pagosMixtos.reduce((s, p) => s + p.monto_usd, 0);
   const residuoMixtoBs = totalBS - sumaPagosMixtosBs;
   const residuoMixtoUsd = totalUSD - sumaPagosMixtosUsd;
-  const pagoMixtoCompleto = pagosMixtos.length > 0 && residuoMixtoBs <= EPSILON_RESIDUO;
+  // Math.abs, no solo <=: un residuo negativo (pago de más) nunca debe
+  // leerse como "completo" — es respaldo de agregarPagoMixtoManual, que ya
+  // debería impedir que esto pase, pero si fallara no hay que confirmar una
+  // venta con pagos que no cuadran.
+  const pagoMixtoCompleto = pagosMixtos.length > 0 && Math.abs(residuoMixtoBs) <= EPSILON_RESIDUO;
 
   const iniciarPagoMixto = () => {
     setModoPagoMixto(true);
@@ -392,6 +396,14 @@ export default function CajaPage() {
     const enUsd = metodoMixtoActual === 'efectivo_usd';
     const monto_bs = enUsd ? (tasa > 0 ? monto * tasa : 0) : monto;
     const monto_usd = enUsd ? monto : (tasa > 0 ? monto / tasa : 0);
+    // Nunca dejar que un pago tecleado deje el residuo en negativo — eso
+    // rompería la regla central del ajuste (el último pago se calcula, no
+    // se teclea). Mismo margen que pagoMixtoCompleto para no rechazar por
+    // un centavo de redondeo.
+    if (monto_bs > residuoMixtoBs + EPSILON_RESIDUO) {
+      showToast(`El monto no puede superar lo que falta: ${formatBS(residuoMixtoBs)}`);
+      return;
+    }
     setPagosMixtos(prev => [...prev, { metodo: metodoMixtoActual, monto_bs, monto_usd }]);
     setMetodoMixtoActual(null);
     setMontoMixtoInput('');
