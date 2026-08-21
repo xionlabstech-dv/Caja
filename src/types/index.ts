@@ -51,14 +51,37 @@ export interface VentaItem {
 
 export type MetodoPago = 'efectivo_bs' | 'pago_movil' | 'biopago' | 'tarjeta' | 'efectivo_usd';
 
+// 'mixto' solo aparece en Venta.metodo_pago (cuando pagos.length > 1) — un
+// pago individual (PagoVenta.metodo) siempre es un MetodoPago real.
+export type MetodoPagoVenta = MetodoPago | 'mixto';
+
 export type Rol = 'admin' | 'cajero';
+
+// Un pago cubre parte (o todo) el total de una venta. Snapshot: monto_bs y
+// monto_usd quedan convertidos a la tasa ya congelada de la venta (Venta.
+// tasa_usada), igual que costo_usd en VentaItem — no se recalculan después.
+// Para una venta de un solo método, pagos trae un único elemento (orden 1,
+// montos = totales de la venta): un solo camino de código, sin ramas
+// especiales para "venta simple" vs. "venta mixta".
+export interface PagoVenta {
+  id: string;
+  orden: number;
+  metodo: MetodoPago;
+  monto_bs: number;
+  monto_usd: number;
+}
 
 export interface Venta {
   id: string;
   fecha: string;
   fecha_dia: string;
   items: VentaItem[];
-  metodo_pago: MetodoPago;
+  // Vale el método único cuando pagos trae un solo elemento, y 'mixto'
+  // cuando trae varios. Se conserva (no se deriva de pagos en cada lectura)
+  // porque Resumen y el histórico lo usan para mostrar la venta de un
+  // vistazo sin tener que inspeccionar el arreglo completo.
+  metodo_pago: MetodoPagoVenta;
+  pagos: PagoVenta[];
   total_bs: number;
   total_usd: number;
   tasa_usada: number;

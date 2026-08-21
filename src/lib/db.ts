@@ -1,5 +1,5 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
-import { Producto, Configuracion, Venta, CierreCaja, OperacionPendiente, Rol, MovimientoStock } from '@/types';
+import { Producto, Configuracion, Venta, CierreCaja, OperacionPendiente, Rol, MovimientoStock, MetodoPago } from '@/types';
 
 interface MetaItem {
   key: string;
@@ -46,8 +46,8 @@ let dbPromise: Promise<IDBPDatabase<CajaDBSchema>> | null = null;
 function getDB() {
   if (typeof window === 'undefined') throw new Error('IDB solo disponible en el browser');
   if (!dbPromise) {
-    dbPromise = openDB<CajaDBSchema>('caja-db', 4, {
-      upgrade(db, oldVersion) {
+    dbPromise = openDB<CajaDBSchema>('caja-db', 5, {
+      async upgrade(db, oldVersion, _newVersion, transaction) {
         if (oldVersion < 1) {
           const productosStore = db.createObjectStore('productos', { keyPath: 'id' });
           productosStore.createIndex('by-codigo', 'codigo_barra');
@@ -66,6 +66,33 @@ function getDB() {
         if (oldVersion < 4) {
           const movimientosStore = db.createObjectStore('movimientos', { keyPath: 'id' });
           movimientosStore.createIndex('by-producto', 'producto_id');
+        }
+        if (oldVersion < 5) {
+          // Pago mixto: Venta gana `pagos: PagoVenta[]`, campo que las
+          // ventas guardadas antes de esta versión no tienen. Se migran acá
+          // con el mismo backfill que ya se aplicó en Supabase: un único
+          // pago (orden 1) con el método y los totales que la venta ya
+          // tenía. Sin esto, una venta local sin sincronizar quedaría sin
+          // `pagos` y se perdería o llegaría incompleta al sincronizar.
+          const store = transaction.objectStore('ventas');
+          let cursor = await store.openCursor();
+          while (cursor) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const v = cursor.value as any;
+            if (!v.pagos) {
+              await cursor.update({
+                ...v,
+                pagos: [{
+                  id: crypto.randomUUID(),
+                  orden: 1,
+                  metodo: v.metodo_pago as MetodoPago,
+                  monto_bs: v.total_bs,
+                  monto_usd: v.total_usd,
+                }],
+              });
+            }
+            cursor = await cursor.continue();
+          }
         }
       },
     });

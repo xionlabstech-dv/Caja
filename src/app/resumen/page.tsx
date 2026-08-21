@@ -13,27 +13,33 @@ import {
 import { getVentasPendientesRemoto, reconciliarCierresLocal } from '@/lib/sync';
 import { encolarCerrarCaja, encolarActualizarCierreVentas, procesarCola } from '@/lib/outbox';
 import { formatBS, formatUSD } from '@/lib/precio';
-import { Venta, MetodoPago, CierreCaja, DesgloseCierre } from '@/types';
+import { Venta, MetodoPago, MetodoPagoVenta, CierreCaja, DesgloseCierre } from '@/types';
 import { useApp } from '@/components/Providers';
 import ThemeToggle from '@/components/ThemeToggle';
 
-const METODO_LABELS: Record<MetodoPago, string> = {
+// desglose_metodos (cierres) y porMetodo (abajo) se arman siempre a partir
+// de venta.pagos, así que sus llaves son MetodoPago real — 'mixto' nunca
+// aparece ahí. El badge por venta (venta.metodo_pago) sí puede ser 'mixto',
+// por eso estos tres mapas cubren MetodoPagoVenta completo.
+const METODO_LABELS: Record<MetodoPagoVenta, string> = {
   efectivo_bs: 'Efectivo Bs',
   pago_movil: 'Pago Móvil',
   biopago: 'Biopago',
   tarjeta: 'Tarjeta',
   efectivo_usd: 'Efectivo $',
+  mixto: 'Mixto',
 };
 
-const METODO_COLORS: Record<MetodoPago, string> = {
+const METODO_COLORS: Record<MetodoPagoVenta, string> = {
   efectivo_bs: 'bg-emerald-100 text-emerald-700',
   pago_movil: 'bg-blue-100 text-blue-700',
   biopago: 'bg-purple-100 text-purple-700',
   tarjeta: 'bg-slate-100 text-slate-700',
   efectivo_usd: 'bg-amber-100 text-amber-700',
+  mixto: 'bg-indigo-100 text-indigo-700',
 };
 
-const METODO_ICONS: Record<MetodoPago, JSX.Element> = {
+const METODO_ICONS: Record<MetodoPagoVenta, JSX.Element> = {
   efectivo_bs: (
     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
@@ -62,6 +68,12 @@ const METODO_ICONS: Record<MetodoPago, JSX.Element> = {
     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
         d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  ),
+  mixto: (
+    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
+        d="M8 7h12m0 0l-4-4m4 4l-4 4M16 17H4m0 0l4 4m-4-4l4-4" />
     </svg>
   ),
 };
@@ -161,9 +173,14 @@ export default function ResumenPage() {
   const totalBS = ventas.reduce((s, v) => s + v.total_bs, 0);
   const totalUSD = tasa > 0 ? totalBS / tasa : 0;
 
+  // Por PAGOS, no por venta: una venta mixta reparte su monto entre los
+  // métodos reales que la componen, en vez de contar el total completo bajo
+  // un único método (o bajo 'mixto', que no es un método real de cobro).
   const porMetodo = ventas.reduce(
     (acc, v) => {
-      acc[v.metodo_pago] = (acc[v.metodo_pago] || 0) + v.total_bs;
+      for (const p of v.pagos) {
+        acc[p.metodo] = (acc[p.metodo] || 0) + p.monto_bs;
+      }
       return acc;
     },
     {} as Partial<Record<MetodoPago, number>>
@@ -190,12 +207,17 @@ export default function ResumenPage() {
     setCerrando(true);
     const now = new Date().toISOString();
 
+    // Igual que porMetodo: por pagos, no por venta. count termina siendo
+    // cantidad de PAGOS (una venta mixta suma 1 a cada método que usó), lo
+    // correcto para arquear cada método por separado — mismo criterio que
+    // ya tiene reportes_por_metodo en Supabase.
     const desglose = ventas.reduce((acc, v) => {
-      const m = v.metodo_pago;
-      if (!acc[m]) acc[m] = { bs: 0, usd: 0, count: 0 };
-      acc[m]!.bs += v.total_bs;
-      acc[m]!.usd += tasa > 0 ? v.total_bs / tasa : 0;
-      acc[m]!.count += 1;
+      for (const p of v.pagos) {
+        if (!acc[p.metodo]) acc[p.metodo] = { bs: 0, usd: 0, count: 0 };
+        acc[p.metodo]!.bs += p.monto_bs;
+        acc[p.metodo]!.usd += p.monto_usd;
+        acc[p.metodo]!.count += 1;
+      }
       return acc;
     }, {} as Partial<Record<MetodoPago, DesgloseCierre>>);
 
@@ -375,6 +397,16 @@ export default function ResumenPage() {
                           <span className="font-medium">{formatBS(item.subtotal_bs)}</span>
                         </div>
                       ))}
+                      {venta.pagos.length > 1 && (
+                        <div className="border-t border-gray-100 pt-2 space-y-1">
+                          {venta.pagos.map(p => (
+                            <div key={p.id} className="flex justify-between text-sm">
+                              <span className="text-gray-500">{METODO_LABELS[p.metodo]}</span>
+                              <span className="text-gray-600">{formatBS(p.monto_bs)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       <div className="border-t border-gray-100 pt-2 flex justify-between text-sm">
                         <span className="text-gray-500">Tasa usada</span>
                         <span className="text-gray-600">Bs {venta.tasa_usada.toLocaleString('es-VE')}</span>
