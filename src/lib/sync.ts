@@ -8,7 +8,7 @@ import {
   setCachedUltimaSincronizacion,
   actualizarStockLocal,
 } from './db';
-import { Producto, Configuracion, CierreCaja, Venta, VentaItem, MovimientoStock } from '@/types';
+import { Producto, Configuracion, CierreCaja, Venta, VentaItem, PagoVenta, MovimientoStock } from '@/types';
 
 export async function syncFromSupabase(negocioId: string): Promise<Configuracion | null> {
   try {
@@ -238,6 +238,26 @@ export async function sincronizarVenta(venta: Venta, negocioId: string): Promise
       }
     }
 
+    // Mismo patrón idempotente que venta_items: los id de cada pago los
+    // genera el cliente, así que un reintento de la cola (misma venta, ya
+    // insertada) vuelve a mandar los mismos id y 23505 confirma que ya
+    // estaban — no es un error real, solo que este intento no era el primero.
+    const pagosPayload = venta.pagos.map(pago => ({
+      id: pago.id,
+      venta_id: venta.id,
+      orden: pago.orden,
+      metodo: pago.metodo,
+      monto_bs: pago.monto_bs,
+      monto_usd: pago.monto_usd,
+    }));
+
+    if (pagosPayload.length > 0) {
+      const { error: pagosError } = await supabase.from('venta_pagos').insert(pagosPayload);
+      if (pagosError && (pagosError as { code?: string }).code !== '23505') {
+        throw pagosError;
+      }
+    }
+
     return true;
   } catch {
     return false;
@@ -289,6 +309,24 @@ export async function getVentasPendientesRemoto(negocioId: string): Promise<Vent
       .select('id, venta_id, producto_id, nombre, cantidad, precio_bs, precio_usd, es_por_peso, gramos')
       .in('venta_id', ids);
 
+    const { data: pagosData } = await supabase
+      .from('venta_pagos')
+      .select('id, venta_id, orden, metodo, monto_bs, monto_usd')
+      .in('venta_id', ids);
+
+    const pagosPorVenta = new Map<string, PagoVenta[]>();
+    for (const p of pagosData ?? []) {
+      const lista = pagosPorVenta.get(p.venta_id) ?? [];
+      lista.push({
+        id: p.id,
+        orden: p.orden,
+        metodo: p.metodo,
+        monto_bs: p.monto_bs,
+        monto_usd: p.monto_usd,
+      });
+      pagosPorVenta.set(p.venta_id, lista);
+    }
+
     const itemsPorVenta = new Map<string, VentaItem[]>();
     for (const it of itemsData ?? []) {
       const lista = itemsPorVenta.get(it.venta_id) ?? [];
@@ -319,6 +357,17 @@ export async function getVentasPendientesRemoto(negocioId: string): Promise<Vent
       fecha_dia: (v.vendida_en as string).split('T')[0],
       items: itemsPorVenta.get(v.id) ?? [],
       metodo_pago: v.metodo_pago,
+      // Fallback por si una venta llegara sin filas en venta_pagos (no
+      // debería pasar post-backfill, pero evita que Resumen reviente el
+      // desglose por método si alguna vez ocurre): un pago único con el
+      // total, igual al backfill que se hizo en Supabase.
+      pagos: pagosPorVenta.get(v.id) ?? [{
+        id: crypto.randomUUID(),
+        orden: 1,
+        metodo: v.metodo_pago,
+        monto_bs: v.total_bs,
+        monto_usd: v.total_usd,
+      }],
       total_bs: v.total_bs,
       total_usd: v.total_usd,
       tasa_usada: v.tasa,

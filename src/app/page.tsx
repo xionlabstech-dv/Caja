@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Producto, ItemCarrito, MetodoPago, Venta, VentaItem, MovimientoStock } from '@/types';
+import { Producto, ItemCarrito, MetodoPago, MetodoPagoVenta, PagoVenta, Venta, VentaItem, MovimientoStock } from '@/types';
 import {
   getProductos,
   getProductoPorCodigo,
@@ -89,6 +89,15 @@ export default function CajaPage() {
   const [gramos, setGramos] = useState('');
   const [metodo, setMetodo] = useState<MetodoPago | null>(null);
   const [montoRecibido, setMontoRecibido] = useState('');
+  // Pago mixto: pagosMixtos son los pagos ya "cerrados" (método + monto en
+  // las dos monedas). metodoMixtoActual/montoMixtoInput son el método y el
+  // monto que se está tecleando para el SIGUIENTE pago — solo aplica
+  // mientras ese pago todavía no es el último (el último nunca se teclea,
+  // se calcula como residuo, ver agregarPagoMixtoCalculado).
+  const [modoPagoMixto, setModoPagoMixto] = useState(false);
+  const [pagosMixtos, setPagosMixtos] = useState<{ metodo: MetodoPago; monto_bs: number; monto_usd: number }[]>([]);
+  const [metodoMixtoActual, setMetodoMixtoActual] = useState<MetodoPago | null>(null);
+  const [montoMixtoInput, setMontoMixtoInput] = useState('');
   const [toast, setToast] = useState('');
   const [showPerfil, setShowPerfil] = useState(false);
   const [passActual, setPassActual] = useState('');
@@ -345,8 +354,86 @@ export default function CajaPage() {
     searchRef.current?.focus();
   };
 
+  // Pago mixto: el primer pago se teclea (método + monto, en la moneda
+  // natural de ese método — igual que "monto recibido" en el flujo simple:
+  // Bs para todo menos efectivo_usd). El residuo se recalcula solo. Si ya
+  // queda en cero (o casi, por redondeo), la venta queda completa sin
+  // necesitar un segundo pago; si no, se ofrece un segundo método cuyo
+  // monto NUNCA se teclea — es el residuo exacto en las dos monedas,
+  // restado por separado en cada una (nunca una derivada de la otra vía
+  // tasa), para que la suma cuadre exacto en Bs y en $ (regla del ajuste).
+  const EPSILON_RESIDUO = 0.005;
+  const sumaPagosMixtosBs = pagosMixtos.reduce((s, p) => s + p.monto_bs, 0);
+  const sumaPagosMixtosUsd = pagosMixtos.reduce((s, p) => s + p.monto_usd, 0);
+  const residuoMixtoBs = totalBS - sumaPagosMixtosBs;
+  const residuoMixtoUsd = totalUSD - sumaPagosMixtosUsd;
+  // Math.abs, no solo <=: un residuo negativo (pago de más) nunca debe
+  // leerse como "completo" — es respaldo de agregarPagoMixtoManual, que ya
+  // debería impedir que esto pase, pero si fallara no hay que confirmar una
+  // venta con pagos que no cuadran.
+  const pagoMixtoCompleto = pagosMixtos.length > 0 && Math.abs(residuoMixtoBs) <= EPSILON_RESIDUO;
+
+  const iniciarPagoMixto = () => {
+    setModoPagoMixto(true);
+    setMetodo(null);
+    setMontoRecibido('');
+    setPagosMixtos([]);
+    setMetodoMixtoActual(null);
+    setMontoMixtoInput('');
+  };
+
+  const salirPagoMixto = () => {
+    setModoPagoMixto(false);
+    setPagosMixtos([]);
+    setMetodoMixtoActual(null);
+    setMontoMixtoInput('');
+  };
+
+  // Único punto para cerrar el panel de pago (flechita, fondo oscuro, o
+  // venta confirmada) — sin esto, cerrar sin confirmar dejaba vivo el
+  // estado de pago mixto y reabrir "Pagar" volvía a caer en modo mixto con
+  // lo que se había tecleado antes.
+  const cerrarPago = () => {
+    setShowPago(false);
+    setMetodo(null);
+    setMontoRecibido('');
+    salirPagoMixto();
+  };
+
+  const agregarPagoMixtoManual = () => {
+    if (!metodoMixtoActual) return;
+    const monto = parseFloat(montoMixtoInput);
+    if (!monto || monto <= 0) return;
+    const enUsd = metodoMixtoActual === 'efectivo_usd';
+    const monto_bs = enUsd ? (tasa > 0 ? monto * tasa : 0) : monto;
+    const monto_usd = enUsd ? monto : (tasa > 0 ? monto / tasa : 0);
+    // Nunca dejar que un pago tecleado deje el residuo en negativo — eso
+    // rompería la regla central del ajuste (el último pago se calcula, no
+    // se teclea). Mismo margen que pagoMixtoCompleto para no rechazar por
+    // un centavo de redondeo.
+    if (monto_bs > residuoMixtoBs + EPSILON_RESIDUO) {
+      showToast(`El monto no puede superar lo que falta: ${formatBS(residuoMixtoBs)}`);
+      return;
+    }
+    setPagosMixtos(prev => [...prev, { metodo: metodoMixtoActual, monto_bs, monto_usd }]);
+    setMetodoMixtoActual(null);
+    setMontoMixtoInput('');
+  };
+
+  const agregarPagoMixtoCalculado = (metodoElegido: MetodoPago) => {
+    setPagosMixtos(prev => [...prev, { metodo: metodoElegido, monto_bs: residuoMixtoBs, monto_usd: residuoMixtoUsd }]);
+  };
+
+  const quitarPagoMixto = (index: number) => {
+    setPagosMixtos(prev => prev.filter((_, i) => i !== index));
+  };
+
   const confirmarVenta = async () => {
-    if (!metodo) return;
+    if (modoPagoMixto) {
+      if (!pagoMixtoCompleto) return;
+    } else if (!metodo) {
+      return;
+    }
     const now = new Date();
     const items: VentaItem[] = carrito.map(item => {
       if (item.esPorPeso) {
@@ -384,12 +471,34 @@ export default function CajaPage() {
       };
     });
 
+    // Un solo camino de código para venta simple y mixta: pagos siempre
+    // trae al menos un elemento. Con un solo método, un único pago con los
+    // totales de la venta (orden 1) — igual al backfill que ya se hizo en
+    // Supabase para las ventas de antes de este cambio.
+    const pagos: PagoVenta[] = modoPagoMixto
+      ? pagosMixtos.map((p, i) => ({
+          id: crypto.randomUUID(),
+          orden: i + 1,
+          metodo: p.metodo,
+          monto_bs: p.monto_bs,
+          monto_usd: p.monto_usd,
+        }))
+      : [{
+          id: crypto.randomUUID(),
+          orden: 1,
+          metodo: metodo!,
+          monto_bs: totalBS,
+          monto_usd: totalUSD,
+        }];
+    const metodoPagoVenta: MetodoPagoVenta = pagos.length > 1 ? 'mixto' : pagos[0].metodo;
+
     const venta: Venta = {
       id: crypto.randomUUID(),
       fecha: now.toISOString(),
       fecha_dia: now.toISOString().split('T')[0],
       items,
-      metodo_pago: metodo,
+      metodo_pago: metodoPagoVenta,
+      pagos,
       total_bs: totalBS,
       total_usd: totalUSD,
       tasa_usada: tasa,
@@ -437,9 +546,7 @@ export default function CajaPage() {
     }
 
     setCarrito([]);
-    setShowPago(false);
-    setMetodo(null);
-    setMontoRecibido('');
+    cerrarPago();
     showToast('Venta registrada');
   };
 
@@ -448,11 +555,12 @@ export default function CajaPage() {
   const cambioUSD =
     metodo === 'efectivo_usd' ? (parseFloat(montoRecibido) || 0) - totalUSD : null;
   const cambio = cambioBS ?? cambioUSD;
-  const puedeConfirmar =
+  const puedeConfirmarSimple =
     metodo !== null &&
     (metodo === 'efectivo_bs' || metodo === 'efectivo_usd'
       ? (cambio ?? -1) >= 0
       : true);
+  const puedeConfirmar = modoPagoMixto ? pagoMixtoCompleto : puedeConfirmarSimple;
 
   // Live preview for weight modal
   const gramosNum = parseFloat(gramos);
@@ -808,12 +916,19 @@ export default function CajaPage() {
       {/* Payment sheet */}
       {showPago && (
         <div className="fixed inset-0 z-50 flex items-end">
-          <div className="absolute inset-0 bg-black/40" onClick={() => { setShowPago(false); setShowCarrito(true); }} />
+          <div className="absolute inset-0 bg-black/40" onClick={() => { cerrarPago(); setShowCarrito(true); }} />
           <div className="relative w-full max-w-lg mx-auto bg-white rounded-t-2xl max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between p-4 border-b border-gray-100">
-              <h2 className="text-lg font-bold">Método de pago</h2>
+              <div>
+                <h2 className="text-lg font-bold">{modoPagoMixto ? 'Pago mixto' : 'Método de pago'}</h2>
+                {modoPagoMixto && (
+                  <button onClick={salirPagoMixto} className="text-xs text-gray-400 font-medium">
+                    Volver a un solo método
+                  </button>
+                )}
+              </div>
               <button
-                onClick={() => { setShowPago(false); setShowCarrito(true); }}
+                onClick={() => { cerrarPago(); setShowCarrito(true); }}
                 className="p-1 text-gray-400"
               >
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -824,52 +939,164 @@ export default function CajaPage() {
 
             <div className="flex-1 overflow-y-auto p-4">
               <div className="text-center py-4 mb-4 bg-emerald-50 rounded-xl">
-                <p className="text-3xl font-bold text-emerald-700">{formatBS(totalBS)}</p>
-                {tasa > 0 && <p className="text-gray-500 text-sm mt-1">{formatUSD(totalUSD)}</p>}
+                {modoPagoMixto && pagosMixtos.length > 0 && !pagoMixtoCompleto ? (
+                  <>
+                    <p className="text-xs font-semibold text-emerald-600 uppercase tracking-wide mb-1">Falta</p>
+                    <p className="text-3xl font-bold text-emerald-700">{formatBS(residuoMixtoBs)}</p>
+                    {tasa > 0 && <p className="text-gray-500 text-sm mt-1">{formatUSD(residuoMixtoUsd)}</p>}
+                  </>
+                ) : (
+                  <>
+                    <p className="text-3xl font-bold text-emerald-700">{formatBS(totalBS)}</p>
+                    {tasa > 0 && <p className="text-gray-500 text-sm mt-1">{formatUSD(totalUSD)}</p>}
+                  </>
+                )}
               </div>
 
-              <div className="grid grid-cols-3 gap-2 mb-4">
-                {METODOS_PAGO.map(m => (
-                  <button
-                    key={m.id}
-                    onClick={() => { setMetodo(m.id); setMontoRecibido(''); }}
-                    className={`py-3 px-2 rounded-xl text-sm font-medium transition-colors text-center ${
-                      metodo === m.id
-                        ? 'bg-emerald-600 text-white shadow-sm'
-                        : 'bg-gray-100 text-gray-700'
-                    }`}
-                  >
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-
-              {(metodo === 'efectivo_bs' || metodo === 'efectivo_usd') && (
-                <div className="mb-4">
-                  <label className="block text-sm text-gray-500 mb-1">
-                    Monto recibido ({metodo === 'efectivo_bs' ? 'Bs' : '$'})
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={montoRecibido}
-                    onChange={e => setMontoRecibido(e.target.value)}
-                    className="w-full border border-gray-300 rounded-xl p-3 text-xl font-bold focus:outline-none focus:border-emerald-400"
-                    placeholder="0.00"
-                    autoFocus
-                  />
-                  {montoRecibido && cambio !== null && (
-                    <div
-                      className={`mt-3 text-center text-xl font-bold py-3 rounded-xl ${
-                        cambio >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'
-                      }`}
-                    >
-                      {cambio >= 0
-                        ? `Cambio: ${metodo === 'efectivo_bs' ? formatBS(cambio) : formatUSD(cambio)}`
-                        : `Faltan: ${metodo === 'efectivo_bs' ? formatBS(-cambio) : formatUSD(-cambio)}`}
+              {modoPagoMixto ? (
+                <div>
+                  {pagosMixtos.length > 0 && (
+                    <div className="space-y-2 mb-4">
+                      {pagosMixtos.map((p, i) => {
+                        const info = METODOS_PAGO.find(m => m.id === p.metodo);
+                        return (
+                          <div key={i} className="flex items-center justify-between bg-gray-50 rounded-xl px-3 py-2.5">
+                            <span className="text-sm font-medium text-gray-700">{info?.label ?? p.metodo}</span>
+                            <div className="flex items-center gap-3">
+                              <div className="text-right">
+                                <p className="font-bold text-gray-900 text-sm">{formatBS(p.monto_bs)}</p>
+                                <p className="text-xs text-gray-400">{formatUSD(p.monto_usd)}</p>
+                              </div>
+                              <button onClick={() => quitarPagoMixto(i)} className="text-gray-300" aria-label="Quitar pago">
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
+
+                  {pagoMixtoCompleto && (
+                    <div className="text-center py-3 rounded-xl bg-green-50 text-green-700 font-bold mb-2">
+                      Pago completo — listo para confirmar
+                    </div>
+                  )}
+
+                  {!pagoMixtoCompleto && (
+                    <>
+                      <p className="text-sm text-gray-500 mb-2">
+                        {pagosMixtos.length === 0 ? 'Elige el primer método' : 'Elige el método para el resto'}
+                      </p>
+                      <div className="grid grid-cols-3 gap-2 mb-3">
+                        {METODOS_PAGO.filter(m => !pagosMixtos.some(p => p.metodo === m.id)).map(m => (
+                          <button
+                            key={m.id}
+                            onClick={() => {
+                              if (pagosMixtos.length === 0) {
+                                setMetodoMixtoActual(m.id);
+                                setMontoMixtoInput('');
+                              } else {
+                                agregarPagoMixtoCalculado(m.id);
+                              }
+                            }}
+                            className={`py-3 px-2 rounded-xl text-sm font-medium transition-colors text-center ${
+                              metodoMixtoActual === m.id
+                                ? 'bg-emerald-600 text-white shadow-sm'
+                                : 'bg-gray-100 text-gray-700'
+                            }`}
+                          >
+                            {m.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {pagosMixtos.length === 0 && metodoMixtoActual && (
+                        <div>
+                          <label className="block text-sm text-gray-500 mb-1">
+                            Monto ({metodoMixtoActual === 'efectivo_usd' ? '$' : 'Bs'})
+                          </label>
+                          <div className="flex gap-2">
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={montoMixtoInput}
+                              onChange={e => setMontoMixtoInput(e.target.value)}
+                              className="flex-1 min-w-0 border border-gray-300 rounded-xl p-3 text-xl font-bold focus:outline-none focus:border-emerald-400"
+                              placeholder="0.00"
+                              autoFocus
+                            />
+                            <button
+                              onClick={agregarPagoMixtoManual}
+                              disabled={!montoMixtoInput || parseFloat(montoMixtoInput) <= 0}
+                              className="px-4 rounded-xl bg-emerald-600 text-white font-semibold disabled:opacity-40"
+                            >
+                              Agregar
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-3 gap-2 mb-4">
+                    {METODOS_PAGO.map(m => (
+                      <button
+                        key={m.id}
+                        onClick={() => { setMetodo(m.id); setMontoRecibido(''); }}
+                        className={`py-3 px-2 rounded-xl text-sm font-medium transition-colors text-center ${
+                          metodo === m.id
+                            ? 'bg-emerald-600 text-white shadow-sm'
+                            : 'bg-gray-100 text-gray-700'
+                        }`}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
+                    <button
+                      onClick={iniciarPagoMixto}
+                      className="py-3 px-2 rounded-xl text-sm font-medium transition-colors text-center bg-gray-100 text-gray-700 flex flex-col items-center justify-center gap-1"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M8 7h12m0 0l-4-4m4 4l-4 4M16 17H4m0 0l4 4m-4-4l4-4" />
+                      </svg>
+                      Pago mixto
+                    </button>
+                  </div>
+
+                  {(metodo === 'efectivo_bs' || metodo === 'efectivo_usd') && (
+                    <div className="mb-4">
+                      <label className="block text-sm text-gray-500 mb-1">
+                        Monto recibido ({metodo === 'efectivo_bs' ? 'Bs' : '$'})
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={montoRecibido}
+                        onChange={e => setMontoRecibido(e.target.value)}
+                        className="w-full border border-gray-300 rounded-xl p-3 text-xl font-bold focus:outline-none focus:border-emerald-400"
+                        placeholder="0.00"
+                        autoFocus
+                      />
+                      {montoRecibido && cambio !== null && (
+                        <div
+                          className={`mt-3 text-center text-xl font-bold py-3 rounded-xl ${
+                            cambio >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'
+                          }`}
+                        >
+                          {cambio >= 0
+                            ? `Cambio: ${metodo === 'efectivo_bs' ? formatBS(cambio) : formatUSD(cambio)}`
+                            : `Faltan: ${metodo === 'efectivo_bs' ? formatBS(-cambio) : formatUSD(-cambio)}`}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </div>
 
