@@ -375,7 +375,42 @@ export async function getVentasPendientesRemoto(negocioId: string): Promise<Vent
       sincronizada: true,
       usuario_id: v.usuario_id ?? undefined,
       usuario_nombre: v.usuario_nombre ?? undefined,
+      // Anulación: se trae siempre (no solo si anulada = true) para que una
+      // venta anulada por otro dispositivo llegue ya marcada, sin depender
+      // de que este dispositivo haya sido el que la anuló.
+      anulada: v.anulada ?? false,
+      anulada_en: v.anulada_en ?? undefined,
+      anulada_por: v.anulada_por ?? undefined,
+      anulada_por_nombre: v.anulada_por_nombre ?? undefined,
+      motivo_anulacion: v.motivo_anulacion ?? undefined,
     }));
+  } catch {
+    return null;
+  }
+}
+
+// Anula una venta vía la RPC (SECURITY DEFINER, exige admin del lado
+// servidor). No pasa por el outbox ni por IndexedDB — a diferencia de
+// registrar una venta, anular requiere conexión: es una acción
+// administrativa sobre algo que ya ocurrió, no el flujo de cobro, así que
+// no aplica la regla de "nunca bloquear". Devuelve null ante cualquier
+// fallo (sin red, RPC rechazada) para que quien llama NUNCA actualice el
+// estado local como si hubiera funcionado.
+export interface ResultadoAnulacion {
+  anulada: boolean;
+  anulada_en: string;
+  // true si la venta ya estaba anulada de antes (RPC idempotente) — un
+  // reintento (doble tap, mala señal) no vuelve a reversar el stock.
+  ya_estaba_anulada: boolean;
+}
+
+export async function anularVenta(ventaId: string, motivo: string): Promise<ResultadoAnulacion | null> {
+  try {
+    const { data, error } = await supabase
+      .rpc('anular_venta', { p_venta_id: ventaId, p_motivo: motivo })
+      .single();
+    if (error) throw error;
+    return data as ResultadoAnulacion;
   } catch {
     return null;
   }

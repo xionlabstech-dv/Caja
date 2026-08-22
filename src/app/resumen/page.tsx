@@ -9,8 +9,9 @@ import {
   getUltimoCierre,
   setUltimoCierre,
   getPendientes,
+  marcarVentaAnulada,
 } from '@/lib/db';
-import { getVentasPendientesRemoto, reconciliarCierresLocal } from '@/lib/sync';
+import { getVentasPendientesRemoto, reconciliarCierresLocal, anularVenta } from '@/lib/sync';
 import { encolarCerrarCaja, encolarActualizarCierreVentas, procesarCola } from '@/lib/outbox';
 import { formatBS, formatUSD } from '@/lib/precio';
 import { Venta, MetodoPago, MetodoPagoVenta, CierreCaja, DesgloseCierre } from '@/types';
@@ -95,7 +96,7 @@ function formatearNombre(nombre: string): string {
 }
 
 export default function ResumenPage() {
-  const { tasa, negocioId, isOnline, user, userNombre } = useApp();
+  const { tasa, negocioId, isOnline, user, userNombre, rol, usaStock, sincronizarAhora } = useApp();
   const [ventas, setVentas] = useState<Venta[]>([]);
   const [cierres, setCierres] = useState<CierreCaja[]>([]);
   const [ultimoCierre, setUltimoCierreState] = useState<string | null>(null);
@@ -109,6 +110,11 @@ export default function ResumenPage() {
   const [soloDispositivo, setSoloDispositivo] = useState(false);
   const [confirmoSoloDispositivo, setConfirmoSoloDispositivo] = useState(false);
   const [toast, setToast] = useState('');
+  // Anulación: venta seleccionada para anular (abre el modal de motivo).
+  const [anulando, setAnulando] = useState<Venta | null>(null);
+  const [motivoAnular, setMotivoAnular] = useState('');
+  const [guardandoAnulacion, setGuardandoAnulacion] = useState(false);
+  const [errorAnular, setErrorAnular] = useState('');
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -152,7 +158,15 @@ export default function ResumenPage() {
         completo = true;
         const porId = new Map(vigentes.map(v => [v.id, v]));
         for (const r of remotas) {
-          if (!porId.has(r.id)) porId.set(r.id, r);
+          const local = porId.get(r.id);
+          // El remoto manda salvo que la copia local todavía no se haya
+          // sincronizado (ej. venta hecha offline, en cola) — a esa no hay
+          // que pisarla con lo que el servidor tenía antes de que llegara.
+          // Si ya estaba sincronizada, el remoto es la fuente de verdad:
+          // así una venta anulada desde OTRO dispositivo se refleja acá,
+          // en vez de quedarse mostrando para siempre la copia local vieja
+          // sin anular.
+          if (!local || local.sincronizada) porId.set(r.id, r);
         }
         ventasFinal = Array.from(porId.values());
       }
@@ -170,13 +184,19 @@ export default function ResumenPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { cargar(); }, [isOnline]);
 
-  const totalBS = ventas.reduce((s, v) => s + v.total_bs, 0);
+  // Vigentes = sin anular. Todos los totales y el desglose por método se
+  // calculan de acá, nunca de `ventas` a secas — una venta anulada sigue en
+  // la lista (no desaparece del histórico) pero no debe sumar ni al total
+  // ni al desglose ni al cierre que se arma al cerrar caja.
+  const ventasVigentes = ventas.filter(v => !v.anulada);
+
+  const totalBS = ventasVigentes.reduce((s, v) => s + v.total_bs, 0);
   const totalUSD = tasa > 0 ? totalBS / tasa : 0;
 
   // Por PAGOS, no por venta: una venta mixta reparte su monto entre los
   // métodos reales que la componen, en vez de contar el total completo bajo
   // un único método (o bajo 'mixto', que no es un método real de cobro).
-  const porMetodo = ventas.reduce(
+  const porMetodo = ventasVigentes.reduce(
     (acc, v) => {
       for (const p of v.pagos) {
         acc[p.metodo] = (acc[p.metodo] || 0) + p.monto_bs;
@@ -207,11 +227,12 @@ export default function ResumenPage() {
     setCerrando(true);
     const now = new Date().toISOString();
 
-    // Igual que porMetodo: por pagos, no por venta. count termina siendo
-    // cantidad de PAGOS (una venta mixta suma 1 a cada método que usó), lo
-    // correcto para arquear cada método por separado — mismo criterio que
-    // ya tiene reportes_por_metodo en Supabase.
-    const desglose = ventas.reduce((acc, v) => {
+    // Igual que porMetodo: por pagos VIGENTES, no por venta ni por lo
+    // anulado. count termina siendo cantidad de PAGOS (una venta mixta suma
+    // 1 a cada método que usó), lo correcto para arquear cada método por
+    // separado — mismo criterio que ya tiene reportes_por_metodo en
+    // Supabase.
+    const desglose = ventasVigentes.reduce((acc, v) => {
       for (const p of v.pagos) {
         if (!acc[p.metodo]) acc[p.metodo] = { bs: 0, usd: 0, count: 0 };
         acc[p.metodo]!.bs += p.monto_bs;
@@ -229,7 +250,7 @@ export default function ResumenPage() {
       periodo_fin: now,
       total_bs: totalBS,
       total_usd: tasa > 0 ? totalBS / tasa : 0,
-      cantidad_ventas: ventas.length,
+      cantidad_ventas: ventasVigentes.length,
       desglose_metodos: desglose,
       tasa_cierre: tasa,
       creado_en: now,
@@ -238,6 +259,10 @@ export default function ResumenPage() {
     };
 
     await saveCierre(cierre);
+    // Todas las ventas del período, ANULADAS INCLUIDAS: una venta anulada
+    // igual debe archivarse (dejar de aparecer como "período actual") para
+    // no quedar atrapada ahí para siempre — solo se excluye de los NÚMEROS
+    // del cierre (arriba), nunca de qué ventas se consideran resueltas.
     await tagVentasConCierre(ventas.map(v => v.id), cierre.id);
     await setUltimoCierre(now);
     // Offline-first: el cierre ya quedó guardado localmente arriba. Se encola
@@ -278,6 +303,53 @@ export default function ResumenPage() {
         );
       }
     }
+  };
+
+  const abrirAnular = (venta: Venta) => {
+    setAnulando(venta);
+    setMotivoAnular('');
+    setErrorAnular('');
+  };
+
+  const cerrarAnular = () => {
+    setAnulando(null);
+    setMotivoAnular('');
+    setErrorAnular('');
+  };
+
+  // Anular requiere conexión y no pasa por el outbox ni por IndexedDB — es
+  // una acción administrativa sobre algo que ya ocurrió (a diferencia de
+  // registrar una venta), así que no aplica "nunca bloquear una venta". El
+  // estado local SOLO se actualiza después de que el servidor confirmó el
+  // éxito; si anular_venta falla, no se toca nada localmente.
+  const confirmarAnular = async () => {
+    if (!anulando || !motivoAnular.trim() || !isOnline) return;
+    setGuardandoAnulacion(true);
+    setErrorAnular('');
+    const resultado = await anularVenta(anulando.id, motivoAnular.trim());
+    setGuardandoAnulacion(false);
+
+    if (!resultado) {
+      setErrorAnular('No se pudo anular la venta. Intenta de nuevo.');
+      return;
+    }
+
+    const datos = {
+      anulada_en: resultado.anulada_en,
+      anulada_por: user?.id,
+      anulada_por_nombre: userNombre || undefined,
+      motivo_anulacion: motivoAnular.trim(),
+    };
+    await marcarVentaAnulada(anulando.id, datos);
+    setVentas(prev => prev.map(v => (v.id === anulando.id ? { ...v, anulada: true, ...datos } : v)));
+    setAnulando(null);
+    setMotivoAnular('');
+    showToast('Venta anulada');
+
+    // El servidor ya reversó el stock (si aplica) dentro de la misma RPC —
+    // se refresca el catálogo para que se vea reflejado sin esperar al
+    // próximo sync automático (cada 30s). No bloquea nada si falla.
+    if (usaStock) sincronizarAhora();
   };
 
   return (
@@ -322,7 +394,7 @@ export default function ResumenPage() {
           <p className="text-4xl font-bold text-gray-900">{formatBS(totalBS)}</p>
           {tasa > 0 && <p className="text-gray-400 mt-1">{formatUSD(totalUSD)}</p>}
           <p className="text-emerald-600 text-sm font-medium mt-2">
-            {ventas.length} {ventas.length === 1 ? 'venta' : 'ventas'}
+            {ventasVigentes.length} {ventasVigentes.length === 1 ? 'venta' : 'ventas'}
           </p>
         </div>
 
@@ -366,16 +438,23 @@ export default function ResumenPage() {
                   >
                     <div>
                       <p className="font-semibold text-gray-800">Venta #{numeroPorVenta.get(venta.id)}</p>
-                      <div className="flex items-center gap-2 mt-0.5">
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                         <span className="text-gray-400 text-xs">{hora}</span>
                         <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex items-center gap-1 ${METODO_COLORS[venta.metodo_pago]}`}>
                           {METODO_ICONS[venta.metodo_pago]}
                           {METODO_LABELS[venta.metodo_pago]}
                         </span>
+                        {venta.anulada && (
+                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-700">
+                            Anulada
+                          </span>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <p className="font-bold text-gray-900">{formatBS(venta.total_bs)}</p>
+                      <p className={`font-bold ${venta.anulada ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
+                        {formatBS(venta.total_bs)}
+                      </p>
                       <svg
                         className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
                         fill="none" viewBox="0 0 24 24" stroke="currentColor"
@@ -415,6 +494,30 @@ export default function ResumenPage() {
                         <span className="text-gray-500">Vendida por</span>
                         <span className="text-gray-600">{venta.usuario_nombre || '—'}</span>
                       </div>
+
+                      {venta.anulada ? (
+                        <div className="border-t border-gray-100 pt-2 space-y-1">
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-500">Anulada por</span>
+                            <span className="text-gray-600">{venta.anulada_por_nombre || '—'}</span>
+                          </div>
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-500">Fecha de anulación</span>
+                            <span className="text-gray-600">{venta.anulada_en ? fmtFecha(venta.anulada_en) : '—'}</span>
+                          </div>
+                          <p className="text-sm text-red-700 bg-red-50 rounded-lg px-2.5 py-2 mt-1">
+                            Motivo: {venta.motivo_anulacion || '—'}
+                          </p>
+                        </div>
+                      ) : rol === 'admin' && (
+                        <button
+                          onClick={() => abrirAnular(venta)}
+                          disabled={!isOnline}
+                          className="w-full mt-1 py-2.5 rounded-xl text-sm font-semibold bg-red-50 text-red-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          {isOnline ? 'Anular venta' : 'Necesitas conexión para anular'}
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -520,7 +623,7 @@ export default function ResumenPage() {
                 <p className="text-3xl font-bold text-gray-900">{formatBS(totalBS)}</p>
                 {tasa > 0 && <p className="text-sm text-gray-500 mt-0.5">{formatUSD(totalUSD)}</p>}
                 <p className="text-emerald-600 text-sm font-medium mt-1">
-                  {ventas.length} {ventas.length === 1 ? 'venta' : 'ventas'}
+                  {ventasVigentes.length} {ventasVigentes.length === 1 ? 'venta' : 'ventas'}
                 </p>
               </div>
 
@@ -574,6 +677,58 @@ export default function ResumenPage() {
                   className="flex-1 py-3 rounded-xl bg-emerald-600 text-white font-bold disabled:opacity-40"
                 >
                   {cerrando ? 'Cerrando...' : 'Confirmar cierre'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Anular venta */}
+      {anulando && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => { if (!guardandoAnulacion) cerrarAnular(); }}
+          />
+          <div className="relative bg-white rounded-2xl w-full max-w-sm shadow-xl overflow-hidden">
+            <div className="p-5">
+              <h2 className="text-xl font-bold text-gray-900 mb-1">Anular venta</h2>
+              <p className="text-sm text-gray-500 mb-4">
+                Venta #{numeroPorVenta.get(anulando.id)} · {formatBS(anulando.total_bs)}. Esta acción no se puede deshacer.
+              </p>
+
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Motivo <span className="text-red-400">*</span>
+              </label>
+              <textarea
+                value={motivoAnular}
+                onChange={e => setMotivoAnular(e.target.value)}
+                rows={3}
+                placeholder="¿Por qué se anula esta venta?"
+                className="w-full border border-gray-300 rounded-xl p-3 text-sm focus:outline-none focus:border-red-400"
+                autoFocus
+              />
+
+              {errorAnular && <p className="text-red-500 text-sm mt-2">{errorAnular}</p>}
+              {!isOnline && (
+                <p className="text-amber-600 text-sm mt-2">Necesitas conexión para anular</p>
+              )}
+
+              <div className="flex gap-3 mt-4">
+                <button
+                  onClick={cerrarAnular}
+                  disabled={guardandoAnulacion}
+                  className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-700 font-semibold disabled:opacity-40"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={confirmarAnular}
+                  disabled={guardandoAnulacion || !motivoAnular.trim() || !isOnline}
+                  className="flex-1 py-3 rounded-xl bg-red-600 text-white font-bold disabled:opacity-40"
+                >
+                  {guardandoAnulacion ? 'Anulando...' : 'Anular'}
                 </button>
               </div>
             </div>

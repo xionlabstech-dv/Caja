@@ -177,6 +177,22 @@ export async function tagVentasConCierre(ventaIds: string[], cierreId: string): 
   await tx.done;
 }
 
+// Se llama SOLO después de que anularVenta() confirmó el éxito con el
+// servidor — nunca antes, para no dejar el estado local mostrando una
+// anulación que en realidad no se guardó (ver comentario de verificación
+// de escrituras en sync.ts). No hay "desanular": es intencional, la RPC
+// tampoco lo permite.
+export async function marcarVentaAnulada(
+  ventaId: string,
+  datos: { anulada_en: string; anulada_por?: string; anulada_por_nombre?: string; motivo_anulacion: string },
+): Promise<void> {
+  const db = await getDB();
+  const venta = await db.get('ventas', ventaId);
+  if (venta) {
+    await db.put('ventas', { ...venta, anulada: true, ...datos });
+  }
+}
+
 export async function saveCierre(cierre: CierreCaja): Promise<void> {
   const db = await getDB();
   await db.put('cierres', cierre);

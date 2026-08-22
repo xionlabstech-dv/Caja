@@ -94,6 +94,18 @@ export interface Venta {
   // altera si luego cambia el nombre visible del usuario.
   usuario_id?: string;
   usuario_nombre?: string;
+  // Anulación (evento aparte, no una edición — regla 8): la venta original
+  // (monto, items, pagos) nunca se toca. Ausente/false = vigente. No
+  // requiere migración de IndexedDB: una venta local guardada antes de
+  // este cambio simplemente no trae `anulada`, que se lee igual de falsy
+  // que `false`.
+  anulada?: boolean;
+  anulada_en?: string;
+  anulada_por?: string;
+  // Snapshot, igual que usuario_nombre — no se altera si luego cambia el
+  // nombre visible de quien anuló.
+  anulada_por_nombre?: string;
+  motivo_anulacion?: string;
 }
 
 export interface DesgloseCierre {
@@ -125,7 +137,10 @@ export interface ItemCarrito {
   precioCalculadoBase?: number;
 }
 
-export type TipoMovimiento = 'entrada' | 'salida' | 'ajuste' | 'venta';
+// 'anulacion' solo la genera el servidor (dentro de anular_venta, nunca se
+// crea desde el formulario de Movimientos) al reversar el stock de una
+// venta anulada.
+export type TipoMovimiento = 'entrada' | 'salida' | 'ajuste' | 'venta' | 'anulacion';
 
 export type MotivoMovimiento =
   | 'compra'
@@ -148,7 +163,11 @@ export interface MovimientoStock {
   // historial offline.
   producto_nombre: string;
   tipo: TipoMovimiento;
-  motivo: MotivoMovimiento;
+  // string, no MotivoMovimiento: para tipo 'anulacion' el motivo es el
+  // texto libre que el admin escribió al anular la venta (mismo motivo que
+  // quedó en ventas.motivo_anulacion), no uno de los valores fijos del
+  // enum. Para el resto de los tipos sigue siendo uno de esos valores.
+  motivo: string;
   // Positiva en entradas, negativa en salidas y ventas. En ajustes por
   // conteo es la diferencia ya calculada (puede ser + o -).
   cantidad: number;
