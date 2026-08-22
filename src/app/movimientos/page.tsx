@@ -52,7 +52,7 @@ const MOTIVOS: Record<TipoUI, { value: MotivoMovimiento; label: string }[]> = {
 };
 
 const TIPO_LABELS: Record<TipoMovimiento, string> = {
-  entrada: 'Entrada', salida: 'Salida', ajuste: 'Ajuste', venta: 'Venta',
+  entrada: 'Entrada', salida: 'Salida', ajuste: 'Ajuste', venta: 'Venta', anulacion: 'Anulación',
 };
 
 const MOTIVO_LABELS: Record<MotivoMovimiento, string> = {
@@ -68,11 +68,19 @@ const MOTIVO_LABELS: Record<MotivoMovimiento, string> = {
   venta: 'Venta',
 };
 
+// El motivo de un movimiento 'anulacion' es texto libre (lo que el admin
+// escribió al anular la venta), no uno de los valores fijos de arriba —
+// se muestra tal cual cuando no matchea ninguno de esos valores conocidos.
+function motivoLabel(motivo: string): string {
+  return MOTIVO_LABELS[motivo as MotivoMovimiento] ?? motivo;
+}
+
 const TIPO_COLORS: Record<TipoMovimiento, string> = {
   entrada: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
   salida: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
   ajuste: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
   venta: 'bg-gray-100 text-gray-600 dark:bg-slate-700 dark:text-gray-300',
+  anulacion: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
 };
 
 export default function MovimientosPage() {
@@ -324,7 +332,7 @@ export default function MovimientosPage() {
                       <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${TIPO_COLORS[m.tipo]}`}>
                         {TIPO_LABELS[m.tipo]}
                       </span>
-                      <span className="text-xs text-gray-400">{MOTIVO_LABELS[m.motivo]}</span>
+                      <span className="text-xs text-gray-400">{motivoLabel(m.motivo)}</span>
                     </div>
                   </div>
                   <div className="text-right flex-shrink-0">
