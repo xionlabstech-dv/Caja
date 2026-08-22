@@ -1016,7 +1016,7 @@ export default function CajaPage() {
                               step="0.01"
                               value={montoMixtoInput}
                               onChange={e => setMontoMixtoInput(e.target.value)}
-                              className="flex-1 border border-gray-300 rounded-xl p-3 text-xl font-bold focus:outline-none focus:border-emerald-400"
+                              className="flex-1 min-w-0 border border-gray-300 rounded-xl p-3 text-xl font-bold focus:outline-none focus:border-emerald-400"
                               placeholder="0.00"
                               autoFocus
                             />
