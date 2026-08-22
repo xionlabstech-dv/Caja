@@ -389,6 +389,17 @@ export default function CajaPage() {
     setMontoMixtoInput('');
   };
 
+  // Único punto para cerrar el panel de pago (flechita, fondo oscuro, o
+  // venta confirmada) — sin esto, cerrar sin confirmar dejaba vivo el
+  // estado de pago mixto y reabrir "Pagar" volvía a caer en modo mixto con
+  // lo que se había tecleado antes.
+  const cerrarPago = () => {
+    setShowPago(false);
+    setMetodo(null);
+    setMontoRecibido('');
+    salirPagoMixto();
+  };
+
   const agregarPagoMixtoManual = () => {
     if (!metodoMixtoActual) return;
     const monto = parseFloat(montoMixtoInput);
@@ -535,10 +546,7 @@ export default function CajaPage() {
     }
 
     setCarrito([]);
-    setShowPago(false);
-    setMetodo(null);
-    setMontoRecibido('');
-    salirPagoMixto();
+    cerrarPago();
     showToast('Venta registrada');
   };
 
@@ -908,7 +916,7 @@ export default function CajaPage() {
       {/* Payment sheet */}
       {showPago && (
         <div className="fixed inset-0 z-50 flex items-end">
-          <div className="absolute inset-0 bg-black/40" onClick={() => { setShowPago(false); setShowCarrito(true); }} />
+          <div className="absolute inset-0 bg-black/40" onClick={() => { cerrarPago(); setShowCarrito(true); }} />
           <div className="relative w-full max-w-lg mx-auto bg-white rounded-t-2xl max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between p-4 border-b border-gray-100">
               <div>
@@ -920,7 +928,7 @@ export default function CajaPage() {
                 )}
               </div>
               <button
-                onClick={() => { setShowPago(false); setShowCarrito(true); }}
+                onClick={() => { cerrarPago(); setShowCarrito(true); }}
                 className="p-1 text-gray-400"
               >
                 <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
