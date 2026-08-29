@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import BottomNav from '@/components/BottomNav';
 import Providers from '@/components/Providers';
+import EstadoBanner from '@/components/EstadoBanner';
 
 export const metadata: Metadata = {
   title: 'Caja',
@@ -36,6 +37,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <Providers>
           <main className="min-h-screen bg-gray-50 dark:bg-slate-900 pb-16 max-w-lg mx-auto">
+            <EstadoBanner />
             {children}
           </main>
           <BottomNav />

@@ -57,6 +57,17 @@ export type MetodoPagoVenta = MetodoPago | 'mixto';
 
 export type Rol = 'admin' | 'cajero';
 
+// Estado de suscripción del negocio. El bloqueo real vive en Supabase (RLS
+// + un trigger que mantiene negocios.activo sincronizado) — esto es
+// puramente para que el cliente sepa qué explicarle al usuario, nunca para
+// decidir qué está permitido de verdad.
+//   activo:       todo funciona normal.
+//   restringido:  vender, cerrar caja y fijar tasa siguen andando; el
+//                 resto (productos, movimientos, anular, reportes) no.
+//   suspendido:   nada funciona salvo leer su propio perfil/negocio, lo
+//                 justo para mostrar una pantalla explicativa.
+export type EstadoNegocio = 'activo' | 'restringido' | 'suspendido';
+
 // Un pago cubre parte (o todo) el total de una venta. Snapshot: monto_bs y
 // monto_usd quedan convertidos a la tasa ya congelada de la venta (Venta.
 // tasa_usada), igual que costo_usd en VentaItem — no se recalculan después.

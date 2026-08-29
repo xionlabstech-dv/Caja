@@ -1,4 +1,4 @@
-import { Rol } from '@/types';
+import { Rol, EstadoNegocio } from '@/types';
 
 // Debe coincidir con LIMITE_USUARIOS_POR_NEGOCIO en
 // supabase/functions/crear-usuario/index.ts — viven en runtimes distintos
@@ -14,10 +14,20 @@ export const LIMITE_USUARIOS_POR_NEGOCIO = 3;
 const RUTAS_ADMIN = ['/', '/resumen', '/reportes', '/tasa', '/inventario', '/usuarios', '/movimientos'];
 const RUTAS_CAJERO = ['/', '/resumen'];
 
-export function rutasPermitidas(rol: Rol | null): string[] {
-  return rol === 'admin' ? RUTAS_ADMIN : RUTAS_CAJERO;
+// Con un negocio 'restringido', vender y cerrar caja (Caja, Resumen) y
+// fijar la tasa siguen andando — el resto de las pantallas de admin, no.
+// La base ya lo bloquea de verdad (RLS); esto solo evita que el admin
+// entre a una pantalla que le va a rebotar todo.
+const RUTAS_OCULTAS_RESTRINGIDO = ['/inventario', '/movimientos', '/reportes'];
+
+export function rutasPermitidas(rol: Rol | null, estado?: EstadoNegocio): string[] {
+  const base = rol === 'admin' ? RUTAS_ADMIN : RUTAS_CAJERO;
+  if (estado === 'restringido') {
+    return base.filter(r => !RUTAS_OCULTAS_RESTRINGIDO.includes(r));
+  }
+  return base;
 }
 
-export function esRutaPermitida(rol: Rol | null, pathname: string): boolean {
-  return rutasPermitidas(rol).includes(pathname);
+export function esRutaPermitida(rol: Rol | null, pathname: string, estado?: EstadoNegocio): boolean {
+  return rutasPermitidas(rol, estado).includes(pathname);
 }

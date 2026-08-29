@@ -10,15 +10,15 @@ import { esRutaPermitida } from './roles';
 // pantalla de admin (Reportes, Tasa, Inventario, Usuarios), ya que ocultar
 // la pestaña en BottomNav no impide escribir la URL a mano.
 export function useGuardarRuta() {
-  const { rol, authLoading } = useApp();
+  const { rol, estado, authLoading } = useApp();
   const router = useRouter();
   const pathname = usePathname();
 
   useEffect(() => {
     if (authLoading) return;
     if (rol === null) return; // perfil aún sin resolver, no redirigir a ciegas
-    if (!esRutaPermitida(rol, pathname)) {
+    if (!esRutaPermitida(rol, pathname, estado)) {
       router.replace('/');
     }
-  }, [rol, authLoading, pathname, router]);
+  }, [rol, estado, authLoading, pathname, router]);
 }

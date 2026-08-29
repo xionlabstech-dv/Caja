@@ -1,5 +1,5 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
-import { Producto, Configuracion, Venta, CierreCaja, OperacionPendiente, Rol, MovimientoStock, MetodoPago } from '@/types';
+import { Producto, Configuracion, Venta, CierreCaja, OperacionPendiente, Rol, MovimientoStock, MetodoPago, EstadoNegocio } from '@/types';
 
 interface MetaItem {
   key: string;
@@ -279,6 +279,35 @@ export async function getCachedUsaStock(): Promise<boolean> {
 export async function setCachedUsaStock(usaStock: boolean): Promise<void> {
   const db = await getDB();
   await db.put('meta', { key: 'usa_stock', value: String(usaStock) });
+}
+
+// Estado de suscripción del negocio y fecha de próximo pago — cacheados
+// igual que rol/usaStock para que la app sepa qué explicar sin conexión.
+// getCachedEstado nunca devuelve null: sin dato cacheado, el default es
+// 'activo' (nunca dejar a un cliente al día fuera de su app por un cache
+// vacío — la base es la que bloquea de verdad, esto solo explica).
+export async function getCachedEstado(): Promise<EstadoNegocio> {
+  const db = await getDB();
+  const item = await db.get('meta', 'estado_negocio');
+  return (item?.value as EstadoNegocio | undefined) ?? 'activo';
+}
+
+export async function setCachedEstado(estado: EstadoNegocio): Promise<void> {
+  const db = await getDB();
+  await db.put('meta', { key: 'estado_negocio', value: estado });
+}
+
+export async function getCachedFechaProximoPago(): Promise<string | null> {
+  const db = await getDB();
+  const item = await db.get('meta', 'fecha_proximo_pago');
+  // '' es como se guarda "sin fecha" (ver setCachedFechaProximoPago) — se
+  // normaliza de vuelta a null, no a un string vacío.
+  return item?.value || null;
+}
+
+export async function setCachedFechaProximoPago(fecha: string | null): Promise<void> {
+  const db = await getDB();
+  await db.put('meta', { key: 'fecha_proximo_pago', value: fecha ?? '' });
 }
 
 // Marca temporal de la última vez que se refrescó el catálogo desde
