@@ -96,7 +96,7 @@ function formatearNombre(nombre: string): string {
 }
 
 export default function ResumenPage() {
-  const { tasa, negocioId, isOnline, user, userNombre, rol, usaStock, sincronizarAhora } = useApp();
+  const { tasa, negocioId, isOnline, user, userNombre, rol, estado, usaStock, sincronizarAhora } = useApp();
   const [ventas, setVentas] = useState<Venta[]>([]);
   const [cierres, setCierres] = useState<CierreCaja[]>([]);
   const [ultimoCierre, setUltimoCierreState] = useState<string | null>(null);
@@ -509,7 +509,7 @@ export default function ResumenPage() {
                             Motivo: {venta.motivo_anulacion || '—'}
                           </p>
                         </div>
-                      ) : rol === 'admin' && (
+                      ) : rol === 'admin' && estado !== 'restringido' && (
                         <button
                           onClick={() => abrirAnular(venta)}
                           disabled={!isOnline}

@@ -17,13 +17,18 @@ import {
   setCachedUsaCostos,
   getCachedUsaStock,
   setCachedUsaStock,
+  getCachedEstado,
+  setCachedEstado,
+  getCachedFechaProximoPago,
+  setCachedFechaProximoPago,
   getCachedUltimaSincronizacion,
   clearTenantData,
   contarPendientes,
 } from '@/lib/db';
 import { procesarCola } from '@/lib/outbox';
-import { Configuracion, Rol } from '@/types';
+import { Configuracion, Rol, EstadoNegocio } from '@/types';
 import LoginScreen from './LoginScreen';
+import SuspendedScreen from './SuspendedScreen';
 
 type EstadoSync = 'online' | 'offline' | 'syncing';
 
@@ -48,6 +53,12 @@ interface AppContextType {
   // patrón que usaCostos.
   usaStock: boolean;
   setUsaStock: (v: boolean) => void;
+  // Estado de suscripción del negocio y fecha del próximo pago. El bloqueo
+  // real ya está en Supabase (RLS + trigger) — esto es solo para que la UI
+  // sepa qué explicarle al usuario. Cacheado igual que usaStock; default
+  // 'activo' si nunca hubo nada cacheado (ver getCachedEstado en db.ts).
+  estado: EstadoNegocio;
+  fechaProximoPago: string | null;
   // Última vez que se refrescó el catálogo con éxito desde Supabase (ISO) —
   // null si nunca se ha logrado sincronizar en este dispositivo. La usa la
   // regla de confiabilidad del stock (Parte 5, ver src/lib/stock.ts).
@@ -82,6 +93,8 @@ const AppContext = createContext<AppContextType>({
   setUsaCostos: () => {},
   usaStock: false,
   setUsaStock: () => {},
+  estado: 'activo',
+  fechaProximoPago: null,
   ultimaSincronizacion: null,
   authLoading: true,
   signOut: async () => {},
@@ -102,6 +115,8 @@ interface PerfilResuelto {
   userNombre: string;
   usaCostos: boolean;
   usaStock: boolean;
+  estado: EstadoNegocio;
+  fechaProximoPago: string | null;
 }
 
 async function fetchPerfil(uid: string): Promise<PerfilResuelto | 'desactivado' | null> {
@@ -117,7 +132,7 @@ async function fetchPerfil(uid: string): Promise<PerfilResuelto | 'desactivado' 
 
     const { data: negocio } = await supabase
       .from('negocios')
-      .select('nombre, usa_costos, usa_stock')
+      .select('nombre, usa_costos, usa_stock, estado, fecha_proximo_pago')
       .eq('id', perfil.negocio_id)
       .single();
 
@@ -130,6 +145,11 @@ async function fetchPerfil(uid: string): Promise<PerfilResuelto | 'desactivado' 
       userNombre: perfil.nombre ?? '',
       usaCostos: negocio.usa_costos ?? false,
       usaStock: negocio.usa_stock ?? false,
+      // Default seguro: un negocio sin `estado` (no debería pasar, pero
+      // cubre datos viejos o un select parcial) se trata como activo, nunca
+      // como restringido/suspendido.
+      estado: (negocio.estado as EstadoNegocio) ?? 'activo',
+      fechaProximoPago: negocio.fecha_proximo_pago ?? null,
     };
   } catch {
     return null;
@@ -153,18 +173,23 @@ async function resolverPerfil(uid: string): Promise<PerfilResuelto | 'desactivad
     await setCachedUsuarioNombre(perfil.userNombre);
     await setCachedUsaCostos(perfil.usaCostos);
     await setCachedUsaStock(perfil.usaStock);
+    await setCachedEstado(perfil.estado);
+    await setCachedFechaProximoPago(perfil.fechaProximoPago);
     return perfil;
   }
 
   const cachedId = await getCachedNegocioId();
   if (!cachedId) return null;
-  const [cachedNombre, cachedRol, cachedUserNombre, cachedUsaCostos, cachedUsaStock] = await Promise.all([
-    getCachedNegocioNombre(),
-    getCachedRol(),
-    getCachedUsuarioNombre(),
-    getCachedUsaCostos(),
-    getCachedUsaStock(),
-  ]);
+  const [cachedNombre, cachedRol, cachedUserNombre, cachedUsaCostos, cachedUsaStock, cachedEstado, cachedFecha] =
+    await Promise.all([
+      getCachedNegocioNombre(),
+      getCachedRol(),
+      getCachedUsuarioNombre(),
+      getCachedUsaCostos(),
+      getCachedUsaStock(),
+      getCachedEstado(),
+      getCachedFechaProximoPago(),
+    ]);
   return {
     negocioId: cachedId,
     negocioNombre: cachedNombre ?? '',
@@ -172,6 +197,8 @@ async function resolverPerfil(uid: string): Promise<PerfilResuelto | 'desactivad
     userNombre: cachedUserNombre ?? '',
     usaCostos: cachedUsaCostos,
     usaStock: cachedUsaStock,
+    estado: cachedEstado,
+    fechaProximoPago: cachedFecha,
   };
 }
 
@@ -187,12 +214,20 @@ export default function Providers({ children }: { children: ReactNode }) {
   const [userNombre, setUserNombre] = useState('');
   const [usaCostos, setUsaCostos] = useState(false);
   const [usaStock, setUsaStock] = useState(false);
+  // Default seguro: 'activo' hasta que se resuelva el perfil (fetch o
+  // cache) — nunca arrancar mostrando restricciones que no corresponden.
+  const [estado, setEstado] = useState<EstadoNegocio>('activo');
+  const [fechaProximoPago, setFechaProximoPago] = useState<string | null>(null);
   const [ultimaSincronizacion, setUltimaSincronizacion] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [pendientesCount, setPendientesCount] = useState(0);
   const [sincronizando, setSincronizando] = useState(false);
   const [productosVersion, setProductosVersion] = useState(0);
   const [motivoDeslogueo, setMotivoDeslogueo] = useState<string | null>(null);
+  // Aviso de versión nueva del Service Worker — nunca dispara una recarga
+  // sola, solo lo pide al usuario (recargar solo podría tumbar una venta a
+  // medio armar).
+  const [updateDisponible, setUpdateDisponible] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem('theme') as 'light' | 'dark' | null;
@@ -204,10 +239,34 @@ export default function Providers({ children }: { children: ReactNode }) {
   // Next.js sirve 'main-app.js' — ese registro nunca llega a ejecutarse.
   // sw.js se genera correctamente (next-pwa maneja bien esa parte), solo falta
   // registrarlo nosotros mismos para que el precache offline funcione.
+  //
+  // skipWaiting:true (next.config.js) hace que un SW nuevo se active solo,
+  // sin esperar a que se cierren las pestañas viejas — pero la página ya
+  // abierta sigue corriendo el JS viejo hasta que alguien la recarga. Un
+  // cliente con la PWA instalada puede quedarse así días, porque nunca
+  // cierra la app del todo. Detectamos cuándo hay una versión nueva lista y
+  // avisamos — nunca recargamos solos, eso podría tumbar una venta a medio
+  // armar.
   useEffect(() => {
     if (process.env.NODE_ENV !== 'production') return;
     if (!('serviceWorker' in navigator)) return;
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
+
+    navigator.serviceWorker.register('/sw.js').then(registration => {
+      // Ya había un SW controlando esta pestaña cuando se registró, y ya
+      // hay uno nuevo esperando: es una actualización, no la primera visita.
+      if (registration.waiting && navigator.serviceWorker.controller) {
+        setUpdateDisponible(true);
+      }
+      registration.addEventListener('updatefound', () => {
+        const nuevo = registration.installing;
+        if (!nuevo) return;
+        nuevo.addEventListener('statechange', () => {
+          if (nuevo.state === 'installed' && navigator.serviceWorker.controller) {
+            setUpdateDisponible(true);
+          }
+        });
+      });
+    }).catch(() => {});
   }, []);
 
   const toggleTheme = () => {
@@ -237,6 +296,8 @@ export default function Providers({ children }: { children: ReactNode }) {
     setUserNombre('');
     setUsaCostos(false);
     setUsaStock(false);
+    setEstado('activo');
+    setFechaProximoPago(null);
     setTasaState(0);
     setConfiguracion(null);
     setPendientesCount(0);
@@ -261,6 +322,8 @@ export default function Providers({ children }: { children: ReactNode }) {
       setUserNombre('');
       setUsaCostos(false);
       setUsaStock(false);
+      setEstado('activo');
+      setFechaProximoPago(null);
       setMotivoDeslogueo('Tu usuario fue desactivado. Contacta al administrador de tu negocio.');
     };
 
@@ -278,6 +341,8 @@ export default function Providers({ children }: { children: ReactNode }) {
         setUserNombre(perfil.userNombre);
         setUsaCostos(perfil.usaCostos);
         setUsaStock(perfil.usaStock);
+        setEstado(perfil.estado);
+        setFechaProximoPago(perfil.fechaProximoPago);
       }
     };
 
@@ -299,6 +364,8 @@ export default function Providers({ children }: { children: ReactNode }) {
         setUserNombre('');
         setUsaCostos(false);
         setUsaStock(false);
+        setEstado('activo');
+        setFechaProximoPago(null);
       }
       // Otros eventos con session null (ej. refresh fallido sin red) se
       // ignoran a propósito: mantenemos la sesión local intacta.
@@ -417,6 +484,21 @@ export default function Providers({ children }: { children: ReactNode }) {
 
   const syncStatus: EstadoSync = !isOnline ? 'offline' : sincronizando ? 'syncing' : 'online';
 
+  // Revalida el estado de suscripción contra el servidor — lo usa el botón
+  // "Reintentar" de la pantalla de suspendido. No fuerza cierre de sesión
+  // ni nada más: si no hay red o el perfil no resuelve, simplemente no hay
+  // nada nuevo que aplicar todavía.
+  const revalidarEstado = async () => {
+    if (!user) return;
+    const perfil = await fetchPerfil(user.id);
+    if (perfil && perfil !== 'desactivado') {
+      setEstado(perfil.estado);
+      setFechaProximoPago(perfil.fechaProximoPago);
+      await setCachedEstado(perfil.estado);
+      await setCachedFechaProximoPago(perfil.fechaProximoPago);
+    }
+  };
+
   if (authLoading) {
     return (
       <div className="min-h-screen bg-emerald-600 flex items-center justify-center">
@@ -446,10 +528,24 @@ export default function Providers({ children }: { children: ReactNode }) {
     <AppContext.Provider value={{
       tasa, setTasa, isOnline, configuracion, theme, toggleTheme,
       user, negocioId, negocioNombre, rol, userNombre, usaCostos, setUsaCostos,
-      usaStock, setUsaStock, ultimaSincronizacion, authLoading, signOut,
+      usaStock, setUsaStock, estado, fechaProximoPago, ultimaSincronizacion, authLoading, signOut,
       pendientesCount, syncStatus, sincronizarAhora, productosVersion,
     }}>
-      {children}
+      {estado === 'suspendido'
+        ? <SuspendedScreen isOnline={isOnline} onReintentar={revalidarEstado} onSignOut={signOut} />
+        : children}
+      {updateDisponible && (
+        <button
+          onClick={() => window.location.reload()}
+          className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 bg-gray-900 text-white text-xs font-medium pl-3 pr-4 py-2.5 rounded-full shadow-lg flex items-center gap-2"
+        >
+          <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          Hay una versión nueva — toca para actualizar
+        </button>
+      )}
     </AppContext.Provider>
   );
 }
