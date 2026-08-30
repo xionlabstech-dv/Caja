@@ -285,7 +285,9 @@ export default function InventarioPage() {
     let stock: number | null = null;
     let stockMinimo: number | null = null;
     if (usaStock && rol === 'admin' && form.controla_stock) {
-      if (form.stock.trim()) {
+      // Con movimientos, "stock" ni se parsea: no puede llegar a incluirse
+      // en el payload del update pase lo que pase (ver más abajo).
+      if (!existenciaBloqueada && form.stock.trim()) {
         stock = parseFloat(form.stock);
         if (isNaN(stock)) { setError('La existencia no es válida'); return; }
       }
@@ -332,7 +334,12 @@ export default function InventarioPage() {
     if (usaStock && rol === 'admin') {
       datos.controla_stock = form.controla_stock;
       if (form.controla_stock) {
-        datos.stock = stock;
+        // La defensa real está acá, no en que el input esté deshabilitado:
+        // con movimientos, la llave "stock" ni se incluye en el payload —
+        // ni siquiera con el mismo valor que ya tenía.
+        if (!existenciaBloqueada) {
+          datos.stock = stock;
+        }
         datos.stock_minimo = stockMinimo;
       }
     }
@@ -434,6 +441,14 @@ export default function InventarioPage() {
     await cargar();
     showToast('Producto eliminado');
   };
+
+  // Se bloquea "Existencia actual" en cuanto el producto tiene aunque sea
+  // un movimiento registrado — la única vía para tocarla a partir de ahí es
+  // Movimientos, nunca un UPDATE directo sin motivo/usuario/rastro. Un
+  // producto nuevo (editando === null) o sin movimientos sigue editable
+  // libre, para poder cargar el inventario inicial. tiene_movimientos la
+  // mantiene un trigger en Supabase — de solo lectura acá.
+  const existenciaBloqueada = !!editando?.tiene_movimientos;
 
   const mostrarCosto = usaCostos && rol === 'admin';
   const precioFormNum = parseFloat(form.precio);
@@ -948,9 +963,26 @@ export default function InventarioPage() {
                           step="0.001"
                           value={form.stock}
                           onChange={e => setForm(f => ({ ...f, stock: e.target.value }))}
-                          className="w-full border border-gray-200 rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none focus:border-emerald-400"
+                          disabled={existenciaBloqueada}
+                          className={`w-full border rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none ${
+                            existenciaBloqueada
+                              ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed'
+                              : 'border-gray-200 focus:border-emerald-400'
+                          }`}
                           placeholder="Opcional"
                         />
+                        {existenciaBloqueada && (
+                          <p className="text-xs text-gray-400 mt-1">
+                            Para ajustar existencia, usa{' '}
+                            <button
+                              type="button"
+                              onClick={() => router.push('/movimientos')}
+                              className="text-emerald-600 font-medium underline"
+                            >
+                              Movimientos → Ajuste por conteo
+                            </button>
+                          </p>
+                        )}
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
