@@ -21,6 +21,13 @@ export interface Producto {
   // Permite excluir productos puntuales del control (granel, servicios).
   // Solo aplica si el negocio tiene usa_stock activo. Default true.
   controla_stock?: boolean;
+  // La mantiene un trigger sobre movimientos_stock en Supabase — de solo
+  // lectura para el cliente, nunca se escribe desde acá. En true, el campo
+  // "Existencia actual" se bloquea en Inventario (ver guardar() en
+  // inventario/page.tsx): con historial, el único camino para ajustar
+  // stock es Movimientos, nunca un UPDATE directo que no deja rastro.
+  // Ausente/false = producto sin movimientos, existencia editable.
+  tiene_movimientos?: boolean;
 }
 
 export interface Configuracion {
