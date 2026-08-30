@@ -1219,7 +1219,6 @@ export default function CajaPage() {
               </p>
               <input
                 type="password"
-                inputMode="numeric"
                 value={passActual}
                 onChange={e => { setPassActual(e.target.value); setPassError(''); }}
                 placeholder="Contraseña actual"
@@ -1227,7 +1226,6 @@ export default function CajaPage() {
               />
               <input
                 type="password"
-                inputMode="numeric"
                 value={passNueva}
                 onChange={e => { setPassNueva(e.target.value); setPassError(''); }}
                 placeholder="Nueva contraseña"
@@ -1235,7 +1233,6 @@ export default function CajaPage() {
               />
               <input
                 type="password"
-                inputMode="numeric"
                 value={passConfirmar}
                 onChange={e => { setPassConfirmar(e.target.value); setPassError(''); }}
                 placeholder="Confirmar nueva contraseña"
