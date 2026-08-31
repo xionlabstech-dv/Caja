@@ -75,13 +75,12 @@ export default function CajaPage() {
   const {
     tasa, isOnline, negocioNombre, signOut, user, pendientesCount, negocioId, rol, userNombre,
     productosVersion, usaCostos, setUsaCostos, usaStock, setUsaStock, ultimaSincronizacion,
+    carrito, setCarrito, showCarrito, setShowCarrito,
   } = useApp();
   const router = useRouter();
   const [productos, setProductos] = useState<Producto[]>([]);
   const [cargandoProductos, setCargandoProductos] = useState(true);
   const [busqueda, setBusqueda] = useState('');
-  const [carrito, setCarrito] = useState<ItemCarrito[]>([]);
-  const [showCarrito, setShowCarrito] = useState(false);
   const [showPago, setShowPago] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [showPeso, setShowPeso] = useState(false);
