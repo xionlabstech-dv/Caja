@@ -105,6 +105,7 @@ export default function CajaPage() {
   const [passError, setPassError] = useState('');
   const [passCargando, setPassCargando] = useState(false);
   const [showConfirmStock, setShowConfirmStock] = useState(false);
+  const [showConfirmVaciar, setShowConfirmVaciar] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   // productosVersion depende de Providers: se re-lee la lista cuando el sync
@@ -312,6 +313,13 @@ export default function CajaPage() {
 
   const removerItem = (lineId: string) => {
     setCarrito(prev => prev.filter(i => i.lineId !== lineId));
+  };
+
+  const confirmarVaciarCarrito = () => {
+    setCarrito([]);
+    setShowConfirmVaciar(false);
+    setShowCarrito(false);
+    showToast('Carrito vaciado');
   };
 
   const totalBS = carrito.reduce((sum, item) => sum + itemPrecioBS(item), 0);
@@ -838,11 +846,21 @@ export default function CajaPage() {
           <div className="relative w-full max-w-lg mx-auto bg-white rounded-t-2xl max-h-[80vh] flex flex-col">
             <div className="flex items-center justify-between p-4 border-b border-gray-100">
               <h2 className="text-lg font-bold">Tu carrito</h2>
-              <button onClick={() => setShowCarrito(false)} className="p-1 text-gray-400">
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+              <div className="flex items-center gap-3">
+                {carrito.length > 0 && (
+                  <button
+                    onClick={() => setShowConfirmVaciar(true)}
+                    className="text-xs text-red-400 font-medium"
+                  >
+                    Vaciar
+                  </button>
+                )}
+                <button onClick={() => setShowCarrito(false)} className="p-1 text-gray-400">
+                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -1359,6 +1377,32 @@ export default function CajaPage() {
                 className="flex-1 py-3 rounded-xl bg-emerald-600 text-white font-bold"
               >
                 Sí, activar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showConfirmVaciar && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowConfirmVaciar(false)} />
+          <div className="relative bg-white dark:bg-slate-800 rounded-2xl w-full max-w-sm shadow-xl p-5">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Vaciar carrito</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
+              Se {carrito.length === 1 ? 'va a quitar' : 'van a quitar'} {carrito.length} producto{carrito.length === 1 ? '' : 's'} del carrito. Esta acción no se puede deshacer.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowConfirmVaciar(false)}
+                className="flex-1 py-3 rounded-xl bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 font-semibold"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmarVaciarCarrito}
+                className="flex-1 py-3 rounded-xl bg-red-600 text-white font-bold"
+              >
+                Vaciar
               </button>
             </div>
           </div>
