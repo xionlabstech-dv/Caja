@@ -128,6 +128,19 @@ export default function ResumenPage() {
       getUltimoCierre(),
     ]);
 
+    // Etapa 1 — pintar lo local de inmediato, sin esperar ninguna ida y
+    // vuelta a Supabase. Antes, toda la función corría antes del primer
+    // setVentas y la pantalla se quedaba en blanco hasta que terminaban la
+    // reconciliación y el fetch remoto — visible en cada apertura de
+    // Resumen con la señal típica de estos comercios, aunque las ventas ya
+    // estuvieran guardadas en el propio teléfono desde que se cobraron.
+    setVentas(vLocal);
+    setCierres(c);
+    setUltimoCierreState(uc);
+    setSoloDispositivo(true);
+
+    // Etapa 2 — completar con el servidor cuando (y si) llega. Mismo
+    // criterio de siempre, solo que ya no bloquea el primer pintado.
     // Reconciliación: ventas que este dispositivo cree pendientes pero que
     // otro dispositivo ya cerró en Supabase mientras tanto. Sin esto se
     // arrastrarían para siempre en el período local, duplicando totales en
