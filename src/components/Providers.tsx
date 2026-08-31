@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, Dispatch, SetStateAction, ReactNode } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { syncFromSupabase, getConfiguracion } from '@/lib/sync';
@@ -26,7 +26,7 @@ import {
   contarPendientes,
 } from '@/lib/db';
 import { procesarCola } from '@/lib/outbox';
-import { Configuracion, Rol, EstadoNegocio } from '@/types';
+import { Configuracion, Rol, EstadoNegocio, ItemCarrito } from '@/types';
 import LoginScreen from './LoginScreen';
 import SuspendedScreen from './SuspendedScreen';
 
@@ -75,6 +75,17 @@ interface AppContextType {
   // carrera al sync de Providers y quedarse con una lista vacía para
   // siempre (nunca hay un segundo render que la corrija).
   productosVersion: number;
+  // Vive acá (no en un useState local de la pantalla de Caja) para que
+  // sobreviva a navegar a cualquier otra pantalla y volver — Next.js
+  // desmonta el componente de Caja al salir, y un useState local se pierde
+  // con él. Nunca se persiste en IndexedDB ni en ningún storage: es
+  // memoria de este contexto, nada más — se limpia explícitamente al
+  // cerrar sesión (ver signOut) para que un cajero nuevo en el mismo
+  // teléfono no herede el carrito del anterior.
+  carrito: ItemCarrito[];
+  setCarrito: Dispatch<SetStateAction<ItemCarrito[]>>;
+  showCarrito: boolean;
+  setShowCarrito: Dispatch<SetStateAction<boolean>>;
 }
 
 const AppContext = createContext<AppContextType>({
@@ -102,6 +113,10 @@ const AppContext = createContext<AppContextType>({
   syncStatus: 'online',
   sincronizarAhora: () => {},
   productosVersion: 0,
+  carrito: [],
+  setCarrito: () => {},
+  showCarrito: false,
+  setShowCarrito: () => {},
 });
 
 export function useApp() {
@@ -228,6 +243,9 @@ export default function Providers({ children }: { children: ReactNode }) {
   // sola, solo lo pide al usuario (recargar solo podría tumbar una venta a
   // medio armar).
   const [updateDisponible, setUpdateDisponible] = useState(false);
+  // Carrito de la pantalla de Caja — ver comentario en AppContextType.
+  const [carrito, setCarrito] = useState<ItemCarrito[]>([]);
+  const [showCarrito, setShowCarrito] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem('theme') as 'light' | 'dark' | null;
@@ -301,6 +319,8 @@ export default function Providers({ children }: { children: ReactNode }) {
     setTasaState(0);
     setConfiguracion(null);
     setPendientesCount(0);
+    setCarrito([]);
+    setShowCarrito(false);
   };
 
   // Auth: revisa la sesión al montar y escucha cambios. La sesión NUNCA se
@@ -324,6 +344,8 @@ export default function Providers({ children }: { children: ReactNode }) {
       setUsaStock(false);
       setEstado('activo');
       setFechaProximoPago(null);
+      setCarrito([]);
+      setShowCarrito(false);
       setMotivoDeslogueo('Tu usuario fue desactivado. Contacta al administrador de tu negocio.');
     };
 
@@ -430,6 +452,8 @@ export default function Providers({ children }: { children: ReactNode }) {
       const cachedNegocioId = await getCachedNegocioId();
       if (cachedNegocioId !== null && cachedNegocioId !== id) {
         await clearTenantData();
+        setCarrito([]);
+        setShowCarrito(false);
       }
       await setCachedNegocioId(id);
 
@@ -530,6 +554,7 @@ export default function Providers({ children }: { children: ReactNode }) {
       user, negocioId, negocioNombre, rol, userNombre, usaCostos, setUsaCostos,
       usaStock, setUsaStock, estado, fechaProximoPago, ultimaSincronizacion, authLoading, signOut,
       pendientesCount, syncStatus, sincronizarAhora, productosVersion,
+      carrito, setCarrito, showCarrito, setShowCarrito,
     }}>
       {estado === 'suspendido'
         ? <SuspendedScreen isOnline={isOnline} onReintentar={revalidarEstado} onSignOut={signOut} />
