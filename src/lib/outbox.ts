@@ -9,6 +9,8 @@ import {
   saveMovimiento,
   getMovimientoFiado,
   saveMovimientoFiado,
+  eliminarMovimientoFiado,
+  actualizarSaldoFiadoLocal,
 } from './db';
 import {
   createProductoSupabase,
@@ -23,6 +25,7 @@ import {
   aplicarMovimientoStockRemoto,
   createClienteFiadoSupabase,
   aplicarMovimientoFiadoRemoto,
+  getSaldoFiadoRemoto,
 } from './sync';
 import {
   OperacionPendiente,
@@ -248,6 +251,16 @@ async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
         // Ej. un abono que ya no coincide con el saldo real para cuando le
         // toca subir (otro dispositivo cobró de más entre medio) — la RPC
         // lo rechaza con un mensaje pensado para mostrarse tal cual.
+        //
+        // El movimiento nunca se aplicó de verdad, así que no puede quedar
+        // en IndexedDB con sincronizado: false para siempre — saveClientesFiado()
+        // trata eso como "hay un cambio pendiente" y nunca deja que el sync
+        // periódico corrija el saldo. Se borra, y el saldo optimista (que
+        // quedó mal) se corrige ya mismo con el valor real de Supabase, sin
+        // esperar al próximo ciclo.
+        await eliminarMovimientoFiado(movimiento.id);
+        const saldoReal = await getSaldoFiadoRemoto(movimiento.cliente_id);
+        if (saldoReal !== null) await actualizarSaldoFiadoLocal(movimiento.cliente_id, saldoReal);
         notificarFalloPermanente(
           `No se pudo aplicar un movimiento de fiado: ${resultado.mensaje ?? 'el servidor lo rechazó'}`
         );

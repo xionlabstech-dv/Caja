@@ -228,6 +228,26 @@ export async function createClienteFiadoSupabase(
   }
 }
 
+// Select puntual del saldo real de UN cliente — se usa cuando un movimiento
+// quedó rechazado de forma definitiva y el saldo optimista que se calculó al
+// encolarlo quedó mal: no tiene sentido esperar al próximo ciclo de sync
+// para corregirlo, se trae ya mismo. Devuelve null si no se pudo consultar
+// (sin red, error), para que quien llama sepa que no hay nada que corregir
+// todavía.
+export async function getSaldoFiadoRemoto(clienteId: string): Promise<number | null> {
+  try {
+    const { data, error } = await supabase
+      .from('clientes_fiado')
+      .select('saldo_usd')
+      .eq('id', clienteId)
+      .single();
+    if (error) throw error;
+    return data.saldo_usd as number;
+  } catch {
+    return null;
+  }
+}
+
 export { getConfigDB as getConfiguracion };
 
 export async function sincronizarCierre(cierre: CierreCaja, negocioId: string): Promise<boolean> {

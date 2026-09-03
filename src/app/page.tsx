@@ -23,6 +23,7 @@ import {
   encolarAplicarMovimientoStock,
   encolarCrearClienteFiado,
   encolarAplicarMovimientoFiado,
+  onFalloPermanente,
 } from '@/lib/outbox';
 import { updateUsaCostos, updateUsaStock } from '@/lib/sync';
 import { precioBS, precioUSD, costoUSD, formatBS, formatUSD } from '@/lib/precio';
@@ -154,6 +155,14 @@ export default function CajaPage() {
     });
     return () => { cancelado = true; };
   }, [productosVersion]);
+
+  // Si la cola rechazó de forma definitiva un movimiento de fiado, ya
+  // corrigió el saldo en IndexedDB de inmediato (ver outbox.ts) — sin esto,
+  // esta pantalla seguiría ofreciendo el saldo optimista viejo al elegir
+  // cliente hasta el próximo sync periódico.
+  useEffect(() => onFalloPermanente(() => {
+    getClientesFiado().then(cs => setClientesFiado(cs));
+  }), []);
 
   const showToast = (msg: string) => {
     setToast(msg);

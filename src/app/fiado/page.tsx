@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { ClienteFiado, MovimientoFiado } from '@/types';
 import { getClientesFiado, actualizarSaldoFiadoLocal, saveMovimientoFiado, getMovimientosFiadoPorCliente } from '@/lib/db';
 import { getMovimientosFiadoPorClienteRemoto } from '@/lib/sync';
-import { encolarAplicarMovimientoFiado } from '@/lib/outbox';
+import { encolarAplicarMovimientoFiado, onFalloPermanente } from '@/lib/outbox';
 import { formatBS, formatUSD } from '@/lib/precio';
 import { useApp } from '@/components/Providers';
 import { useGuardarRuta } from '@/lib/useGuardarRuta';
@@ -61,6 +61,14 @@ export default function FiadoPage() {
     });
     return () => { cancelado = true; };
   }, [productosVersion]);
+
+  // Si la cola rechazó de forma definitiva un movimiento de este cliente, ya
+  // corrigió el saldo en IndexedDB de inmediato (ver outbox.ts) — sin esto,
+  // esta pantalla seguiría mostrando el saldo optimista viejo hasta el
+  // próximo sync periódico.
+  useEffect(() => onFalloPermanente(() => {
+    getClientesFiado().then(cs => setClientes(cs));
+  }), []);
 
   const deudores = clientes
     .filter(c => c.saldo_usd > EPSILON_SALDO)

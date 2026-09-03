@@ -458,6 +458,15 @@ export async function getMovimientoFiado(id: string): Promise<MovimientoFiado | 
   return db.get('fiado_movimientos', id);
 }
 
+// Se usa cuando el servidor rechazó el movimiento de forma definitiva: nunca
+// se aplicó de verdad, así que no puede quedar en IndexedDB marcado como
+// sincronizado: false para siempre — saveClientesFiado() trata eso como "hay
+// un cambio pendiente" y nunca deja que el sync periódico corrija el saldo.
+export async function eliminarMovimientoFiado(id: string): Promise<void> {
+  const db = await getDB();
+  await db.delete('fiado_movimientos', id);
+}
+
 export async function getMovimientosFiado(): Promise<MovimientoFiado[]> {
   const db = await getDB();
   const all = await db.getAll('fiado_movimientos');
