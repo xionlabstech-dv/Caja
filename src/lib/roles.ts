@@ -11,13 +11,14 @@ export const LIMITE_USUARIOS_POR_NEGOCIO = 3;
 // /movimientos no son pestañas de BottomNav (se llega desde el mini perfil
 // e Inventario respectivamente), pero sí deben estar acá para que la guía
 // de rutas las bloquee a un cajero por URL directa.
-const RUTAS_ADMIN = ['/', '/resumen', '/reportes', '/tasa', '/inventario', '/usuarios', '/movimientos'];
-const RUTAS_CAJERO = ['/', '/resumen'];
+const RUTAS_ADMIN = ['/', '/resumen', '/reportes', '/tasa', '/inventario', '/usuarios', '/movimientos', '/fiado'];
+const RUTAS_CAJERO = ['/', '/resumen', '/fiado'];
 
 // Con un negocio 'restringido', vender y cerrar caja (Caja, Resumen) y
 // fijar la tasa siguen andando — el resto de las pantallas de admin, no.
 // La base ya lo bloquea de verdad (RLS); esto solo evita que el admin
-// entre a una pantalla que le va a rebotar todo.
+// entre a una pantalla que le va a rebotar todo. Fiado (fiar/abonar) es
+// parte de vender, no de administrar — sigue disponible igual que Caja.
 const RUTAS_OCULTAS_RESTRINGIDO = ['/inventario', '/movimientos', '/reportes'];
 
 export function rutasPermitidas(rol: Rol | null, estado?: EstadoNegocio): string[] {
