@@ -56,7 +56,11 @@ export interface VentaItem {
   costo_usd?: number | null;
 }
 
-export type MetodoPago = 'efectivo_bs' | 'pago_movil' | 'biopago' | 'tarjeta' | 'efectivo_usd';
+// 'fiado' es un método más, exactamente igual que los demás: una fila más
+// en venta_pagos con su monto_bs/monto_usd, dentro del mismo pago mixto.
+// Lo que lo distingue es que además dispara un MovimientoFiado tipo
+// 'cargo' ligado a un cliente — ver confirmarVenta() en src/app/page.tsx.
+export type MetodoPago = 'efectivo_bs' | 'pago_movil' | 'biopago' | 'tarjeta' | 'efectivo_usd' | 'fiado';
 
 // 'mixto' solo aparece en Venta.metodo_pago (cuando pagos.length > 1) — un
 // pago individual (PagoVenta.metodo) siempre es un MetodoPago real.
@@ -144,6 +148,15 @@ export interface CierreCaja {
   creado_en: string;
   usuario_id?: string;
   usuario_nombre?: string;
+  // Abonos de fiado cobrados durante el período — aparte de total_bs/
+  // total_usd, que son lo VENDIDO. Un abono puede cobrar deuda de una
+  // venta de días atrás, así que no es lo mismo que "vendí hoy". Opcional:
+  // un cierre guardado antes de esta función simplemente no los trae, y
+  // leerlos como 0 es literalmente correcto (esos cierres nunca tuvieron
+  // abonos que contar) — no hace falta migración de IndexedDB.
+  total_abonado_bs?: number;
+  total_abonado_usd?: number;
+  cantidad_abonos?: number;
 }
 
 export interface ItemCarrito {
@@ -199,6 +212,54 @@ export interface MovimientoStock {
   sincronizado?: boolean;
 }
 
+// Fiado: Nelson fija la deuda de sus clientes en dólares (para que la
+// inflación no se la coma) y recibe los abonos en bolívares a la tasa del
+// día. El id lo genera el dispositivo — crear un cliente tiene que
+// funcionar sin conexión, igual que todo lo demás acá.
+export interface ClienteFiado {
+  id: string;
+  nombre: string;
+  // Siempre nace en 0 — un trigger en Supabase lo fuerza sin importar qué
+  // se mande. El saldo real solo se mueve a través de
+  // aplicar_movimiento_fiado (cargo suma, abono resta). Nunca se edita
+  // desde ningún formulario, ni siquiera un admin.
+  saldo_usd: number;
+  creado_por?: string;
+  creado_por_nombre?: string;
+  creado_en: string;
+}
+
+export type TipoMovimientoFiado = 'cargo' | 'abono';
+
+// Ledger de fiado, mismo patrón que MovimientoStock: cada fila es un
+// evento inmutable (fiar o abonar), nunca se edita ni se borra.
+export interface MovimientoFiado {
+  id: string;
+  cliente_id: string;
+  // Snapshot solo local (fiado_movimientos en Supabase no tiene esta
+  // columna) — igual que producto_nombre en MovimientoStock, para mostrar
+  // el historial offline sin depender de que el cliente siga cacheado.
+  cliente_nombre?: string;
+  tipo: TipoMovimientoFiado;
+  // El cliente entrega bolívares (el abono) o se le fía en dólares (el
+  // cargo, calculado desde el monto_bs de esa porción de la venta) — el
+  // equivalente en la otra moneda se calcula UNA vez, a la tasa de ese
+  // momento, y se guarda tal cual. Nunca se deriva de nuevo después.
+  monto_usd: number;
+  monto_bs: number;
+  tasa_usada: number;
+  // Solo en cargos originados por una venta — un abono no está ligado a
+  // una venta puntual.
+  venta_id?: string;
+  usuario_id?: string;
+  usuario_nombre?: string;
+  nota?: string;
+  saldo_resultante?: number;
+  ocurrido_en: string;
+  // Marca si ya se respaldó en Supabase (mismo patrón que Venta.sincronizada).
+  sincronizado?: boolean;
+}
+
 export type TipoPendiente =
   | 'crear_producto'
   | 'editar_producto'
@@ -209,7 +270,9 @@ export type TipoPendiente =
   | 'actualizar_cierre_ventas'
   | 'actualizar_usa_costos'
   | 'actualizar_usa_stock'
-  | 'aplicar_movimiento_stock';
+  | 'aplicar_movimiento_stock'
+  | 'crear_cliente_fiado'
+  | 'aplicar_movimiento_fiado';
 
 export interface PayloadCrearProducto {
   producto: Producto;
@@ -260,6 +323,16 @@ export interface PayloadAplicarMovimientoStock {
   negocioId: string;
 }
 
+export interface PayloadCrearClienteFiado {
+  cliente: ClienteFiado;
+  negocioId: string;
+}
+
+export interface PayloadAplicarMovimientoFiado {
+  movimientoId: string;
+  negocioId: string;
+}
+
 export type PayloadPendiente =
   | PayloadCrearProducto
   | PayloadEditarProducto
@@ -270,7 +343,9 @@ export type PayloadPendiente =
   | PayloadActualizarCierreVentas
   | PayloadActualizarUsaCostos
   | PayloadActualizarUsaStock
-  | PayloadAplicarMovimientoStock;
+  | PayloadAplicarMovimientoStock
+  | PayloadCrearClienteFiado
+  | PayloadAplicarMovimientoFiado;
 
 export interface OperacionPendiente {
   id: string;

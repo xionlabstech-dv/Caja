@@ -7,6 +7,8 @@ import {
   saveVenta,
   getMovimiento,
   saveMovimiento,
+  getMovimientoFiado,
+  saveMovimientoFiado,
 } from './db';
 import {
   createProductoSupabase,
@@ -19,6 +21,8 @@ import {
   sincronizarVenta,
   actualizarCierreIdVentas,
   aplicarMovimientoStockRemoto,
+  createClienteFiadoSupabase,
+  aplicarMovimientoFiadoRemoto,
 } from './sync';
 import {
   OperacionPendiente,
@@ -34,8 +38,11 @@ import {
   PayloadActualizarUsaCostos,
   PayloadActualizarUsaStock,
   PayloadAplicarMovimientoStock,
+  PayloadCrearClienteFiado,
+  PayloadAplicarMovimientoFiado,
   Producto,
   CierreCaja,
+  ClienteFiado,
 } from '@/types';
 
 // Backoff exponencial por operación: 2s, 4s, 8s... tope 60s.
@@ -117,6 +124,17 @@ export async function encolarAplicarMovimientoStock(movimientoId: string, negoci
   await encolar('aplicar_movimiento_stock', payload, movimientoId);
 }
 
+export async function encolarCrearClienteFiado(cliente: ClienteFiado, negocioId: string): Promise<void> {
+  const payload: PayloadCrearClienteFiado = { cliente, negocioId };
+  await encolar('crear_cliente_fiado', payload, cliente.id);
+}
+
+export async function encolarAplicarMovimientoFiado(movimientoId: string, negocioId: string): Promise<void> {
+  const payload: PayloadAplicarMovimientoFiado = { movimientoId, negocioId };
+  // id fijo = id del movimiento: mismo criterio que aplicar_movimiento_stock.
+  await encolar('aplicar_movimiento_fiado', payload, movimientoId);
+}
+
 async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
   switch (op.tipo) {
     case 'crear_producto': {
@@ -174,6 +192,23 @@ async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
       const nuevoStock = await aplicarMovimientoStockRemoto(movimiento);
       if (nuevoStock === null) return false;
       await saveMovimiento({ ...movimiento, sincronizado: true });
+      return true;
+    }
+    case 'crear_cliente_fiado': {
+      const { cliente, negocioId } = op.payload as PayloadCrearClienteFiado;
+      const resultado = await createClienteFiadoSupabase(cliente, negocioId);
+      // 'duplicate' en un reintento de cola = mismo id ya insertado antes → resuelto.
+      return resultado !== null;
+    }
+    case 'aplicar_movimiento_fiado': {
+      const { movimientoId } = op.payload as PayloadAplicarMovimientoFiado;
+      // Se relee de IndexedDB en vez de guardar una copia congelada en el
+      // payload — mismo patrón que 'aplicar_movimiento_stock'.
+      const movimiento = await getMovimientoFiado(movimientoId);
+      if (!movimiento) return true; // no hay nada que sincronizar
+      const resultado = await aplicarMovimientoFiadoRemoto(movimiento);
+      if (!resultado.ok) return false;
+      await saveMovimientoFiado({ ...movimiento, sincronizado: true });
       return true;
     }
     default:
