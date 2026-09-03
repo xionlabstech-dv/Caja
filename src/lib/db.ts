@@ -402,8 +402,32 @@ export async function saveClienteFiado(c: ClienteFiado): Promise<void> {
 
 export async function saveClientesFiado(clientes: ClienteFiado[]): Promise<void> {
   const db = await getDB();
+
+  // Si el sync periódico cae justo entre que se aplica un cargo/abono local
+  // y que el outbox termina de confirmarlo con el servidor, pisar saldo_usd
+  // con lo que trae el servidor revive por un momento el saldo viejo (ej. un
+  // cliente que ya saldó su deuda "reaparece" en la lista de deudores hasta
+  // que el outbox corrija de nuevo). Se trae una sola vez, para todo el
+  // lote, el set de clientes con movimientos locales todavía sin confirmar
+  // — mismo principio que el merge local/remoto de ventas en Resumen: lo
+  // pendiente no se pisa con lo remoto hasta que se confirma.
+  const movimientos = await db.getAll('fiado_movimientos');
+  const conMovimientoPendiente = new Set(
+    movimientos.filter(m => m.sincronizado === false).map(m => m.cliente_id)
+  );
+
   const tx = db.transaction('clientes_fiado', 'readwrite');
-  await Promise.all([...clientes.map(c => tx.store.put(c)), tx.done]);
+  for (const c of clientes) {
+    if (conMovimientoPendiente.has(c.id)) {
+      const local = await tx.store.get(c.id);
+      if (local) {
+        await tx.store.put({ ...c, saldo_usd: local.saldo_usd });
+        continue;
+      }
+    }
+    await tx.store.put(c);
+  }
+  await tx.done;
 }
 
 export async function getClienteFiado(id: string): Promise<ClienteFiado | undefined> {
