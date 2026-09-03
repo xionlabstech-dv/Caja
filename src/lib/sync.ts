@@ -487,12 +487,25 @@ export async function anularVenta(ventaId: string, motivo: string): Promise<Resu
 
 // Aplica un movimiento de stock vía la RPC atómica e idempotente — nunca un
 // UPDATE directo. Si el mismo id ya se aplicó (reintento de la cola
-// offline), la función devuelve el stock actual sin volver a descontar. El
-// resultado (número o excepción) siempre es definitivo, a diferencia de un
-// UPDATE de tabla: no hace falta verificar filas afectadas por separado.
-export async function aplicarMovimientoStockRemoto(m: MovimientoStock): Promise<number | null> {
+// offline), la función devuelve el stock actual sin volver a descontar.
+//
+// El fallo viene distinguido, mismo criterio que aplicarMovimientoFiadoRemoto:
+// si supabase.rpc() no llega a obtener respuesta (sin red, timeout), es
+// transitorio y vale la pena reintentar. Si el servidor sí respondió y
+// rechazó la operación, es permanente — quien llama debe sacarlo de la cola
+// en vez de reintentar algo que nunca va a cambiar de resultado.
+export interface ResultadoMovimientoStock {
+  ok: boolean;
+  nuevoStock?: number;
+  mensaje?: string;
+  permanente?: boolean;
+}
+
+export async function aplicarMovimientoStockRemoto(m: MovimientoStock): Promise<ResultadoMovimientoStock> {
+  let data: unknown;
+  let error: { message?: string } | null;
   try {
-    const { data, error } = await supabase.rpc('aplicar_movimiento_stock', {
+    ({ data, error } = await supabase.rpc('aplicar_movimiento_stock', {
       p_id: m.id,
       p_producto_id: m.producto_id,
       p_tipo: m.tipo,
@@ -501,18 +514,20 @@ export async function aplicarMovimientoStockRemoto(m: MovimientoStock): Promise<
       p_ocurrido_en: m.ocurrido_en,
       p_venta_id: m.venta_id ?? null,
       p_nota: m.nota ?? null,
-    });
-    if (error) throw error;
-    const nuevoStock = data as number;
-    // El stock local se corrige al valor autoritativo que devuelve la RPC
-    // (no simplemente al que se calculó de forma optimista al encolar) —
-    // cubre el caso de que otro dispositivo haya aplicado movimientos
-    // propios entre medio.
-    await actualizarStockLocal(m.producto_id, nuevoStock);
-    return nuevoStock;
-  } catch {
-    return null;
+    }));
+  } catch (err) {
+    return { ok: false, mensaje: (err as { message?: string }).message, permanente: false };
   }
+  if (error) {
+    return { ok: false, mensaje: error.message, permanente: true };
+  }
+  const nuevoStock = data as number;
+  // El stock local se corrige al valor autoritativo que devuelve la RPC
+  // (no simplemente al que se calculó de forma optimista al encolar) —
+  // cubre el caso de que otro dispositivo haya aplicado movimientos
+  // propios entre medio.
+  await actualizarStockLocal(m.producto_id, nuevoStock);
+  return { ok: true, nuevoStock };
 }
 
 // Historial de movimientos de TODO el negocio (no solo los de este
@@ -581,16 +596,26 @@ export async function reconciliarCierresLocal(ventaIds: string[]): Promise<Map<s
 // importa: un abono mayor a la deuda lo rechaza la función con un mensaje
 // pensado para mostrarse tal cual al usuario, así que no alcanza con
 // devolver null en caso de fallo.
+//
+// El fallo también viene distinguido: si supabase.rpc() ni siquiera obtiene
+// respuesta (sin red, timeout), es transitorio y vale la pena reintentar
+// como hasta ahora. Si SÍ hubo respuesta y el servidor la rechazó (ej. un
+// abono que ya no coincide con el saldo real para cuando le toca subir), es
+// permanente — reintentar no lo va a cambiar, así que quien llama debe
+// sacarlo de la cola en vez de dejarlo reintentando para siempre.
 export interface ResultadoMovimientoFiado {
   ok: boolean;
   saldoNuevo?: number;
   // error.message tal cual lo devolvió la RPC, solo presente cuando ok=false.
   mensaje?: string;
+  permanente?: boolean;
 }
 
 export async function aplicarMovimientoFiadoRemoto(m: MovimientoFiado): Promise<ResultadoMovimientoFiado> {
+  let data: unknown;
+  let error: { message?: string } | null;
   try {
-    const { data, error } = await supabase.rpc('aplicar_movimiento_fiado', {
+    ({ data, error } = await supabase.rpc('aplicar_movimiento_fiado', {
       p_id: m.id,
       p_cliente_id: m.cliente_id,
       p_tipo: m.tipo,
@@ -600,18 +625,22 @@ export async function aplicarMovimientoFiadoRemoto(m: MovimientoFiado): Promise<
       p_venta_id: m.venta_id ?? null,
       p_nota: m.nota ?? null,
       p_ocurrido_en: m.ocurrido_en,
-    });
-    if (error) throw error;
-    const nuevoSaldo = data as number;
-    // Igual que con el stock: el saldo local se corrige al valor
-    // autoritativo que devuelve la RPC, no al que se calculó de forma
-    // optimista al encolar — cubre que otro dispositivo haya aplicado
-    // movimientos propios sobre el mismo cliente entre medio.
-    await actualizarSaldoFiadoLocal(m.cliente_id, nuevoSaldo);
-    return { ok: true, saldoNuevo: nuevoSaldo };
+    }));
   } catch (err) {
-    return { ok: false, mensaje: (err as { message?: string }).message };
+    // La llamada ni siquiera volvió con una respuesta — sin red, timeout.
+    return { ok: false, mensaje: (err as { message?: string }).message, permanente: false };
   }
+  if (error) {
+    // El servidor respondió y rechazó la operación — definitivo.
+    return { ok: false, mensaje: error.message, permanente: true };
+  }
+  const nuevoSaldo = data as number;
+  // Igual que con el stock: el saldo local se corrige al valor
+  // autoritativo que devuelve la RPC, no al que se calculó de forma
+  // optimista al encolar — cubre que otro dispositivo haya aplicado
+  // movimientos propios sobre el mismo cliente entre medio.
+  await actualizarSaldoFiadoLocal(m.cliente_id, nuevoSaldo);
+  return { ok: true, saldoNuevo: nuevoSaldo };
 }
 
 // Historial de movimientos de UN cliente (cargos y abonos), para mostrar

@@ -50,6 +50,28 @@ function backoffMs(intentos: number): number {
   return Math.min(2 ** intentos * 1000, 60000);
 }
 
+// Aviso de un cambio que el servidor rechazó de forma DEFINITIVA (no un
+// problema de red) — se saca de la cola en vez de reintentar para siempre,
+// pero eso no puede pasar en silencio: quien esté usando la app necesita
+// enterarse de que ese cargo/abono o movimiento específico nunca se aplicó,
+// y por qué. outbox.ts no es un componente de React, así que expone este
+// suscriptor en vez de mostrar el aviso directamente — Providers.tsx (que sí
+// puede pintar algo visible en cualquier pantalla) se suscribe una vez.
+type ListenerFalloPermanente = (mensaje: string) => void;
+const listenersFalloPermanente: ListenerFalloPermanente[] = [];
+
+export function onFalloPermanente(cb: ListenerFalloPermanente): () => void {
+  listenersFalloPermanente.push(cb);
+  return () => {
+    const i = listenersFalloPermanente.indexOf(cb);
+    if (i >= 0) listenersFalloPermanente.splice(i, 1);
+  };
+}
+
+function notificarFalloPermanente(mensaje: string) {
+  for (const cb of listenersFalloPermanente) cb(mensaje);
+}
+
 async function encolar(
   tipo: TipoPendiente,
   payload: PayloadPendiente,
@@ -189,10 +211,21 @@ async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
       // payload — mismo patrón que 'registrar_venta'.
       const movimiento = await getMovimiento(movimientoId);
       if (!movimiento) return true; // no hay nada que sincronizar
-      const nuevoStock = await aplicarMovimientoStockRemoto(movimiento);
-      if (nuevoStock === null) return false;
-      await saveMovimiento({ ...movimiento, sincronizado: true });
-      return true;
+      const resultado = await aplicarMovimientoStockRemoto(movimiento);
+      if (resultado.ok) {
+        await saveMovimiento({ ...movimiento, sincronizado: true });
+        return true;
+      }
+      if (resultado.permanente) {
+        // El servidor respondió y rechazó el movimiento de forma definitiva
+        // — reintentar no lo va a cambiar. Se saca de la cola en vez de
+        // quedar reintentando para siempre, y se avisa con el motivo real.
+        notificarFalloPermanente(
+          `No se pudo aplicar un movimiento de stock: ${resultado.mensaje ?? 'el servidor lo rechazó'}`
+        );
+        return true;
+      }
+      return false;
     }
     case 'crear_cliente_fiado': {
       const { cliente, negocioId } = op.payload as PayloadCrearClienteFiado;
@@ -207,9 +240,20 @@ async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
       const movimiento = await getMovimientoFiado(movimientoId);
       if (!movimiento) return true; // no hay nada que sincronizar
       const resultado = await aplicarMovimientoFiadoRemoto(movimiento);
-      if (!resultado.ok) return false;
-      await saveMovimientoFiado({ ...movimiento, sincronizado: true });
-      return true;
+      if (resultado.ok) {
+        await saveMovimientoFiado({ ...movimiento, sincronizado: true });
+        return true;
+      }
+      if (resultado.permanente) {
+        // Ej. un abono que ya no coincide con el saldo real para cuando le
+        // toca subir (otro dispositivo cobró de más entre medio) — la RPC
+        // lo rechaza con un mensaje pensado para mostrarse tal cual.
+        notificarFalloPermanente(
+          `No se pudo aplicar un movimiento de fiado: ${resultado.mensaje ?? 'el servidor lo rechazó'}`
+        );
+        return true;
+      }
+      return false;
     }
     default:
       return true;

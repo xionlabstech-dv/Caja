@@ -239,9 +239,21 @@ export default function MovimientosPage() {
       return;
     }
 
-    const nuevoStock = await aplicarMovimientoStockRemoto(movimiento);
+    const resultado = await aplicarMovimientoStockRemoto(movimiento);
     setGuardando(false);
-    if (nuevoStock === null) {
+
+    if (resultado.permanente) {
+      // El servidor respondió y rechazó el movimiento de forma definitiva —
+      // no tiene sentido encolarlo para reintentar algo que ya sabemos que
+      // va a volver a fallar. El movimiento ya aplicado localmente se deja
+      // como está (mismo criterio que una venta: ya ocurrió en la realidad).
+      showToast(`No se pudo registrar: ${resultado.mensaje ?? 'el servidor lo rechazó'}`);
+      setShowForm(false);
+      await cargar();
+      return;
+    }
+
+    if (!resultado.ok) {
       await encolarAplicarMovimientoStock(movimiento.id, negocioId);
       setShowForm(false);
       await cargar();
@@ -249,7 +261,7 @@ export default function MovimientosPage() {
       return;
     }
 
-    await saveMovimiento({ ...movimiento, sincronizado: true, stock_resultante: nuevoStock });
+    await saveMovimiento({ ...movimiento, sincronizado: true, stock_resultante: resultado.nuevoStock });
     setShowForm(false);
     await cargar();
     showToast('Movimiento registrado');
