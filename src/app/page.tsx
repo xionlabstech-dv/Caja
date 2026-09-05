@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Producto, ItemCarrito, MetodoPago, MetodoPagoVenta, PagoVenta, Venta, VentaItem, MovimientoStock } from '@/types';
+import { Producto, ItemCarrito, MetodoPago, MetodoPagoVenta, PagoVenta, Venta, VentaItem, MovimientoStock, ClienteFiado, MovimientoFiado } from '@/types';
 import {
   getProductos,
   getProductoPorCodigo,
@@ -11,12 +11,19 @@ import {
   setCachedUsaStock,
   saveMovimiento,
   actualizarStockLocal,
+  getClientesFiado,
+  saveClienteFiado,
+  saveMovimientoFiado,
+  actualizarSaldoFiadoLocal,
 } from '@/lib/db';
 import {
   encolarRegistrarVenta,
   encolarActualizarUsaCostos,
   encolarActualizarUsaStock,
   encolarAplicarMovimientoStock,
+  encolarCrearClienteFiado,
+  encolarAplicarMovimientoFiado,
+  onFalloPermanente,
 } from '@/lib/outbox';
 import { updateUsaCostos, updateUsaStock } from '@/lib/sync';
 import { precioBS, precioUSD, costoUSD, formatBS, formatUSD } from '@/lib/precio';
@@ -69,6 +76,7 @@ const METODOS_PAGO: { id: MetodoPago; label: string }[] = [
   { id: 'biopago', label: 'Biopago' },
   { id: 'tarjeta', label: 'Tarjeta' },
   { id: 'efectivo_usd', label: 'Efectivo $' },
+  { id: 'fiado', label: 'Fiado' },
 ];
 
 export default function CajaPage() {
@@ -94,7 +102,7 @@ export default function CajaPage() {
   // mientras ese pago todavía no es el último (el último nunca se teclea,
   // se calcula como residuo, ver agregarPagoMixtoCalculado).
   const [modoPagoMixto, setModoPagoMixto] = useState(false);
-  const [pagosMixtos, setPagosMixtos] = useState<{ metodo: MetodoPago; monto_bs: number; monto_usd: number }[]>([]);
+  const [pagosMixtos, setPagosMixtos] = useState<{ metodo: MetodoPago; monto_bs: number; monto_usd: number; clienteFiadoId?: string }[]>([]);
   const [metodoMixtoActual, setMetodoMixtoActual] = useState<MetodoPago | null>(null);
   const [montoMixtoInput, setMontoMixtoInput] = useState('');
   const [toast, setToast] = useState('');
@@ -107,6 +115,20 @@ export default function CajaPage() {
   const [showConfirmStock, setShowConfirmStock] = useState(false);
   const [showConfirmVaciar, setShowConfirmVaciar] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+
+  // Fiado: clientes del negocio, para elegir/crear al cobrar. Se recarga
+  // junto con productos (mismo disparador productosVersion) porque viaja en
+  // el mismo sync periódico — ver syncFromSupabase.
+  const [clientesFiado, setClientesFiado] = useState<ClienteFiado[]>([]);
+  const [busquedaClienteFiado, setBusquedaClienteFiado] = useState('');
+  const [creandoClienteFiado, setCreandoClienteFiado] = useState(false);
+  // Cliente elegido para el pago fiado que se está armando ahora mismo (modo
+  // simple, o el pago manual del modo mixto — nunca ambos a la vez).
+  const [clienteFiadoElegido, setClienteFiadoElegido] = useState<ClienteFiado | null>(null);
+  // En modo mixto, el pago "calculado" (el resto) normalmente se agrega al
+  // toque de elegir el método — pero si ese método es fiado hace falta
+  // primero elegir cliente, así que se abre este selector en su lugar.
+  const [seleccionandoClienteCalculado, setSeleccionandoClienteCalculado] = useState(false);
 
   // productosVersion depende de Providers: se re-lee la lista cuando el sync
   // inicial (o cualquier sync posterior) termina de escribir productos
@@ -122,6 +144,25 @@ export default function CajaPage() {
     });
     return () => { cancelado = true; };
   }, [productosVersion]);
+
+  // Mismo disparador que productos: clientes_fiado viaja en el mismo sync
+  // periódico (ver syncFromSupabase), así que se relee la lista local cada
+  // vez que ese sync termina de escribir.
+  useEffect(() => {
+    let cancelado = false;
+    getClientesFiado().then(cs => {
+      if (!cancelado) setClientesFiado(cs);
+    });
+    return () => { cancelado = true; };
+  }, [productosVersion]);
+
+  // Si la cola rechazó de forma definitiva un movimiento de fiado, ya
+  // corrigió el saldo en IndexedDB de inmediato (ver outbox.ts) — sin esto,
+  // esta pantalla seguiría ofreciendo el saldo optimista viejo al elegir
+  // cliente hasta el próximo sync periódico.
+  useEffect(() => onFalloPermanente(() => {
+    getClientesFiado().then(cs => setClientesFiado(cs));
+  }), []);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -394,6 +435,9 @@ export default function CajaPage() {
     setPagosMixtos([]);
     setMetodoMixtoActual(null);
     setMontoMixtoInput('');
+    setClienteFiadoElegido(null);
+    setBusquedaClienteFiado('');
+    setSeleccionandoClienteCalculado(false);
   };
 
   // Único punto para cerrar el panel de pago (flechita, fondo oscuro, o
@@ -404,11 +448,90 @@ export default function CajaPage() {
     setShowPago(false);
     setMetodo(null);
     setMontoRecibido('');
+    setClienteFiadoElegido(null);
+    setBusquedaClienteFiado('');
     salirPagoMixto();
+  };
+
+  // Cliente de fiado nuevo, creado sin salir del cobro — igual que crear un
+  // producto sobre la marcha, nunca depende de conexión: se guarda local de
+  // inmediato y se encola el alta en Supabase.
+  const crearClienteFiado = async (nombre: string): Promise<ClienteFiado> => {
+    const cliente: ClienteFiado = {
+      id: crypto.randomUUID(),
+      nombre: nombre.trim(),
+      saldo_usd: 0,
+      creado_por: user?.id,
+      creado_por_nombre: userNombre || undefined,
+      creado_en: new Date().toISOString(),
+    };
+    await saveClienteFiado(cliente);
+    setClientesFiado(prev => [...prev, cliente]);
+    if (negocioId) await encolarCrearClienteFiado(cliente, negocioId);
+    return cliente;
+  };
+
+  // Buscar entre los clientes existentes o crear uno nuevo con solo el
+  // nombre, sin salir del cobro. Se reutiliza en los tres puntos donde hace
+  // falta elegir cliente: pago simple, pago manual mixto y el pago
+  // calculado (el resto) mixto.
+  const renderSelectorClienteFiado = (onElegir: (c: ClienteFiado) => void) => {
+    const busqueda = busquedaClienteFiado.trim().toLowerCase();
+    const filtrados = busqueda
+      ? clientesFiado.filter(c => c.nombre.toLowerCase().includes(busqueda))
+      : clientesFiado;
+    const existeExacto = clientesFiado.some(c => c.nombre.toLowerCase() === busqueda);
+    return (
+      <div>
+        <label className="block text-sm text-gray-500 mb-1">Cliente</label>
+        <input
+          type="text"
+          value={busquedaClienteFiado}
+          onChange={e => setBusquedaClienteFiado(e.target.value)}
+          placeholder="Buscar o escribir nombre nuevo"
+          className="w-full border border-gray-300 rounded-xl p-3 text-base focus:outline-none focus:border-emerald-400 mb-2"
+          autoFocus
+        />
+        <div className="max-h-40 overflow-y-auto space-y-1.5">
+          {filtrados.map(c => (
+            <button
+              key={c.id}
+              onClick={() => onElegir(c)}
+              className="w-full text-left px-3 py-2.5 rounded-xl bg-gray-50 flex items-center justify-between"
+            >
+              <span className="font-medium text-gray-800">{c.nombre}</span>
+              {c.saldo_usd > 0 && (
+                <span className="text-xs text-orange-600 font-semibold flex-shrink-0 ml-2">
+                  Debe {formatUSD(c.saldo_usd)}
+                </span>
+              )}
+            </button>
+          ))}
+          {busqueda && !existeExacto && (
+            <button
+              disabled={creandoClienteFiado}
+              onClick={async () => {
+                setCreandoClienteFiado(true);
+                const nuevo = await crearClienteFiado(busquedaClienteFiado);
+                setCreandoClienteFiado(false);
+                onElegir(nuevo);
+              }}
+              className="w-full text-left px-3 py-2.5 rounded-xl bg-emerald-50 text-emerald-700 font-semibold disabled:opacity-50"
+            >
+              + Crear &quot;{busquedaClienteFiado.trim()}&quot;
+            </button>
+          )}
+          {filtrados.length === 0 && !busqueda && (
+            <p className="text-xs text-gray-400 text-center py-2">Escribe para buscar o crear un cliente</p>
+          )}
+        </div>
+      </div>
+    );
   };
 
   const agregarPagoMixtoManual = () => {
     if (!metodoMixtoActual) return;
+    if (metodoMixtoActual === 'fiado' && !clienteFiadoElegido) return;
     const monto = parseFloat(montoMixtoInput);
     if (!monto || monto <= 0) return;
     const enUsd = metodoMixtoActual === 'efectivo_usd';
@@ -422,13 +545,26 @@ export default function CajaPage() {
       showToast(`El monto no puede superar lo que falta: ${formatBS(residuoMixtoBs)}`);
       return;
     }
-    setPagosMixtos(prev => [...prev, { metodo: metodoMixtoActual, monto_bs, monto_usd }]);
+    setPagosMixtos(prev => [
+      ...prev,
+      {
+        metodo: metodoMixtoActual,
+        monto_bs,
+        monto_usd,
+        clienteFiadoId: metodoMixtoActual === 'fiado' ? clienteFiadoElegido!.id : undefined,
+      },
+    ]);
     setMetodoMixtoActual(null);
     setMontoMixtoInput('');
+    setClienteFiadoElegido(null);
+    setBusquedaClienteFiado('');
   };
 
-  const agregarPagoMixtoCalculado = (metodoElegido: MetodoPago) => {
-    setPagosMixtos(prev => [...prev, { metodo: metodoElegido, monto_bs: residuoMixtoBs, monto_usd: residuoMixtoUsd }]);
+  const agregarPagoMixtoCalculado = (metodoElegido: MetodoPago, clienteFiadoId?: string) => {
+    setPagosMixtos(prev => [
+      ...prev,
+      { metodo: metodoElegido, monto_bs: residuoMixtoBs, monto_usd: residuoMixtoUsd, clienteFiadoId },
+    ]);
   };
 
   const quitarPagoMixto = (index: number) => {
@@ -552,6 +688,43 @@ export default function CajaPage() {
       }
     }
 
+    // Fiado es un método más dentro de venta_pagos (ya insertado arriba, sin
+    // cambios), pero además liga esa porción a la deuda de un cliente — un
+    // aplicar_movimiento_fiado tipo 'cargo' aparte, encolado igual que el
+    // descuento de stock: nunca bloquea el cobro, se aplica local de
+    // inmediato y se sincroniza por su cuenta vía la RPC atómica e
+    // idempotente. A lo sumo hay un pago fiado por venta (el selector de
+    // método ya excluye 'fiado' de las opciones una vez usado en modo mixto).
+    if (negocioId) {
+      const pagoFiado = pagos.find(p => p.metodo === 'fiado');
+      const clienteId = modoPagoMixto
+        ? pagosMixtos.find(p => p.metodo === 'fiado')?.clienteFiadoId
+        : clienteFiadoElegido?.id;
+      if (pagoFiado && clienteId) {
+        const movimientoFiado: MovimientoFiado = {
+          id: crypto.randomUUID(),
+          cliente_id: clienteId,
+          tipo: 'cargo',
+          monto_usd: pagoFiado.monto_usd,
+          monto_bs: pagoFiado.monto_bs,
+          tasa_usada: tasa,
+          venta_id: venta.id,
+          usuario_id: user?.id,
+          usuario_nombre: userNombre || undefined,
+          ocurrido_en: now.toISOString(),
+          sincronizado: false,
+        };
+        await saveMovimientoFiado(movimientoFiado);
+        const clienteLocal = clientesFiado.find(c => c.id === clienteId);
+        if (clienteLocal) {
+          const nuevoSaldo = clienteLocal.saldo_usd + movimientoFiado.monto_usd;
+          await actualizarSaldoFiadoLocal(clienteId, nuevoSaldo);
+          setClientesFiado(prev => prev.map(c => (c.id === clienteId ? { ...c, saldo_usd: nuevoSaldo } : c)));
+        }
+        await encolarAplicarMovimientoFiado(movimientoFiado.id, negocioId);
+      }
+    }
+
     setCarrito([]);
     cerrarPago();
     showToast('Venta registrada');
@@ -566,7 +739,9 @@ export default function CajaPage() {
     metodo !== null &&
     (metodo === 'efectivo_bs' || metodo === 'efectivo_usd'
       ? (cambio ?? -1) >= 0
-      : true);
+      : metodo === 'fiado'
+        ? clienteFiadoElegido !== null
+        : true);
   const puedeConfirmar = modoPagoMixto ? pagoMixtoCompleto : puedeConfirmarSimple;
 
   // Live preview for weight modal
@@ -1003,6 +1178,22 @@ export default function CajaPage() {
                   )}
 
                   {!pagoMixtoCompleto && (
+                    seleccionandoClienteCalculado ? (
+                      <div>
+                        <p className="text-sm text-gray-500 mb-2">Fiar el resto a:</p>
+                        {renderSelectorClienteFiado(c => {
+                          agregarPagoMixtoCalculado('fiado', c.id);
+                          setSeleccionandoClienteCalculado(false);
+                          setBusquedaClienteFiado('');
+                        })}
+                        <button
+                          onClick={() => { setSeleccionandoClienteCalculado(false); setBusquedaClienteFiado(''); }}
+                          className="text-xs text-gray-400 font-medium mt-2"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    ) : (
                     <>
                       <p className="text-sm text-gray-500 mb-2">
                         {pagosMixtos.length === 0 ? 'Elige el primer método' : 'Elige el método para el resto'}
@@ -1015,6 +1206,11 @@ export default function CajaPage() {
                               if (pagosMixtos.length === 0) {
                                 setMetodoMixtoActual(m.id);
                                 setMontoMixtoInput('');
+                                setClienteFiadoElegido(null);
+                                setBusquedaClienteFiado('');
+                              } else if (m.id === 'fiado') {
+                                setSeleccionandoClienteCalculado(true);
+                                setBusquedaClienteFiado('');
                               } else {
                                 agregarPagoMixtoCalculado(m.id);
                               }
@@ -1043,19 +1239,39 @@ export default function CajaPage() {
                               onChange={e => setMontoMixtoInput(e.target.value)}
                               className="flex-1 min-w-0 border border-gray-300 rounded-xl p-3 text-xl font-bold focus:outline-none focus:border-emerald-400"
                               placeholder="0.00"
-                              autoFocus
+                              autoFocus={metodoMixtoActual !== 'fiado'}
                             />
                             <button
                               onClick={agregarPagoMixtoManual}
-                              disabled={!montoMixtoInput || parseFloat(montoMixtoInput) <= 0}
+                              disabled={
+                                !montoMixtoInput ||
+                                parseFloat(montoMixtoInput) <= 0 ||
+                                (metodoMixtoActual === 'fiado' && !clienteFiadoElegido)
+                              }
                               className="px-4 rounded-xl bg-emerald-600 text-white font-semibold disabled:opacity-40"
                             >
                               Agregar
                             </button>
                           </div>
+                          {metodoMixtoActual === 'fiado' && (
+                            <div className="mt-3">
+                              {clienteFiadoElegido ? (
+                                <div className="flex items-center justify-between bg-orange-50 rounded-xl px-3 py-2.5">
+                                  <p className="font-semibold text-gray-800 text-sm">{clienteFiadoElegido.nombre}</p>
+                                  <button
+                                    onClick={() => { setClienteFiadoElegido(null); setBusquedaClienteFiado(''); }}
+                                    className="text-xs text-gray-400 font-medium"
+                                  >
+                                    Cambiar
+                                  </button>
+                                </div>
+                              ) : renderSelectorClienteFiado(c => setClienteFiadoElegido(c))}
+                            </div>
+                          )}
                         </div>
                       )}
                     </>
+                    )
                   )}
                 </div>
               ) : (
@@ -1064,7 +1280,12 @@ export default function CajaPage() {
                     {METODOS_PAGO.map(m => (
                       <button
                         key={m.id}
-                        onClick={() => { setMetodo(m.id); setMontoRecibido(''); }}
+                        onClick={() => {
+                          setMetodo(m.id);
+                          setMontoRecibido('');
+                          setClienteFiadoElegido(null);
+                          setBusquedaClienteFiado('');
+                        }}
                         className={`py-3 px-2 rounded-xl text-sm font-medium transition-colors text-center ${
                           metodo === m.id
                             ? 'bg-emerald-600 text-white shadow-sm'
@@ -1111,6 +1332,25 @@ export default function CajaPage() {
                             : `Faltan: ${metodo === 'efectivo_bs' ? formatBS(-cambio) : formatUSD(-cambio)}`}
                         </div>
                       )}
+                    </div>
+                  )}
+
+                  {metodo === 'fiado' && (
+                    <div className="mb-4">
+                      {clienteFiadoElegido ? (
+                        <div className="flex items-center justify-between bg-orange-50 rounded-xl px-3 py-2.5">
+                          <div>
+                            <p className="text-xs text-orange-500 font-semibold uppercase">Fiado a</p>
+                            <p className="font-bold text-gray-800">{clienteFiadoElegido.nombre}</p>
+                          </div>
+                          <button
+                            onClick={() => { setClienteFiadoElegido(null); setBusquedaClienteFiado(''); }}
+                            className="text-xs text-gray-400 font-medium"
+                          >
+                            Cambiar
+                          </button>
+                        </div>
+                      ) : renderSelectorClienteFiado(c => setClienteFiadoElegido(c))}
                     </div>
                   )}
                 </>

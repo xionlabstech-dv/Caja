@@ -1,5 +1,5 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
-import { Producto, Configuracion, Venta, CierreCaja, OperacionPendiente, Rol, MovimientoStock, MetodoPago, EstadoNegocio } from '@/types';
+import { Producto, Configuracion, Venta, CierreCaja, OperacionPendiente, Rol, MovimientoStock, MetodoPago, EstadoNegocio, ClienteFiado, MovimientoFiado } from '@/types';
 
 interface MetaItem {
   key: string;
@@ -39,6 +39,15 @@ interface CajaDBSchema extends DBSchema {
     value: MovimientoStock;
     indexes: { 'by-producto': string };
   };
+  clientes_fiado: {
+    key: string;
+    value: ClienteFiado;
+  };
+  fiado_movimientos: {
+    key: string;
+    value: MovimientoFiado;
+    indexes: { 'by-cliente': string };
+  };
 }
 
 let dbPromise: Promise<IDBPDatabase<CajaDBSchema>> | null = null;
@@ -46,7 +55,7 @@ let dbPromise: Promise<IDBPDatabase<CajaDBSchema>> | null = null;
 function getDB() {
   if (typeof window === 'undefined') throw new Error('IDB solo disponible en el browser');
   if (!dbPromise) {
-    dbPromise = openDB<CajaDBSchema>('caja-db', 5, {
+    dbPromise = openDB<CajaDBSchema>('caja-db', 6, {
       async upgrade(db, oldVersion, _newVersion, transaction) {
         if (oldVersion < 1) {
           const productosStore = db.createObjectStore('productos', { keyPath: 'id' });
@@ -93,6 +102,13 @@ function getDB() {
             }
             cursor = await cursor.continue();
           }
+        }
+        if (oldVersion < 6) {
+          // Fiado: sin datos que migrar, es una funcionalidad enteramente
+          // nueva — solo hace falta crear las stores.
+          db.createObjectStore('clientes_fiado', { keyPath: 'id' });
+          const fiadoMovStore = db.createObjectStore('fiado_movimientos', { keyPath: 'id' });
+          fiadoMovStore.createIndex('by-cliente', 'cliente_id');
         }
       },
     });
@@ -360,7 +376,7 @@ export async function actualizarStockLocal(productoId: string, nuevoStock: numbe
 export async function clearTenantData(): Promise<void> {
   const db = await getDB();
   const tx = db.transaction(
-    ['productos', 'configuracion', 'ventas', 'cierres', 'meta', 'pendientes', 'movimientos'],
+    ['productos', 'configuracion', 'ventas', 'cierres', 'meta', 'pendientes', 'movimientos', 'clientes_fiado', 'fiado_movimientos'],
     'readwrite',
   );
   await Promise.all([
@@ -371,8 +387,96 @@ export async function clearTenantData(): Promise<void> {
     tx.objectStore('meta').clear(),
     tx.objectStore('pendientes').clear(),
     tx.objectStore('movimientos').clear(),
+    tx.objectStore('clientes_fiado').clear(),
+    tx.objectStore('fiado_movimientos').clear(),
     tx.done,
   ]);
+}
+
+// --- Fiado ---
+
+export async function saveClienteFiado(c: ClienteFiado): Promise<void> {
+  const db = await getDB();
+  await db.put('clientes_fiado', c);
+}
+
+export async function saveClientesFiado(clientes: ClienteFiado[]): Promise<void> {
+  const db = await getDB();
+
+  // Si el sync periódico cae justo entre que se aplica un cargo/abono local
+  // y que el outbox termina de confirmarlo con el servidor, pisar saldo_usd
+  // con lo que trae el servidor revive por un momento el saldo viejo (ej. un
+  // cliente que ya saldó su deuda "reaparece" en la lista de deudores hasta
+  // que el outbox corrija de nuevo). Se trae una sola vez, para todo el
+  // lote, el set de clientes con movimientos locales todavía sin confirmar
+  // — mismo principio que el merge local/remoto de ventas en Resumen: lo
+  // pendiente no se pisa con lo remoto hasta que se confirma.
+  const movimientos = await db.getAll('fiado_movimientos');
+  const conMovimientoPendiente = new Set(
+    movimientos.filter(m => m.sincronizado === false).map(m => m.cliente_id)
+  );
+
+  const tx = db.transaction('clientes_fiado', 'readwrite');
+  for (const c of clientes) {
+    if (conMovimientoPendiente.has(c.id)) {
+      const local = await tx.store.get(c.id);
+      if (local) {
+        await tx.store.put({ ...c, saldo_usd: local.saldo_usd });
+        continue;
+      }
+    }
+    await tx.store.put(c);
+  }
+  await tx.done;
+}
+
+export async function getClienteFiado(id: string): Promise<ClienteFiado | undefined> {
+  const db = await getDB();
+  return db.get('clientes_fiado', id);
+}
+
+export async function getClientesFiado(): Promise<ClienteFiado[]> {
+  const db = await getDB();
+  return db.getAll('clientes_fiado');
+}
+
+// Aplica el saldo autoritativo que devuelve la RPC al cliente cacheado —
+// mismo patrón que actualizarStockLocal.
+export async function actualizarSaldoFiadoLocal(clienteId: string, nuevoSaldo: number): Promise<void> {
+  const db = await getDB();
+  const cliente = await db.get('clientes_fiado', clienteId);
+  if (cliente) await db.put('clientes_fiado', { ...cliente, saldo_usd: nuevoSaldo });
+}
+
+export async function saveMovimientoFiado(m: MovimientoFiado): Promise<void> {
+  const db = await getDB();
+  await db.put('fiado_movimientos', m);
+}
+
+export async function getMovimientoFiado(id: string): Promise<MovimientoFiado | undefined> {
+  const db = await getDB();
+  return db.get('fiado_movimientos', id);
+}
+
+// Se usa cuando el servidor rechazó el movimiento de forma definitiva: nunca
+// se aplicó de verdad, así que no puede quedar en IndexedDB marcado como
+// sincronizado: false para siempre — saveClientesFiado() trata eso como "hay
+// un cambio pendiente" y nunca deja que el sync periódico corrija el saldo.
+export async function eliminarMovimientoFiado(id: string): Promise<void> {
+  const db = await getDB();
+  await db.delete('fiado_movimientos', id);
+}
+
+export async function getMovimientosFiado(): Promise<MovimientoFiado[]> {
+  const db = await getDB();
+  const all = await db.getAll('fiado_movimientos');
+  return all.sort((a, b) => b.ocurrido_en.localeCompare(a.ocurrido_en));
+}
+
+export async function getMovimientosFiadoPorCliente(clienteId: string): Promise<MovimientoFiado[]> {
+  const db = await getDB();
+  const all = await db.getAllFromIndex('fiado_movimientos', 'by-cliente', clienteId);
+  return all.sort((a, b) => b.ocurrido_en.localeCompare(a.ocurrido_en));
 }
 
 // --- Cola de sincronización (outbox) ---

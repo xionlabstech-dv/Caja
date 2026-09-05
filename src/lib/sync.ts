@@ -7,8 +7,20 @@ import {
   setCachedUsaStock,
   setCachedUltimaSincronizacion,
   actualizarStockLocal,
+  saveClientesFiado,
+  actualizarSaldoFiadoLocal,
 } from './db';
-import { Producto, Configuracion, CierreCaja, Venta, VentaItem, PagoVenta, MovimientoStock } from '@/types';
+import {
+  Producto,
+  Configuracion,
+  CierreCaja,
+  Venta,
+  VentaItem,
+  PagoVenta,
+  MovimientoStock,
+  ClienteFiado,
+  MovimientoFiado,
+} from '@/types';
 
 export async function syncFromSupabase(negocioId: string): Promise<Configuracion | null> {
   try {
@@ -31,6 +43,29 @@ export async function syncFromSupabase(negocioId: string): Promise<Configuracion
 
     if (allProducts.length > 0) {
       await saveProductos(allProducts);
+    }
+
+    // Clientes de fiado: mismo patrón paginado que productos, para que el
+    // saldo de cada uno (quién debe y cuánto) esté disponible sin conexión —
+    // si Nelson abre la pantalla Fiado sin señal, igual debe poder ver la
+    // lista de deudores. RLS ya limita esto al negocio del usuario, igual
+    // que en productos.
+    let fromFiado = 0;
+    const allClientesFiado: ClienteFiado[] = [];
+    while (true) {
+      const { data, error } = await supabase
+        .from('clientes_fiado')
+        .select('*')
+        .range(fromFiado, fromFiado + PAGE_SIZE - 1);
+
+      if (error || !data?.length) break;
+      allClientesFiado.push(...(data as ClienteFiado[]));
+      if (data.length < PAGE_SIZE) break;
+      fromFiado += PAGE_SIZE;
+    }
+
+    if (allClientesFiado.length > 0) {
+      await saveClientesFiado(allClientesFiado);
     }
 
     // Marca de "hasta acá se pudo confirmar con el servidor" — la regla de
@@ -164,6 +199,55 @@ export async function softDeleteProducto(id: string): Promise<boolean> {
   }
 }
 
+// Nunca se manda saldo_usd: el trigger en Supabase lo fuerza a nacer en 0
+// sin importar qué se le mande, así que ni siquiera vale la pena enviarlo.
+export async function createClienteFiadoSupabase(
+  cliente: ClienteFiado,
+  negocioId: string
+): Promise<ClienteFiado | 'duplicate' | null> {
+  try {
+    const { data, error } = await supabase
+      .from('clientes_fiado')
+      .insert({
+        id: cliente.id,
+        negocio_id: negocioId,
+        nombre: cliente.nombre,
+        creado_por: cliente.creado_por ?? null,
+        creado_por_nombre: cliente.creado_por_nombre ?? null,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data as ClienteFiado;
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    // 23505 con el mismo id (retry de la cola offline) = ya sincronizado, no error real
+    if (code === '23505') return 'duplicate';
+    return null;
+  }
+}
+
+// Select puntual del saldo real de UN cliente — se usa cuando un movimiento
+// quedó rechazado de forma definitiva y el saldo optimista que se calculó al
+// encolarlo quedó mal: no tiene sentido esperar al próximo ciclo de sync
+// para corregirlo, se trae ya mismo. Devuelve null si no se pudo consultar
+// (sin red, error), para que quien llama sepa que no hay nada que corregir
+// todavía.
+export async function getSaldoFiadoRemoto(clienteId: string): Promise<number | null> {
+  try {
+    const { data, error } = await supabase
+      .from('clientes_fiado')
+      .select('saldo_usd')
+      .eq('id', clienteId)
+      .single();
+    if (error) throw error;
+    return data.saldo_usd as number;
+  } catch {
+    return null;
+  }
+}
+
 export { getConfigDB as getConfiguracion };
 
 export async function sincronizarCierre(cierre: CierreCaja, negocioId: string): Promise<boolean> {
@@ -177,6 +261,11 @@ export async function sincronizarCierre(cierre: CierreCaja, negocioId: string): 
       total_usd: cierre.total_usd,
       cantidad_ventas: cierre.cantidad_ventas,
       desglose_metodos: cierre.desglose_metodos,
+      // Cobrado (abonos de fiado), separado de lo vendido — "hoy vendí" y
+      // "hoy cobré en mano" son números distintos, ver Resumen.
+      total_abonado_bs: cierre.total_abonado_bs ?? 0,
+      total_abonado_usd: cierre.total_abonado_usd ?? 0,
+      cantidad_abonos: cierre.cantidad_abonos ?? 0,
       tasa_cierre: cierre.tasa_cierre,
       creado_en: cierre.creado_en,
       usuario_id: cierre.usuario_id ?? null,
@@ -418,12 +507,25 @@ export async function anularVenta(ventaId: string, motivo: string): Promise<Resu
 
 // Aplica un movimiento de stock vía la RPC atómica e idempotente — nunca un
 // UPDATE directo. Si el mismo id ya se aplicó (reintento de la cola
-// offline), la función devuelve el stock actual sin volver a descontar. El
-// resultado (número o excepción) siempre es definitivo, a diferencia de un
-// UPDATE de tabla: no hace falta verificar filas afectadas por separado.
-export async function aplicarMovimientoStockRemoto(m: MovimientoStock): Promise<number | null> {
+// offline), la función devuelve el stock actual sin volver a descontar.
+//
+// El fallo viene distinguido, mismo criterio que aplicarMovimientoFiadoRemoto:
+// si supabase.rpc() no llega a obtener respuesta (sin red, timeout), es
+// transitorio y vale la pena reintentar. Si el servidor sí respondió y
+// rechazó la operación, es permanente — quien llama debe sacarlo de la cola
+// en vez de reintentar algo que nunca va a cambiar de resultado.
+export interface ResultadoMovimientoStock {
+  ok: boolean;
+  nuevoStock?: number;
+  mensaje?: string;
+  permanente?: boolean;
+}
+
+export async function aplicarMovimientoStockRemoto(m: MovimientoStock): Promise<ResultadoMovimientoStock> {
+  let data: unknown;
+  let error: { message?: string } | null;
   try {
-    const { data, error } = await supabase.rpc('aplicar_movimiento_stock', {
+    ({ data, error } = await supabase.rpc('aplicar_movimiento_stock', {
       p_id: m.id,
       p_producto_id: m.producto_id,
       p_tipo: m.tipo,
@@ -432,18 +534,20 @@ export async function aplicarMovimientoStockRemoto(m: MovimientoStock): Promise<
       p_ocurrido_en: m.ocurrido_en,
       p_venta_id: m.venta_id ?? null,
       p_nota: m.nota ?? null,
-    });
-    if (error) throw error;
-    const nuevoStock = data as number;
-    // El stock local se corrige al valor autoritativo que devuelve la RPC
-    // (no simplemente al que se calculó de forma optimista al encolar) —
-    // cubre el caso de que otro dispositivo haya aplicado movimientos
-    // propios entre medio.
-    await actualizarStockLocal(m.producto_id, nuevoStock);
-    return nuevoStock;
-  } catch {
-    return null;
+    }));
+  } catch (err) {
+    return { ok: false, mensaje: (err as { message?: string }).message, permanente: false };
   }
+  if (error) {
+    return { ok: false, mensaje: error.message, permanente: true };
+  }
+  const nuevoStock = data as number;
+  // El stock local se corrige al valor autoritativo que devuelve la RPC
+  // (no simplemente al que se calculó de forma optimista al encolar) —
+  // cubre el caso de que otro dispositivo haya aplicado movimientos
+  // propios entre medio.
+  await actualizarStockLocal(m.producto_id, nuevoStock);
+  return { ok: true, nuevoStock };
 }
 
 // Historial de movimientos de TODO el negocio (no solo los de este
@@ -503,5 +607,137 @@ export async function reconciliarCierresLocal(ventaIds: string[]): Promise<Map<s
     return new Map((data ?? []).map(v => [v.id as string, v.cierre_id as string]));
   } catch {
     return new Map();
+  }
+}
+
+// Aplica un cargo o abono de fiado vía la RPC atómica e idempotente — nunca
+// un UPDATE directo a saldo_usd (ni siquiera está permitido por RLS). A
+// diferencia de aplicarMovimientoStockRemoto, acá el mensaje de error
+// importa: un abono mayor a la deuda lo rechaza la función con un mensaje
+// pensado para mostrarse tal cual al usuario, así que no alcanza con
+// devolver null en caso de fallo.
+//
+// El fallo también viene distinguido: si supabase.rpc() ni siquiera obtiene
+// respuesta (sin red, timeout), es transitorio y vale la pena reintentar
+// como hasta ahora. Si SÍ hubo respuesta y el servidor la rechazó (ej. un
+// abono que ya no coincide con el saldo real para cuando le toca subir), es
+// permanente — reintentar no lo va a cambiar, así que quien llama debe
+// sacarlo de la cola en vez de dejarlo reintentando para siempre.
+export interface ResultadoMovimientoFiado {
+  ok: boolean;
+  saldoNuevo?: number;
+  // error.message tal cual lo devolvió la RPC, solo presente cuando ok=false.
+  mensaje?: string;
+  permanente?: boolean;
+}
+
+export async function aplicarMovimientoFiadoRemoto(m: MovimientoFiado): Promise<ResultadoMovimientoFiado> {
+  let data: unknown;
+  let error: { message?: string } | null;
+  try {
+    ({ data, error } = await supabase.rpc('aplicar_movimiento_fiado', {
+      p_id: m.id,
+      p_cliente_id: m.cliente_id,
+      p_tipo: m.tipo,
+      p_monto_usd: m.monto_usd,
+      p_monto_bs: m.monto_bs,
+      p_tasa: m.tasa_usada,
+      p_venta_id: m.venta_id ?? null,
+      p_nota: m.nota ?? null,
+      p_ocurrido_en: m.ocurrido_en,
+    }));
+  } catch (err) {
+    // La llamada ni siquiera volvió con una respuesta — sin red, timeout.
+    return { ok: false, mensaje: (err as { message?: string }).message, permanente: false };
+  }
+  if (error) {
+    // El servidor respondió y rechazó la operación — definitivo.
+    return { ok: false, mensaje: error.message, permanente: true };
+  }
+  const nuevoSaldo = data as number;
+  // Igual que con el stock: el saldo local se corrige al valor
+  // autoritativo que devuelve la RPC, no al que se calculó de forma
+  // optimista al encolar — cubre que otro dispositivo haya aplicado
+  // movimientos propios sobre el mismo cliente entre medio.
+  await actualizarSaldoFiadoLocal(m.cliente_id, nuevoSaldo);
+  return { ok: true, saldoNuevo: nuevoSaldo };
+}
+
+// Historial de movimientos de UN cliente (cargos y abonos), para mostrar
+// "qué llevó y cuándo" en su tarjeta de la pantalla Fiado. Se pide bajo
+// demanda (no se sincroniza periódicamente como clientes_fiado) — el saldo
+// ya está disponible sin conexión, este detalle es un enriquecimiento que
+// requiere red y se degrada con gracia si no la hay.
+export async function getMovimientosFiadoPorClienteRemoto(
+  clienteId: string,
+  limite = 20
+): Promise<MovimientoFiado[] | null> {
+  try {
+    const { data, error } = await supabase
+      .from('fiado_movimientos')
+      .select(
+        'id, cliente_id, tipo, monto_usd, monto_bs, tasa_usada, venta_id, usuario_id, usuario_nombre, nota, saldo_resultante, ocurrido_en'
+      )
+      .eq('cliente_id', clienteId)
+      .order('ocurrido_en', { ascending: false })
+      .limit(limite);
+    if (error) throw error;
+
+    return (data ?? []).map(m => ({
+      id: m.id,
+      cliente_id: m.cliente_id,
+      tipo: m.tipo,
+      monto_usd: m.monto_usd,
+      monto_bs: m.monto_bs,
+      tasa_usada: m.tasa_usada,
+      venta_id: m.venta_id ?? undefined,
+      usuario_id: m.usuario_id ?? undefined,
+      usuario_nombre: m.usuario_nombre ?? undefined,
+      nota: m.nota ?? undefined,
+      saldo_resultante: m.saldo_resultante ?? undefined,
+      ocurrido_en: m.ocurrido_en,
+      sincronizado: true,
+    } as MovimientoFiado));
+  } catch {
+    return null;
+  }
+}
+
+// Abonos de TODO el negocio ocurridos en un rango de tiempo — usado tanto
+// para armar el cierre (total_abonado_bs/usd, cantidad_abonos) como para la
+// sección "Abonos recibidos" del período actual en Resumen. A propósito NO
+// usa la RPC reportes_abonos_fiado: esa función solo devuelve datos con el
+// negocio en estado 'activo', y fiar/abonar/cerrar caja deben seguir
+// funcionando en 'restringido' — se consulta la tabla directo, confiando
+// solo en RLS (que no filtra por estado).
+export async function getAbonosPeriodoRemoto(
+  negocioId: string,
+  desde: string | null,
+  hasta: string
+): Promise<MovimientoFiado[] | null> {
+  try {
+    let query = supabase
+      .from('fiado_movimientos')
+      .select('id, cliente_id, tipo, monto_usd, monto_bs, tasa_usada, venta_id, ocurrido_en')
+      .eq('negocio_id', negocioId)
+      .eq('tipo', 'abono')
+      .lte('ocurrido_en', hasta);
+    if (desde) query = query.gt('ocurrido_en', desde);
+    const { data, error } = await query;
+    if (error) throw error;
+
+    return (data ?? []).map(m => ({
+      id: m.id,
+      cliente_id: m.cliente_id,
+      tipo: m.tipo,
+      monto_usd: m.monto_usd,
+      monto_bs: m.monto_bs,
+      tasa_usada: m.tasa_usada,
+      venta_id: m.venta_id ?? undefined,
+      ocurrido_en: m.ocurrido_en,
+      sincronizado: true,
+    } as MovimientoFiado));
+  } catch {
+    return null;
   }
 }

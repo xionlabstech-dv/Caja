@@ -25,7 +25,7 @@ import {
   clearTenantData,
   contarPendientes,
 } from '@/lib/db';
-import { procesarCola } from '@/lib/outbox';
+import { procesarCola, onFalloPermanente } from '@/lib/outbox';
 import { Configuracion, Rol, EstadoNegocio, ItemCarrito } from '@/types';
 import LoginScreen from './LoginScreen';
 import SuspendedScreen from './SuspendedScreen';
@@ -246,6 +246,13 @@ export default function Providers({ children }: { children: ReactNode }) {
   // Carrito de la pantalla de Caja — ver comentario en AppContextType.
   const [carrito, setCarrito] = useState<ItemCarrito[]>([]);
   const [showCarrito, setShowCarrito] = useState(false);
+  // Aviso de un cambio que el servidor rechazó de forma definitiva (no un
+  // problema de red) y que la cola sacó de reintentar — ver onFalloPermanente
+  // en outbox.ts. Global (no de una pantalla puntual) porque procesarCola()
+  // puede correr con el usuario parado en cualquier lado.
+  const [avisoFalloPermanente, setAvisoFalloPermanente] = useState<string | null>(null);
+
+  useEffect(() => onFalloPermanente(mensaje => setAvisoFalloPermanente(mensaje)), []);
 
   useEffect(() => {
     const saved = localStorage.getItem('theme') as 'light' | 'dark' | null;
@@ -570,6 +577,20 @@ export default function Providers({ children }: { children: ReactNode }) {
           </svg>
           Hay una versión nueva — toca para actualizar
         </button>
+      )}
+      {avisoFalloPermanente && (
+        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 w-[90%] max-w-sm bg-red-600 text-white text-xs font-medium px-4 py-3 rounded-xl shadow-lg flex items-start gap-2">
+          <span className="flex-1">{avisoFalloPermanente}</span>
+          <button
+            onClick={() => setAvisoFalloPermanente(null)}
+            className="flex-shrink-0"
+            aria-label="Cerrar aviso"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
       )}
     </AppContext.Provider>
   );

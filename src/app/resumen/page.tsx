@@ -10,11 +10,12 @@ import {
   setUltimoCierre,
   getPendientes,
   marcarVentaAnulada,
+  getMovimientosFiado,
 } from '@/lib/db';
-import { getVentasPendientesRemoto, reconciliarCierresLocal, anularVenta } from '@/lib/sync';
+import { getVentasPendientesRemoto, reconciliarCierresLocal, anularVenta, getAbonosPeriodoRemoto } from '@/lib/sync';
 import { encolarCerrarCaja, encolarActualizarCierreVentas, procesarCola } from '@/lib/outbox';
 import { formatBS, formatUSD } from '@/lib/precio';
-import { Venta, MetodoPago, MetodoPagoVenta, CierreCaja, DesgloseCierre } from '@/types';
+import { Venta, MetodoPago, MetodoPagoVenta, CierreCaja, DesgloseCierre, MovimientoFiado } from '@/types';
 import { useApp } from '@/components/Providers';
 import ThemeToggle from '@/components/ThemeToggle';
 
@@ -28,6 +29,7 @@ const METODO_LABELS: Record<MetodoPagoVenta, string> = {
   biopago: 'Biopago',
   tarjeta: 'Tarjeta',
   efectivo_usd: 'Efectivo $',
+  fiado: 'Fiado',
   mixto: 'Mixto',
 };
 
@@ -37,6 +39,7 @@ const METODO_COLORS: Record<MetodoPagoVenta, string> = {
   biopago: 'bg-purple-100 text-purple-700',
   tarjeta: 'bg-slate-100 text-slate-700',
   efectivo_usd: 'bg-amber-100 text-amber-700',
+  fiado: 'bg-orange-100 text-orange-700',
   mixto: 'bg-indigo-100 text-indigo-700',
 };
 
@@ -71,6 +74,12 @@ const METODO_ICONS: Record<MetodoPagoVenta, JSX.Element> = {
         d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
     </svg>
   ),
+  fiado: (
+    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
+        d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-1.13a4 4 0 10-4-4 4 4 0 004 4zm6 0a4 4 0 10-4-4" />
+    </svg>
+  ),
   mixto: (
     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
@@ -98,6 +107,7 @@ function formatearNombre(nombre: string): string {
 export default function ResumenPage() {
   const { tasa, negocioId, isOnline, user, userNombre, rol, estado, usaStock, sincronizarAhora } = useApp();
   const [ventas, setVentas] = useState<Venta[]>([]);
+  const [abonos, setAbonos] = useState<MovimientoFiado[]>([]);
   const [cierres, setCierres] = useState<CierreCaja[]>([]);
   const [ultimoCierre, setUltimoCierreState] = useState<string | null>(null);
   const [expandido, setExpandido] = useState<string | null>(null);
@@ -176,6 +186,26 @@ export default function ResumenPage() {
     setSoloDispositivo(!completo);
     setCierres(c);
     setUltimoCierreState(uc);
+
+    // Abonos del período actual: igual base offline-first que las ventas —
+    // local siempre visible, completado con el resto del negocio cuando hay
+    // red. No hay un flag "cierre_id" en fiado_movimientos como en ventas,
+    // así que el corte de período es por fecha (después del último cierre).
+    const abonosLocal = (await getMovimientosFiado()).filter(
+      m => m.tipo === 'abono' && (!uc || m.ocurrido_en > uc)
+    );
+    let abonosFinal = abonosLocal;
+    if (isOnline && negocioId) {
+      const remotos = await getAbonosPeriodoRemoto(negocioId, uc, new Date().toISOString());
+      if (remotos !== null) {
+        const porId = new Map(abonosLocal.map(m => [m.id, m]));
+        for (const r of remotos) {
+          if (!porId.has(r.id)) porId.set(r.id, r);
+        }
+        abonosFinal = Array.from(porId.values());
+      }
+    }
+    setAbonos(abonosFinal);
   };
 
   // Se re-consulta al recuperar conexión: si esta pantalla se abrió offline
@@ -205,6 +235,12 @@ export default function ResumenPage() {
     },
     {} as Partial<Record<MetodoPago, number>>
   );
+
+  // Cobrado, no vendido — separado a propósito de totalBS/porMetodo: un
+  // abono puede venir de una venta de días atrás, así que sumarlo a "lo
+  // vendido hoy" mezclaría dos cosas distintas.
+  const totalAbonadoBs = abonos.reduce((s, m) => s + m.monto_bs, 0);
+  const totalAbonadoUsd = abonos.reduce((s, m) => s + m.monto_usd, 0);
 
   // Start of current period: last cierre time, or oldest pending venta, or null
   const periodoInicio = ultimoCierre
@@ -252,6 +288,9 @@ export default function ResumenPage() {
       total_usd: tasa > 0 ? totalBS / tasa : 0,
       cantidad_ventas: ventasVigentes.length,
       desglose_metodos: desglose,
+      total_abonado_bs: totalAbonadoBs,
+      total_abonado_usd: totalAbonadoUsd,
+      cantidad_abonos: abonos.length,
       tasa_cierre: tasa,
       creado_en: now,
       usuario_id: user?.id,
@@ -279,6 +318,7 @@ export default function ResumenPage() {
     await encolarActualizarCierreVentas(ventas.map(v => v.id), cierre.id);
 
     setVentas([]);
+    setAbonos([]);
     setCierres(prev => [cierre, ...prev]);
     setUltimoCierreState(now);
     setShowConfirmCierre(false);
@@ -412,6 +452,24 @@ export default function ResumenPage() {
                   <span className="font-bold text-gray-800">{formatBS(total)}</span>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Abonos recibidos — separado del total vendido a propósito: "vendido
+            hoy" y "cobrado hoy" son números distintos, un abono puede venir
+            de una venta de otro día. */}
+        {abonos.length > 0 && (
+          <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+            <h2 className="font-semibold text-gray-700 mb-2">Abonos recibidos</h2>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-500">
+                {abonos.length} {abonos.length === 1 ? 'abono' : 'abonos'}
+              </span>
+              <div className="text-right">
+                <p className="font-bold text-gray-800">{formatBS(totalAbonadoBs)}</p>
+                {tasa > 0 && <p className="text-xs text-gray-400">{formatUSD(totalAbonadoUsd)}</p>}
+              </div>
             </div>
           </div>
         )}
@@ -586,6 +644,14 @@ export default function ResumenPage() {
                           <span className="font-bold text-sm text-gray-800">{formatBS(d.bs)}</span>
                         </div>
                       ))}
+                      {!!cierre.cantidad_abonos && (
+                        <div className="border-t border-gray-100 pt-2 flex items-center justify-between">
+                          <span className="text-xs text-gray-500">
+                            Abonos recibidos ({cierre.cantidad_abonos})
+                          </span>
+                          <span className="font-bold text-sm text-gray-800">{formatBS(cierre.total_abonado_bs ?? 0)}</span>
+                        </div>
+                      )}
                       <div className="border-t border-gray-100 pt-2 flex justify-between text-sm">
                         <span className="text-gray-500">Tasa al cierre</span>
                         <span className="text-gray-600">
@@ -638,6 +704,15 @@ export default function ResumenPage() {
                       <span className="font-bold text-sm text-gray-800">{formatBS(total)}</span>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {abonos.length > 0 && (
+                <div className="flex items-center justify-between mb-4 p-3 bg-gray-50 rounded-xl">
+                  <span className="text-sm text-gray-600">
+                    Abonos recibidos ({abonos.length})
+                  </span>
+                  <span className="font-bold text-sm text-gray-800">{formatBS(totalAbonadoBs)}</span>
                 </div>
               )}
 

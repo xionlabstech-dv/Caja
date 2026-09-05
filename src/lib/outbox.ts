@@ -7,6 +7,10 @@ import {
   saveVenta,
   getMovimiento,
   saveMovimiento,
+  getMovimientoFiado,
+  saveMovimientoFiado,
+  eliminarMovimientoFiado,
+  actualizarSaldoFiadoLocal,
 } from './db';
 import {
   createProductoSupabase,
@@ -19,6 +23,9 @@ import {
   sincronizarVenta,
   actualizarCierreIdVentas,
   aplicarMovimientoStockRemoto,
+  createClienteFiadoSupabase,
+  aplicarMovimientoFiadoRemoto,
+  getSaldoFiadoRemoto,
 } from './sync';
 import {
   OperacionPendiente,
@@ -34,13 +41,38 @@ import {
   PayloadActualizarUsaCostos,
   PayloadActualizarUsaStock,
   PayloadAplicarMovimientoStock,
+  PayloadCrearClienteFiado,
+  PayloadAplicarMovimientoFiado,
   Producto,
   CierreCaja,
+  ClienteFiado,
 } from '@/types';
 
 // Backoff exponencial por operación: 2s, 4s, 8s... tope 60s.
 function backoffMs(intentos: number): number {
   return Math.min(2 ** intentos * 1000, 60000);
+}
+
+// Aviso de un cambio que el servidor rechazó de forma DEFINITIVA (no un
+// problema de red) — se saca de la cola en vez de reintentar para siempre,
+// pero eso no puede pasar en silencio: quien esté usando la app necesita
+// enterarse de que ese cargo/abono o movimiento específico nunca se aplicó,
+// y por qué. outbox.ts no es un componente de React, así que expone este
+// suscriptor en vez de mostrar el aviso directamente — Providers.tsx (que sí
+// puede pintar algo visible en cualquier pantalla) se suscribe una vez.
+type ListenerFalloPermanente = (mensaje: string) => void;
+const listenersFalloPermanente: ListenerFalloPermanente[] = [];
+
+export function onFalloPermanente(cb: ListenerFalloPermanente): () => void {
+  listenersFalloPermanente.push(cb);
+  return () => {
+    const i = listenersFalloPermanente.indexOf(cb);
+    if (i >= 0) listenersFalloPermanente.splice(i, 1);
+  };
+}
+
+function notificarFalloPermanente(mensaje: string) {
+  for (const cb of listenersFalloPermanente) cb(mensaje);
 }
 
 async function encolar(
@@ -117,6 +149,17 @@ export async function encolarAplicarMovimientoStock(movimientoId: string, negoci
   await encolar('aplicar_movimiento_stock', payload, movimientoId);
 }
 
+export async function encolarCrearClienteFiado(cliente: ClienteFiado, negocioId: string): Promise<void> {
+  const payload: PayloadCrearClienteFiado = { cliente, negocioId };
+  await encolar('crear_cliente_fiado', payload, cliente.id);
+}
+
+export async function encolarAplicarMovimientoFiado(movimientoId: string, negocioId: string): Promise<void> {
+  const payload: PayloadAplicarMovimientoFiado = { movimientoId, negocioId };
+  // id fijo = id del movimiento: mismo criterio que aplicar_movimiento_stock.
+  await encolar('aplicar_movimiento_fiado', payload, movimientoId);
+}
+
 async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
   switch (op.tipo) {
     case 'crear_producto': {
@@ -171,10 +214,59 @@ async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
       // payload — mismo patrón que 'registrar_venta'.
       const movimiento = await getMovimiento(movimientoId);
       if (!movimiento) return true; // no hay nada que sincronizar
-      const nuevoStock = await aplicarMovimientoStockRemoto(movimiento);
-      if (nuevoStock === null) return false;
-      await saveMovimiento({ ...movimiento, sincronizado: true });
-      return true;
+      const resultado = await aplicarMovimientoStockRemoto(movimiento);
+      if (resultado.ok) {
+        await saveMovimiento({ ...movimiento, sincronizado: true });
+        return true;
+      }
+      if (resultado.permanente) {
+        // El servidor respondió y rechazó el movimiento de forma definitiva
+        // — reintentar no lo va a cambiar. Se saca de la cola en vez de
+        // quedar reintentando para siempre, y se avisa con el motivo real.
+        notificarFalloPermanente(
+          `No se pudo aplicar un movimiento de stock: ${resultado.mensaje ?? 'el servidor lo rechazó'}`
+        );
+        return true;
+      }
+      return false;
+    }
+    case 'crear_cliente_fiado': {
+      const { cliente, negocioId } = op.payload as PayloadCrearClienteFiado;
+      const resultado = await createClienteFiadoSupabase(cliente, negocioId);
+      // 'duplicate' en un reintento de cola = mismo id ya insertado antes → resuelto.
+      return resultado !== null;
+    }
+    case 'aplicar_movimiento_fiado': {
+      const { movimientoId } = op.payload as PayloadAplicarMovimientoFiado;
+      // Se relee de IndexedDB en vez de guardar una copia congelada en el
+      // payload — mismo patrón que 'aplicar_movimiento_stock'.
+      const movimiento = await getMovimientoFiado(movimientoId);
+      if (!movimiento) return true; // no hay nada que sincronizar
+      const resultado = await aplicarMovimientoFiadoRemoto(movimiento);
+      if (resultado.ok) {
+        await saveMovimientoFiado({ ...movimiento, sincronizado: true });
+        return true;
+      }
+      if (resultado.permanente) {
+        // Ej. un abono que ya no coincide con el saldo real para cuando le
+        // toca subir (otro dispositivo cobró de más entre medio) — la RPC
+        // lo rechaza con un mensaje pensado para mostrarse tal cual.
+        //
+        // El movimiento nunca se aplicó de verdad, así que no puede quedar
+        // en IndexedDB con sincronizado: false para siempre — saveClientesFiado()
+        // trata eso como "hay un cambio pendiente" y nunca deja que el sync
+        // periódico corrija el saldo. Se borra, y el saldo optimista (que
+        // quedó mal) se corrige ya mismo con el valor real de Supabase, sin
+        // esperar al próximo ciclo.
+        await eliminarMovimientoFiado(movimiento.id);
+        const saldoReal = await getSaldoFiadoRemoto(movimiento.cliente_id);
+        if (saldoReal !== null) await actualizarSaldoFiadoLocal(movimiento.cliente_id, saldoReal);
+        notificarFalloPermanente(
+          `No se pudo aplicar un movimiento de fiado: ${resultado.mensaje ?? 'el servidor lo rechazó'}`
+        );
+        return true;
+      }
+      return false;
     }
     default:
       return true;
