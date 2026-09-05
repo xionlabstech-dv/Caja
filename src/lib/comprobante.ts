@@ -81,6 +81,17 @@ function dibujarComprobante(ctx: CanvasRenderingContext2D, ancho: number, datos:
     ctx.font = 'bold 13px sans-serif';
     ctx.fillText('VENTA ANULADA', centroX, y + 3);
     y += 30;
+
+    if (venta.motivo_anulacion) {
+      // Discreto a propósito — el banner de arriba ya dice lo importante
+      // (que se anuló); esto es el detalle para quien quiera leerlo.
+      ctx.font = 'italic 10px sans-serif';
+      ctx.fillStyle = '#6b7280';
+      ctx.textAlign = 'center';
+      const motivoLinea = truncar(ctx, `Motivo: ${venta.motivo_anulacion}`, ancho - PAD * 2);
+      ctx.fillText(motivoLinea, centroX, y);
+      y += 16;
+    }
   }
 
   y += 8;
