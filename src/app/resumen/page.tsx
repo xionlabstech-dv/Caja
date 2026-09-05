@@ -15,6 +15,7 @@ import {
 import { getVentasPendientesRemoto, reconciliarCierresLocal, anularVenta, getAbonosPeriodoRemoto } from '@/lib/sync';
 import { encolarCerrarCaja, encolarActualizarCierreVentas, procesarCola } from '@/lib/outbox';
 import { formatBS, formatUSD } from '@/lib/precio';
+import { compartirComprobante } from '@/lib/comprobante';
 import { Venta, MetodoPago, MetodoPagoVenta, CierreCaja, DesgloseCierre, MovimientoFiado } from '@/types';
 import { useApp } from '@/components/Providers';
 import ThemeToggle from '@/components/ThemeToggle';
@@ -105,7 +106,7 @@ function formatearNombre(nombre: string): string {
 }
 
 export default function ResumenPage() {
-  const { tasa, negocioId, isOnline, user, userNombre, rol, estado, usaStock, sincronizarAhora } = useApp();
+  const { tasa, negocioId, negocioNombre, isOnline, user, userNombre, rol, estado, usaStock, sincronizarAhora } = useApp();
   const [ventas, setVentas] = useState<Venta[]>([]);
   const [abonos, setAbonos] = useState<MovimientoFiado[]>([]);
   const [cierres, setCierres] = useState<CierreCaja[]>([]);
@@ -125,10 +126,22 @@ export default function ResumenPage() {
   const [motivoAnular, setMotivoAnular] = useState('');
   const [guardandoAnulacion, setGuardandoAnulacion] = useState(false);
   const [errorAnular, setErrorAnular] = useState('');
+  const [compartiendoComprobante, setCompartiendoComprobante] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(''), 5000);
+  };
+
+  const compartirComprobanteVenta = async (venta: Venta, numero: number) => {
+    setCompartiendoComprobante(venta.id);
+    try {
+      await compartirComprobante({ negocioNombre: negocioNombre || '', venta, numero });
+    } catch {
+      showToast('No se pudo generar el comprobante');
+    } finally {
+      setCompartiendoComprobante(null);
+    }
   };
 
   const cargar = async () => {
@@ -552,6 +565,14 @@ export default function ResumenPage() {
                         <span className="text-gray-500">Vendida por</span>
                         <span className="text-gray-600">{venta.usuario_nombre || '—'}</span>
                       </div>
+
+                      <button
+                        onClick={() => compartirComprobanteVenta(venta, numeroPorVenta.get(venta.id) ?? 0)}
+                        disabled={compartiendoComprobante === venta.id}
+                        className="w-full mt-1 py-2.5 rounded-xl text-sm font-semibold bg-emerald-50 text-emerald-700 disabled:opacity-60"
+                      >
+                        {compartiendoComprobante === venta.id ? 'Generando...' : 'Compartir comprobante'}
+                      </button>
 
                       {venta.anulada ? (
                         <div className="border-t border-gray-100 pt-2 space-y-1">
