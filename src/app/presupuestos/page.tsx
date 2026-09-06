@@ -53,6 +53,7 @@ export default function PresupuestosPage() {
   const [presupuestos, setPresupuestos] = useState<Presupuesto[]>([]);
   const [cargando, setCargando] = useState(true);
   const [expandido, setExpandido] = useState<string | null>(null);
+  const [cargandoItems, setCargandoItems] = useState<string | null>(null);
   const [convirtiendo, setConvirtiendo] = useState<string | null>(null);
   const [compartiendo, setCompartiendo] = useState<string | null>(null);
   const [toast, setToast] = useState('');
@@ -101,6 +102,26 @@ export default function PresupuestosPage() {
     setAnulando(null);
     setMotivoAnular('');
     showToast('Presupuesto anulado');
+  };
+
+  // Los items no viajan en presupuestos_listar (solo el resumen para la
+  // lista) — un presupuesto creado en otro dispositivo, o que se limpió de
+  // IndexedDB, llega sin ellos. Se piden bajo demanda al expandir, mismo
+  // criterio y misma función que ya usa convertirPresupuesto, y se cachean
+  // en el presupuesto local para no volver a pedirlos la próxima vez.
+  const alExpandir = async (p: Presupuesto) => {
+    const abrir = expandido !== p.id;
+    setExpandido(abrir ? p.id : null);
+    if (!abrir || (p.items && p.items.length > 0) || !isOnline) return;
+
+    setCargandoItems(p.id);
+    const remotos = await getPresupuestoItemsRemoto(p.id);
+    if (remotos && remotos.length > 0) {
+      const actualizado = { ...p, items: remotos };
+      await savePresupuesto(actualizado);
+      setPresupuestos(prev => prev.map(x => (x.id === p.id ? actualizado : x)));
+    }
+    setCargandoItems(null);
   };
 
   // Disponible para cualquier presupuesto, no solo los vigentes — si no se
@@ -244,7 +265,7 @@ export default function PresupuestosPage() {
                 <div key={p.id} className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
                   <button
                     className="w-full flex items-center justify-between p-4 text-left"
-                    onClick={() => setExpandido(isOpen ? null : p.id)}
+                    onClick={() => alExpandir(p)}
                   >
                     <div className="min-w-0">
                       <p className="font-semibold text-gray-800 dark:text-white truncate">
@@ -275,21 +296,29 @@ export default function PresupuestosPage() {
 
                   {isOpen && (
                     <div className="border-t border-gray-100 dark:border-slate-700 px-4 pb-4 pt-3 space-y-2">
-                      {(p.items ?? []).map(item => (
-                        <div key={item.id} className="flex justify-between text-sm">
-                          <span className="text-gray-600 dark:text-gray-300">
-                            {item.gramos !== undefined ? `${item.gramos}g ` : `${item.cantidad}× `}
-                            {formatearNombre(item.nombre)}
-                          </span>
-                          <span className="font-medium text-gray-700 dark:text-gray-200">
-                            {formatBS(
-                              item.gramos !== undefined
-                                ? item.precioUnitarioBs * (item.gramos / 1000)
-                                : item.precioUnitarioBs * item.cantidad
-                            )}
-                          </span>
-                        </div>
-                      ))}
+                      {cargandoItems === p.id ? (
+                        <p className="text-xs text-gray-400 py-1">Cargando...</p>
+                      ) : !p.items || p.items.length === 0 ? (
+                        <p className="text-xs text-gray-400 py-1">
+                          {isOnline ? 'Sin detalle disponible' : 'Sin conexión — hace falta señal para ver el detalle'}
+                        </p>
+                      ) : (
+                        p.items.map(item => (
+                          <div key={item.id} className="flex justify-between text-sm">
+                            <span className="text-gray-600 dark:text-gray-300">
+                              {item.gramos !== undefined ? `${item.gramos}g ` : `${item.cantidad}× `}
+                              {formatearNombre(item.nombre)}
+                            </span>
+                            <span className="font-medium text-gray-700 dark:text-gray-200">
+                              {formatBS(
+                                item.gramos !== undefined
+                                  ? item.precioUnitarioBs * (item.gramos / 1000)
+                                  : item.precioUnitarioBs * item.cantidad
+                              )}
+                            </span>
+                          </div>
+                        ))
+                      )}
                       <div className="border-t border-gray-100 dark:border-slate-700 pt-2 flex justify-between text-sm">
                         <span className="text-gray-500">Equivalente</span>
                         <span className="text-gray-600 dark:text-gray-300">{formatUSD(p.total_usd)}</span>
