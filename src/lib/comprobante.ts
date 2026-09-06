@@ -243,12 +243,24 @@ function descargarBlob(blob: Blob, nombreArchivo: string) {
 // disponible. Nunca deja al usuario sin salida: si navigator.share no
 // existe o no soporta archivos (escritorio, navegador viejo), descarga el
 // archivo directo.
+//
+// El share sheet solo tiene sentido en el teléfono, que es donde vive este
+// flujo (el cajero comparte a mano, eligiendo WhatsApp y el contacto). En
+// escritorio, Chrome expone navigator.share con soporte de archivos igual
+// que en Android — pero ahí abre el "compartir" nativo de Windows/macOS,
+// lleno de apps de oficina sin relación con WhatsApp, que solo confunde.
+// Ahí conviene ir directo a la descarga.
+function esMovil(): boolean {
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
 export async function compartirComprobante(datos: DatosComprobante): Promise<'compartido' | 'descargado'> {
   const { blob, nombreArchivo } = await generarComprobantePNG(datos);
   const archivo = new File([blob], nombreArchivo, { type: 'image/png' });
 
   const nav = navigator as Navigator & { canShare?: (data?: ShareData) => boolean };
   const puedeCompartirArchivo =
+    esMovil() &&
     typeof nav.share === 'function' &&
     (typeof nav.canShare !== 'function' || nav.canShare({ files: [archivo] }));
 
