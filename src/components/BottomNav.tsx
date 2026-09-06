@@ -5,6 +5,9 @@ import { usePathname } from 'next/navigation';
 import { useApp } from './Providers';
 import { rutasPermitidas } from '@/lib/roles';
 
+// Solo lo que se usa constante, varias veces por hora, vive en la barra.
+// El resto (Reportes, Tasa, Inventario, Presupuestos) se accede desde
+// "Más" — con Presupuestos la barra hubiera llegado a 7 pestañas.
 const tabs = [
   {
     href: '/',
@@ -40,39 +43,21 @@ const tabs = [
     ),
   },
   {
-    href: '/reportes',
-    label: 'Reportes',
+    href: '/mas',
+    label: 'Más',
     icon: (
       <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-          d="M7 20V10m6 10V4m6 16v-7M4 20h16"
-        />
-      </svg>
-    ),
-  },
-  {
-    href: '/tasa',
-    label: 'Tasa',
-    icon: (
-      <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-          d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-        />
-      </svg>
-    ),
-  },
-  {
-    href: '/inventario',
-    label: 'Inventario',
-    icon: (
-      <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-          d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
+          d="M4 6h16M4 12h16M4 18h16"
         />
       </svg>
     ),
   },
 ];
+
+// Pantallas a las que solo se llega desde la grilla de "Más" — esa pestaña
+// se marca activa en cualquiera de ellas, no solo en /mas mismo.
+const RUTAS_DENTRO_DE_MAS = ['/mas', '/reportes', '/tasa', '/inventario', '/usuarios', '/movimientos', '/presupuestos', '/presupuestos/nuevo'];
 
 export default function BottomNav() {
   const pathname = usePathname();
@@ -83,7 +68,9 @@ export default function BottomNav() {
     <nav className="fixed bottom-0 left-0 right-0 bg-white dark:bg-slate-800 border-t border-gray-200 dark:border-slate-700 z-40 safe-area-bottom">
       <div className="max-w-lg mx-auto flex">
         {visibles.map(tab => {
-          const isActive = pathname === tab.href;
+          const isActive = tab.href === '/mas'
+            ? RUTAS_DENTRO_DE_MAS.includes(pathname)
+            : pathname === tab.href;
           return (
             <Link
               key={tab.href}
