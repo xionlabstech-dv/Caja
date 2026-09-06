@@ -284,7 +284,10 @@ export default function PresupuestosPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
-                      <p className="font-bold text-gray-900 dark:text-white">{formatBS(p.total_bs_estimado)}</p>
+                      <div className="text-right">
+                        <p className="font-bold text-gray-900 dark:text-white">{formatUSD(p.total_usd)}</p>
+                        <p className="text-xs text-gray-400">{formatBS(p.total_bs_estimado)}</p>
+                      </div>
                       <svg
                         className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
                         fill="none" viewBox="0 0 24 24" stroke="currentColor"

@@ -388,28 +388,33 @@ function dibujarPresupuesto(ctx: CanvasRenderingContext2D, ancho: number, datos:
   trazarLinea(ctx, ancho, y);
   y += 28;
 
+  // Al revés que en el comprobante de venta: acá el dólar es lo único que
+  // se sostiene hasta que esto se convierta en venta, así que es el número
+  // grande. El bolívar es apenas una proyección a la tasa de hoy — texto
+  // secundario, con su propia aclaración de por qué puede cambiar.
   ctx.textAlign = 'center';
   ctx.font = 'bold 22px sans-serif';
   ctx.fillStyle = '#111827';
-  ctx.fillText(formatBS(presupuesto.total_bs_estimado), centroX, y);
+  ctx.fillText(formatUSD(presupuesto.total_usd), centroX, y);
   y += 22;
 
   ctx.font = '13px sans-serif';
   ctx.fillStyle = '#6b7280';
-  ctx.fillText(formatUSD(presupuesto.total_usd), centroX, y);
-  y += 20;
+  ctx.fillText(formatBS(presupuesto.total_bs_estimado), centroX, y);
+  y += 16;
+
+  ctx.font = 'italic 10px sans-serif';
+  ctx.fillStyle = '#9ca3af';
+  ctx.fillText('Bs estimado a la tasa de hoy — se recalcula el día del pago', centroX, y);
+  y += 18;
 
   ctx.font = '11px sans-serif';
+  ctx.fillStyle = '#6b7280';
   ctx.fillText(
     `Tasa: Bs ${presupuesto.tasa_al_crear.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} por $`,
     centroX, y
   );
   y += 20;
-
-  ctx.font = 'italic 10px sans-serif';
-  ctx.fillStyle = '#9ca3af';
-  ctx.fillText('El monto en bolívares es estimado a la tasa de hoy — puede variar', centroX, y);
-  y += 18;
 
   return y;
 }
