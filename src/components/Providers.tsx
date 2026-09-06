@@ -86,6 +86,12 @@ interface AppContextType {
   setCarrito: Dispatch<SetStateAction<ItemCarrito[]>>;
   showCarrito: boolean;
   setShowCarrito: Dispatch<SetStateAction<boolean>>;
+  // Igual que carrito: vive acá para sobrevivir a la navegación desde
+  // /presupuestos hasta Caja. Si no es null, la próxima venta que se
+  // confirme en Caja marca ESE presupuesto como convertido — se limpia al
+  // confirmar la venta, al vaciar el carrito, o al cerrar sesión.
+  presupuestoConvirtiendoId: string | null;
+  setPresupuestoConvirtiendoId: Dispatch<SetStateAction<string | null>>;
 }
 
 const AppContext = createContext<AppContextType>({
@@ -117,6 +123,8 @@ const AppContext = createContext<AppContextType>({
   setCarrito: () => {},
   showCarrito: false,
   setShowCarrito: () => {},
+  presupuestoConvirtiendoId: null,
+  setPresupuestoConvirtiendoId: () => {},
 });
 
 export function useApp() {
@@ -246,6 +254,7 @@ export default function Providers({ children }: { children: ReactNode }) {
   // Carrito de la pantalla de Caja — ver comentario en AppContextType.
   const [carrito, setCarrito] = useState<ItemCarrito[]>([]);
   const [showCarrito, setShowCarrito] = useState(false);
+  const [presupuestoConvirtiendoId, setPresupuestoConvirtiendoId] = useState<string | null>(null);
   // Aviso de un cambio que el servidor rechazó de forma definitiva (no un
   // problema de red) y que la cola sacó de reintentar — ver onFalloPermanente
   // en outbox.ts. Global (no de una pantalla puntual) porque procesarCola()
@@ -328,6 +337,7 @@ export default function Providers({ children }: { children: ReactNode }) {
     setPendientesCount(0);
     setCarrito([]);
     setShowCarrito(false);
+    setPresupuestoConvirtiendoId(null);
   };
 
   // Auth: revisa la sesión al montar y escucha cambios. La sesión NUNCA se
@@ -562,6 +572,7 @@ export default function Providers({ children }: { children: ReactNode }) {
       usaStock, setUsaStock, estado, fechaProximoPago, ultimaSincronizacion, authLoading, signOut,
       pendientesCount, syncStatus, sincronizarAhora, productosVersion,
       carrito, setCarrito, showCarrito, setShowCarrito,
+      presupuestoConvirtiendoId, setPresupuestoConvirtiendoId,
     }}>
       {estado === 'suspendido'
         ? <SuspendedScreen isOnline={isOnline} onReintentar={revalidarEstado} onSignOut={signOut} />
