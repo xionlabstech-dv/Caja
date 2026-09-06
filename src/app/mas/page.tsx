@@ -55,6 +55,17 @@ const ITEMS = [
       </svg>
     ),
   },
+  {
+    href: '/datos-negocio',
+    label: 'Datos del negocio',
+    icon: (
+      <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M3 21h18M5 21V7l8-4v18M19 21V11l-6-4m-4 6h.01M9 12h.01M9 16h.01M13 12h.01M13 16h.01"
+        />
+      </svg>
+    ),
+  },
 ];
 
 export default function MasPage() {
