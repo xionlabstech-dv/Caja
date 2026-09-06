@@ -1415,21 +1415,21 @@ export default function CajaPage() {
             </div>
             <div className="p-4 pt-0 space-y-2">
               <button
+                onClick={() => setVentaConfirmada(null)}
+                className="w-full bg-emerald-600 text-white py-3.5 rounded-xl font-bold"
+              >
+                Nueva venta
+              </button>
+              <button
                 onClick={() => compartirComprobanteVenta(ventaConfirmada.venta, ventaConfirmada.numero)}
                 disabled={compartiendoComprobante}
-                className="w-full bg-emerald-600 text-white py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 disabled:opacity-60"
+                className="w-full bg-gray-100 text-gray-700 py-3.5 rounded-xl font-semibold flex items-center justify-center gap-2 disabled:opacity-60"
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                     d="M8.684 13.342a3 3 0 100-2.684m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
                 </svg>
                 {compartiendoComprobante ? 'Generando...' : 'Compartir comprobante'}
-              </button>
-              <button
-                onClick={() => setVentaConfirmada(null)}
-                className="w-full bg-gray-100 text-gray-700 py-3.5 rounded-xl font-semibold"
-              >
-                Nueva venta
               </button>
             </div>
           </div>
