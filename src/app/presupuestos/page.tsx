@@ -48,7 +48,7 @@ const ESTADO_COLORS: Record<Presupuesto['estado'], string> = {
 export default function PresupuestosPage() {
   useGuardarRuta();
   const router = useRouter();
-  const { negocioNombre, negocioId, isOnline, productosVersion, setCarrito, setPresupuestoConvirtiendoId, setPresupuestoClienteNombre } = useApp();
+  const { negocioNombre, datosNegocio, negocioId, isOnline, productosVersion, setCarrito, setPresupuestoConvirtiendoId, setPresupuestoClienteNombre } = useApp();
 
   const [presupuestos, setPresupuestos] = useState<Presupuesto[]>([]);
   const [cargando, setCargando] = useState(true);
@@ -130,7 +130,16 @@ export default function PresupuestosPage() {
   const compartir = async (p: Presupuesto) => {
     setCompartiendo(p.id);
     try {
-      await compartirPresupuesto({ negocioNombre: negocioNombre || '', presupuesto: p });
+      // Mismo criterio que "Venta #N": correlativo por orden de creación,
+      // calculado sobre lo que este dispositivo conoce.
+      const ordenados = [...presupuestos].sort((a, b) => a.creado_en.localeCompare(b.creado_en));
+      const numero = ordenados.findIndex(x => x.id === p.id) + 1;
+      await compartirPresupuesto({
+        negocioNombre: negocioNombre || '',
+        datosNegocio,
+        presupuesto: p,
+        numero: numero > 0 ? numero : ordenados.length,
+      });
     } catch {
       showToast('No se pudo generar el documento');
     } finally {

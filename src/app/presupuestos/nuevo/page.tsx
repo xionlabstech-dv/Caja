@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Producto, PresupuestoItem, Presupuesto } from '@/types';
-import { getProductos, getProductoPorCodigo, savePresupuesto } from '@/lib/db';
+import { getProductos, getProductoPorCodigo, savePresupuesto, getPresupuestos } from '@/lib/db';
 import { encolarCrearPresupuesto } from '@/lib/outbox';
 import { precioBS, precioUSD, formatBS, formatUSD } from '@/lib/precio';
 import { pareceCodigoBarra } from '@/lib/barcode';
@@ -36,7 +36,7 @@ function hoyISO(): string {
 export default function NuevoPresupuestoPage() {
   useGuardarRuta();
   const router = useRouter();
-  const { tasa, isOnline, usaStock, ultimaSincronizacion, negocioId, user, userNombre, negocioNombre, productosVersion } = useApp();
+  const { tasa, isOnline, usaStock, ultimaSincronizacion, negocioId, user, userNombre, negocioNombre, datosNegocio, productosVersion } = useApp();
 
   const [productos, setProductos] = useState<Producto[]>([]);
   const [busqueda, setBusqueda] = useState('');
@@ -51,6 +51,7 @@ export default function NuevoPresupuestoPage() {
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
   const [guardado, setGuardado] = useState<Presupuesto | null>(null);
+  const [numeroGuardado, setNumeroGuardado] = useState(0);
   const [compartiendo, setCompartiendo] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -197,15 +198,28 @@ export default function NuevoPresupuestoPage() {
     await savePresupuesto(presupuesto);
     await encolarCrearPresupuesto(presupuesto, negocioId);
 
+    // Correlativo por orden de creación — mismo criterio que "Venta #N" en
+    // Resumen, calculado en el cliente sobre todo lo que este dispositivo
+    // conoce (no hay concepto de "período" para presupuestos).
+    const todos = await getPresupuestos();
+    const ordenados = [...todos].sort((a, b) => a.creado_en.localeCompare(b.creado_en));
+    const numero = ordenados.findIndex(p => p.id === presupuesto.id) + 1;
+
     setGuardando(false);
     setGuardado(presupuesto);
+    setNumeroGuardado(numero > 0 ? numero : ordenados.length);
   };
 
   const compartir = async () => {
     if (!guardado) return;
     setCompartiendo(true);
     try {
-      await compartirPresupuesto({ negocioNombre: negocioNombre || '', presupuesto: guardado });
+      await compartirPresupuesto({
+        negocioNombre: negocioNombre || '',
+        datosNegocio,
+        presupuesto: guardado,
+        numero: numeroGuardado,
+      });
     } catch {
       showToast('No se pudo generar el documento');
     } finally {

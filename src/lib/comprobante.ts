@@ -1,4 +1,4 @@
-import { Venta, MetodoPago, Presupuesto } from '@/types';
+import { Venta, MetodoPago, Presupuesto, DatosNegocio } from '@/types';
 import { formatBS, formatUSD } from './precio';
 
 // Documentos de venta y de presupuesto — NUNCA fiscales (ver la leyenda que
@@ -297,7 +297,13 @@ export async function compartirComprobante(datos: DatosComprobante): Promise<'co
 
 export interface DatosPresupuesto {
   negocioNombre: string;
+  // Opcional a propósito: si el admin nunca cargó "Datos del negocio", el
+  // documento sigue funcionando, solo sin ese bloque.
+  datosNegocio?: DatosNegocio;
   presupuesto: Presupuesto;
+  // Correlativo calculado en el cliente — mismo criterio que "Venta #N" en
+  // Resumen, nunca una columna en la base.
+  numero: number;
 }
 
 function fmtFechaCorta(iso: string): string {
@@ -310,10 +316,41 @@ function fmtFechaCorta(iso: string): string {
   });
 }
 
+// Debajo del nombre del negocio, los datos de contacto que estén cargados
+// — nunca los cuatro fijos: el que falte simplemente no ocupa una línea,
+// no hay "No especificado" ni renglones en blanco.
+function dibujarDatosNegocio(ctx: CanvasRenderingContext2D, ancho: number, y: number, datos?: DatosNegocio): number {
+  if (!datos) return y;
+  const lineas: string[] = [];
+  if (datos.direccion?.trim()) lineas.push(datos.direccion.trim());
+  if (datos.telefono?.trim()) lineas.push(datos.telefono.trim());
+  if (datos.correo?.trim()) lineas.push(datos.correo.trim());
+  if (datos.rif?.trim()) lineas.push(`RIF: ${datos.rif.trim()}`);
+  if (lineas.length === 0) return y;
+
+  ctx.textAlign = 'center';
+  ctx.font = '10px sans-serif';
+  ctx.fillStyle = '#6b7280';
+  for (const linea of lineas) {
+    ctx.fillText(linea, ancho / 2, y);
+    y += 13;
+  }
+  return y + 4;
+}
+
+// Columnas de la tabla de items — Descripción / Cantidad / Precio unitario
+// / Total, en vez de la lista simple de antes. Los bordes derechos de cada
+// columna (el texto crece hacia la izquierda desde ahí).
+const COL_CANT_X = ANCHO - PAD - 180;
+const COL_PRECIO_X = ANCHO - PAD - 90;
+const COL_TOTAL_X = ANCHO - PAD;
+const COL_DESC_ANCHO_MAX = COL_CANT_X - PAD - 10;
+
 function dibujarPresupuesto(ctx: CanvasRenderingContext2D, ancho: number, datos: DatosPresupuesto): number {
-  const { negocioNombre, presupuesto } = datos;
+  const { negocioNombre, datosNegocio, presupuesto, numero } = datos;
   const centroX = ancho / 2;
   let y = dibujarEncabezado(ctx, ancho, negocioNombre, 'Presupuesto');
+  y = dibujarDatosNegocio(ctx, ancho, y, datosNegocio);
 
   // La fecha de vencimiento es lo que le avisa al cliente que el precio en
   // bolívares no es eterno — se destaca en un recuadro, no como una línea
@@ -338,12 +375,20 @@ function dibujarPresupuesto(ctx: CanvasRenderingContext2D, ancho: number, datos:
     day: '2-digit', month: 'short', year: 'numeric',
   });
   ctx.fillText(fechaCreacion, PAD, y);
-  if (presupuesto.cliente_nombre) {
-    ctx.textAlign = 'right';
-    const clienteLinea = truncar(ctx, presupuesto.cliente_nombre, ancho - PAD * 2 - 90);
-    ctx.fillText(clienteLinea, ancho - PAD, y);
-  }
+  ctx.textAlign = 'right';
+  ctx.fillText(`Presupuesto #${numero}`, ancho - PAD, y);
   y += 20;
+
+  // Etiqueta delante del nombre — sin esto el dato quedaba pelado, sin
+  // decir qué es.
+  if (presupuesto.cliente_nombre) {
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#374151';
+    ctx.font = '12px sans-serif';
+    const clienteLinea = truncar(ctx, `Cliente: ${presupuesto.cliente_nombre}`, ancho - PAD * 2);
+    ctx.fillText(clienteLinea, PAD, y);
+    y += 20;
+  }
 
   ctx.textAlign = 'left';
   ctx.fillStyle = '#6b7280';
@@ -352,37 +397,39 @@ function dibujarPresupuesto(ctx: CanvasRenderingContext2D, ancho: number, datos:
   y += 18;
 
   trazarLinea(ctx, ancho, y);
-  y += 24;
+  y += 20;
+
+  ctx.font = 'bold 10px sans-serif';
+  ctx.fillStyle = '#9ca3af';
+  ctx.textAlign = 'left';
+  ctx.fillText('DESCRIPCIÓN', PAD, y);
+  ctx.textAlign = 'right';
+  ctx.fillText('CANT.', COL_CANT_X, y);
+  ctx.fillText('P. UNIT.', COL_PRECIO_X, y);
+  ctx.fillText('TOTAL', COL_TOTAL_X, y);
+  y += 12;
+  trazarLinea(ctx, ancho, y);
+  y += 20;
 
   for (const item of presupuesto.items ?? []) {
     const esPeso = item.gramos !== undefined;
-    const etiquetaCantidad = esPeso ? `${item.gramos}g` : `${item.cantidad}×`;
     const subtotalBs = esPeso
       ? item.precioUnitarioBs * ((item.gramos ?? 0) / 1000)
       : item.precioUnitarioBs * item.cantidad;
+    const cantidadTexto = esPeso ? `${item.gramos}g` : `${item.cantidad}`;
+    const precioTexto = esPeso ? `${formatBS(item.precioUnitarioBs)}/kg` : formatBS(item.precioUnitarioBs);
 
-    ctx.font = '13px sans-serif';
+    ctx.font = '12px sans-serif';
     ctx.fillStyle = '#111827';
     ctx.textAlign = 'left';
-    const nombreLinea = truncar(ctx, `${etiquetaCantidad} ${item.nombre}`, ancho - PAD * 2 - 90);
-    ctx.fillText(nombreLinea, PAD, y);
+    ctx.fillText(truncar(ctx, item.nombre, COL_DESC_ANCHO_MAX), PAD, y);
     ctx.textAlign = 'right';
-    ctx.fillText(formatBS(subtotalBs), ancho - PAD, y);
-    y += 16;
-
-    const detalleUnitario = esPeso
-      ? `${formatBS(item.precioUnitarioBs)} / kg`
-      : item.cantidad > 1
-        ? `${formatBS(item.precioUnitarioBs)} c/u`
-        : '';
-    if (detalleUnitario) {
-      ctx.font = '10px sans-serif';
-      ctx.fillStyle = '#9ca3af';
-      ctx.textAlign = 'left';
-      ctx.fillText(detalleUnitario, PAD, y);
-      y += 14;
-    }
-    y += 6;
+    ctx.fillStyle = '#374151';
+    ctx.fillText(cantidadTexto, COL_CANT_X, y);
+    ctx.fillText(precioTexto, COL_PRECIO_X, y);
+    ctx.fillStyle = '#111827';
+    ctx.fillText(formatBS(subtotalBs), COL_TOTAL_X, y);
+    y += 20;
   }
 
   trazarLinea(ctx, ancho, y);
@@ -421,7 +468,7 @@ function dibujarPresupuesto(ctx: CanvasRenderingContext2D, ancho: number, datos:
 
 export async function generarPresupuestoPNG(datos: DatosPresupuesto): Promise<{ blob: Blob; nombreArchivo: string }> {
   const blob = await generarPNG((ctx, ancho) => dibujarPresupuesto(ctx, ancho, datos));
-  return { blob, nombreArchivo: `presupuesto-${datos.presupuesto.id.slice(0, 8)}.png` };
+  return { blob, nombreArchivo: `presupuesto-${datos.numero}.png` };
 }
 
 export async function compartirPresupuesto(datos: DatosPresupuesto): Promise<'compartido' | 'descargado'> {
