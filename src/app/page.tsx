@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Producto, ItemCarrito, MetodoPago, MetodoPagoVenta, PagoVenta, Venta, VentaItem, MovimientoStock, ClienteFiado, MovimientoFiado } from '@/types';
+import { Producto, ItemCarrito, MetodoPago, MetodoPagoVenta, PagoVenta, Venta, VentaItem, MovimientoStock, ClienteFiado, MovimientoFiado, Presupuesto } from '@/types';
 import {
   getProductos,
   getProductoPorCodigo,
@@ -16,6 +16,8 @@ import {
   saveMovimientoFiado,
   actualizarSaldoFiadoLocal,
   getVentasSinCerrar,
+  getPresupuesto,
+  savePresupuesto,
 } from '@/lib/db';
 import {
   encolarRegistrarVenta,
@@ -24,6 +26,7 @@ import {
   encolarAplicarMovimientoStock,
   encolarCrearClienteFiado,
   encolarAplicarMovimientoFiado,
+  encolarActualizarPresupuesto,
   onFalloPermanente,
 } from '@/lib/outbox';
 import { updateUsaCostos, updateUsaStock } from '@/lib/sync';
@@ -86,6 +89,8 @@ export default function CajaPage() {
     tasa, isOnline, negocioNombre, signOut, user, pendientesCount, negocioId, rol, userNombre,
     productosVersion, usaCostos, setUsaCostos, usaStock, setUsaStock, ultimaSincronizacion,
     carrito, setCarrito, showCarrito, setShowCarrito,
+    presupuestoConvirtiendoId, setPresupuestoConvirtiendoId,
+    presupuestoClienteNombre,
   } = useApp();
   const router = useRouter();
   const [productos, setProductos] = useState<Producto[]>([]);
@@ -365,6 +370,10 @@ export default function CajaPage() {
 
   const confirmarVaciarCarrito = () => {
     setCarrito([]);
+    // Vaciar el carrito rompe el vínculo con el presupuesto que lo había
+    // cargado — una venta futura desde un carrito armado desde cero nunca
+    // debe marcar ese presupuesto como convertido.
+    setPresupuestoConvirtiendoId(null);
     setShowConfirmVaciar(false);
     setShowCarrito(false);
     showToast('Carrito vaciado');
@@ -730,6 +739,27 @@ export default function CajaPage() {
         }
         await encolarAplicarMovimientoFiado(movimientoFiado.id, negocioId);
       }
+    }
+
+    // Si este carrito vino de "Convertir en venta" en /presupuestos, la
+    // venta ya se confirmó — se marca el presupuesto como convertido,
+    // ligado a esta venta. Mismo criterio offline-first que el resto de
+    // los pasos posteriores a una venta: se aplica local y se encola,
+    // nunca depende de tener conexión ahora mismo.
+    if (presupuestoConvirtiendoId && negocioId) {
+      const presupuesto = await getPresupuesto(presupuestoConvirtiendoId);
+      if (presupuesto) {
+        const actualizado: Presupuesto = {
+          ...presupuesto,
+          estado: 'convertido',
+          convertido_en: now.toISOString(),
+          venta_id: venta.id,
+          sincronizado: false,
+        };
+        await savePresupuesto(actualizado);
+        await encolarActualizarPresupuesto(actualizado.id, negocioId);
+      }
+      setPresupuestoConvirtiendoId(null);
     }
 
     setCarrito([]);
@@ -1234,10 +1264,13 @@ export default function CajaPage() {
                                 setMetodoMixtoActual(m.id);
                                 setMontoMixtoInput('');
                                 setClienteFiadoElegido(null);
-                                setBusquedaClienteFiado('');
+                                // Precarga con el cliente del presupuesto que se
+                                // está convirtiendo (si tenía uno) — le ahorra al
+                                // cajero escribirlo de nuevo, solo confirma o crea.
+                                setBusquedaClienteFiado(m.id === 'fiado' ? (presupuestoClienteNombre || '') : '');
                               } else if (m.id === 'fiado') {
                                 setSeleccionandoClienteCalculado(true);
-                                setBusquedaClienteFiado('');
+                                setBusquedaClienteFiado(presupuestoClienteNombre || '');
                               } else {
                                 agregarPagoMixtoCalculado(m.id);
                               }
@@ -1311,7 +1344,10 @@ export default function CajaPage() {
                           setMetodo(m.id);
                           setMontoRecibido('');
                           setClienteFiadoElegido(null);
-                          setBusquedaClienteFiado('');
+                          // Precarga con el cliente del presupuesto que se está
+                          // convirtiendo (si tenía uno) — le ahorra al cajero
+                          // escribirlo de nuevo, solo confirma o crea.
+                          setBusquedaClienteFiado(m.id === 'fiado' ? (presupuestoClienteNombre || '') : '');
                         }}
                         className={`py-3 px-2 rounded-xl text-sm font-medium transition-colors text-center ${
                           metodo === m.id

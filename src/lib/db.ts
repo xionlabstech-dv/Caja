@@ -1,5 +1,5 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
-import { Producto, Configuracion, Venta, CierreCaja, OperacionPendiente, Rol, MovimientoStock, MetodoPago, EstadoNegocio, ClienteFiado, MovimientoFiado } from '@/types';
+import { Producto, Configuracion, Venta, CierreCaja, OperacionPendiente, Rol, MovimientoStock, MetodoPago, EstadoNegocio, ClienteFiado, MovimientoFiado, Presupuesto } from '@/types';
 
 interface MetaItem {
   key: string;
@@ -48,6 +48,10 @@ interface CajaDBSchema extends DBSchema {
     value: MovimientoFiado;
     indexes: { 'by-cliente': string };
   };
+  presupuestos: {
+    key: string;
+    value: Presupuesto;
+  };
 }
 
 let dbPromise: Promise<IDBPDatabase<CajaDBSchema>> | null = null;
@@ -55,7 +59,7 @@ let dbPromise: Promise<IDBPDatabase<CajaDBSchema>> | null = null;
 function getDB() {
   if (typeof window === 'undefined') throw new Error('IDB solo disponible en el browser');
   if (!dbPromise) {
-    dbPromise = openDB<CajaDBSchema>('caja-db', 6, {
+    dbPromise = openDB<CajaDBSchema>('caja-db', 7, {
       async upgrade(db, oldVersion, _newVersion, transaction) {
         if (oldVersion < 1) {
           const productosStore = db.createObjectStore('productos', { keyPath: 'id' });
@@ -109,6 +113,11 @@ function getDB() {
           db.createObjectStore('clientes_fiado', { keyPath: 'id' });
           const fiadoMovStore = db.createObjectStore('fiado_movimientos', { keyPath: 'id' });
           fiadoMovStore.createIndex('by-cliente', 'cliente_id');
+        }
+        if (oldVersion < 7) {
+          // Presupuestos: sin datos que migrar, funcionalidad enteramente
+          // nueva — solo hace falta crear la store.
+          db.createObjectStore('presupuestos', { keyPath: 'id' });
         }
       },
     });
@@ -376,7 +385,7 @@ export async function actualizarStockLocal(productoId: string, nuevoStock: numbe
 export async function clearTenantData(): Promise<void> {
   const db = await getDB();
   const tx = db.transaction(
-    ['productos', 'configuracion', 'ventas', 'cierres', 'meta', 'pendientes', 'movimientos', 'clientes_fiado', 'fiado_movimientos'],
+    ['productos', 'configuracion', 'ventas', 'cierres', 'meta', 'pendientes', 'movimientos', 'clientes_fiado', 'fiado_movimientos', 'presupuestos'],
     'readwrite',
   );
   await Promise.all([
@@ -389,6 +398,7 @@ export async function clearTenantData(): Promise<void> {
     tx.objectStore('movimientos').clear(),
     tx.objectStore('clientes_fiado').clear(),
     tx.objectStore('fiado_movimientos').clear(),
+    tx.objectStore('presupuestos').clear(),
     tx.done,
   ]);
 }
@@ -477,6 +487,57 @@ export async function getMovimientosFiadoPorCliente(clienteId: string): Promise<
   const db = await getDB();
   const all = await db.getAllFromIndex('fiado_movimientos', 'by-cliente', clienteId);
   return all.sort((a, b) => b.ocurrido_en.localeCompare(a.ocurrido_en));
+}
+
+// --- Presupuestos ---
+
+export async function savePresupuesto(p: Presupuesto): Promise<void> {
+  const db = await getDB();
+  await db.put('presupuestos', p);
+}
+
+export async function getPresupuesto(id: string): Promise<Presupuesto | undefined> {
+  const db = await getDB();
+  return db.get('presupuestos', id);
+}
+
+// Vigentes primero, más recientes primero dentro de cada grupo — mismo
+// orden que ya aplica presupuestos_listar en Supabase.
+export async function getPresupuestos(): Promise<Presupuesto[]> {
+  const db = await getDB();
+  const all = await db.getAll('presupuestos');
+  return all.sort((a, b) => {
+    if (a.estado === 'vigente' && b.estado !== 'vigente') return -1;
+    if (a.estado !== 'vigente' && b.estado === 'vigente') return 1;
+    return b.creado_en.localeCompare(a.creado_en);
+  });
+}
+
+// El resumen que trae presupuestos_listar no incluye items — se guarda el
+// encabezado nada más, preservando los items locales si ya se conocían
+// (creado en este dispositivo, o pedidos antes bajo demanda). Si el
+// presupuesto tiene un cambio local todavía sin confirmar (sincronizado
+// === false — un convertir/anular recién hecho), no se pisa: mismo motivo
+// que el fix ya aplicado a clientes_fiado — el sync periódico podría
+// revivir un 'vigente' viejo encima de un estado más nuevo que la cola
+// todavía no terminó de subir.
+export async function savePresupuestosResumen(
+  resumenes: Omit<Presupuesto, 'items' | 'sincronizado'>[]
+): Promise<void> {
+  const db = await getDB();
+  const tx = db.transaction('presupuestos', 'readwrite');
+  for (const r of resumenes) {
+    const local = await tx.store.get(r.id);
+    if (local && local.sincronizado === false) continue;
+    await tx.store.put({ ...r, items: local?.items, sincronizado: true });
+  }
+  await tx.done;
+}
+
+export async function marcarPresupuestoSincronizado(id: string): Promise<void> {
+  const db = await getDB();
+  const p = await db.get('presupuestos', id);
+  if (p) await db.put('presupuestos', { ...p, sincronizado: true });
 }
 
 // --- Cola de sincronización (outbox) ---
