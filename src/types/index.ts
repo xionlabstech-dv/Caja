@@ -260,6 +260,54 @@ export interface MovimientoFiado {
   sincronizado?: boolean;
 }
 
+export type EstadoPresupuesto = 'vigente' | 'convertido' | 'anulado';
+
+// Foto congelada del producto al momento de cotizar — mismo patrón exacto
+// que VentaItem: si el precio del producto cambia después en Inventario,
+// el presupuesto sigue diciendo lo que se cotizó.
+export interface PresupuestoItem {
+  id: string;
+  producto_id?: string;
+  nombre: string;
+  cantidad: number;
+  gramos?: number;
+  precioUnitarioUsd: number;
+  precioUnitarioBs: number;
+}
+
+export interface Presupuesto {
+  id: string;
+  cliente_nombre?: string;
+  estado: EstadoPresupuesto;
+  // 'vencido' no es un estado guardado — se calcula comparando esta fecha
+  // contra hoy, en el momento de mostrarlo (ver presupuestos_listar en
+  // Supabase y el mismo cálculo del lado del cliente para lo local).
+  fecha_vencimiento: string;
+  tasa_al_crear: number;
+  total_usd: number;
+  total_bs_estimado: number;
+  // En Supabase vive en su propia tabla (presupuesto_items), pero acá se
+  // guarda embebido — igual que Venta.items — porque es lo que permite
+  // crear y convertir sin conexión. Puede faltar si este presupuesto se
+  // conoce solo por el resumen remoto (presupuestos_listar, que no trae
+  // items) y todavía no se pidieron sus items bajo demanda para convertirlo.
+  items?: PresupuestoItem[];
+  creado_por?: string;
+  creado_por_nombre?: string;
+  creado_en: string;
+  convertido_en?: string;
+  venta_id?: string;
+  anulado_en?: string;
+  motivo_anulacion?: string;
+  // Igual que Venta.sincronizada, pero sobre el ESTADO actual (el de la
+  // última transición: creado, convertido o anulado) — el sync periódico
+  // del resumen nunca pisa un presupuesto con esto en false. Sin esto, un
+  // "convertir" o "anular" recién hecho localmente podía volver a aparecer
+  // como 'vigente' si el sync corría antes de que la cola confirmara el
+  // cambio con el servidor — mismo bug que ya se corrigió para fiado.
+  sincronizado?: boolean;
+}
+
 export type TipoPendiente =
   | 'crear_producto'
   | 'editar_producto'
@@ -272,7 +320,9 @@ export type TipoPendiente =
   | 'actualizar_usa_stock'
   | 'aplicar_movimiento_stock'
   | 'crear_cliente_fiado'
-  | 'aplicar_movimiento_fiado';
+  | 'aplicar_movimiento_fiado'
+  | 'crear_presupuesto'
+  | 'actualizar_presupuesto';
 
 export interface PayloadCrearProducto {
   producto: Producto;
@@ -333,6 +383,16 @@ export interface PayloadAplicarMovimientoFiado {
   negocioId: string;
 }
 
+export interface PayloadCrearPresupuesto {
+  presupuesto: Presupuesto;
+  negocioId: string;
+}
+
+export interface PayloadActualizarPresupuesto {
+  presupuestoId: string;
+  negocioId: string;
+}
+
 export type PayloadPendiente =
   | PayloadCrearProducto
   | PayloadEditarProducto
@@ -345,7 +405,9 @@ export type PayloadPendiente =
   | PayloadActualizarUsaStock
   | PayloadAplicarMovimientoStock
   | PayloadCrearClienteFiado
-  | PayloadAplicarMovimientoFiado;
+  | PayloadAplicarMovimientoFiado
+  | PayloadCrearPresupuesto
+  | PayloadActualizarPresupuesto;
 
 export interface OperacionPendiente {
   id: string;

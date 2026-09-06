@@ -11,6 +11,8 @@ import {
   saveMovimientoFiado,
   eliminarMovimientoFiado,
   actualizarSaldoFiadoLocal,
+  getPresupuesto,
+  marcarPresupuestoSincronizado,
 } from './db';
 import {
   createProductoSupabase,
@@ -26,6 +28,8 @@ import {
   createClienteFiadoSupabase,
   aplicarMovimientoFiadoRemoto,
   getSaldoFiadoRemoto,
+  sincronizarPresupuesto,
+  actualizarPresupuestoSupabase,
 } from './sync';
 import {
   OperacionPendiente,
@@ -43,9 +47,12 @@ import {
   PayloadAplicarMovimientoStock,
   PayloadCrearClienteFiado,
   PayloadAplicarMovimientoFiado,
+  PayloadCrearPresupuesto,
+  PayloadActualizarPresupuesto,
   Producto,
   CierreCaja,
   ClienteFiado,
+  Presupuesto,
 } from '@/types';
 
 // Backoff exponencial por operación: 2s, 4s, 8s... tope 60s.
@@ -160,6 +167,19 @@ export async function encolarAplicarMovimientoFiado(movimientoId: string, negoci
   await encolar('aplicar_movimiento_fiado', payload, movimientoId);
 }
 
+export async function encolarCrearPresupuesto(presupuesto: Presupuesto, negocioId: string): Promise<void> {
+  const payload: PayloadCrearPresupuesto = { presupuesto, negocioId };
+  await encolar('crear_presupuesto', payload, presupuesto.id);
+}
+
+export async function encolarActualizarPresupuesto(presupuestoId: string, negocioId: string): Promise<void> {
+  const payload: PayloadActualizarPresupuesto = { presupuestoId, negocioId };
+  // id fijo distinto del propio presupuesto: si se llega a encolar crear y
+  // luego convertir/anular casi seguido sin red, deben quedar como dos
+  // operaciones separadas (la cola procesa en orden, primero llega el alta).
+  await encolar('actualizar_presupuesto', payload, `presupuesto-estado-${presupuestoId}`);
+}
+
 async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
   switch (op.tipo) {
     case 'crear_producto': {
@@ -267,6 +287,27 @@ async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
         return true;
       }
       return false;
+    }
+    case 'crear_presupuesto': {
+      const { presupuesto, negocioId } = op.payload as PayloadCrearPresupuesto;
+      return await sincronizarPresupuesto(presupuesto, negocioId);
+    }
+    case 'actualizar_presupuesto': {
+      const { presupuestoId } = op.payload as PayloadActualizarPresupuesto;
+      // Se relee de IndexedDB en vez de guardar una copia congelada en el
+      // payload — mismo patrón que 'registrar_venta': manda lo último que
+      // se sabe de este presupuesto en el momento de sincronizar.
+      const presupuesto = await getPresupuesto(presupuestoId);
+      if (!presupuesto) return true; // no hay nada que sincronizar
+      const ok = await actualizarPresupuestoSupabase(presupuesto.id, {
+        estado: presupuesto.estado,
+        convertido_en: presupuesto.convertido_en,
+        venta_id: presupuesto.venta_id,
+        anulado_en: presupuesto.anulado_en,
+        motivo_anulacion: presupuesto.motivo_anulacion,
+      });
+      if (ok) await marcarPresupuestoSincronizado(presupuesto.id);
+      return ok;
     }
     default:
       return true;

@@ -9,6 +9,7 @@ import {
   actualizarStockLocal,
   saveClientesFiado,
   actualizarSaldoFiadoLocal,
+  savePresupuestosResumen,
 } from './db';
 import {
   Producto,
@@ -20,6 +21,9 @@ import {
   MovimientoStock,
   ClienteFiado,
   MovimientoFiado,
+  Presupuesto,
+  PresupuestoItem,
+  EstadoPresupuesto,
 } from '@/types';
 
 export async function syncFromSupabase(negocioId: string): Promise<Configuracion | null> {
@@ -66,6 +70,15 @@ export async function syncFromSupabase(negocioId: string): Promise<Configuracion
 
     if (allClientesFiado.length > 0) {
       await saveClientesFiado(allClientesFiado);
+    }
+
+    // Presupuestos: mismo criterio, pero vía la función presupuestos_listar
+    // (ella arma el orden y calcula 'vencido' contra la fecha del
+    // servidor) en vez de leer la tabla directo — no trae items, solo el
+    // resumen para la lista.
+    const resumenesPresupuestos = await getPresupuestosRemoto(negocioId);
+    if (resumenesPresupuestos) {
+      await savePresupuestosResumen(resumenesPresupuestos);
     }
 
     // Marca de "hasta acá se pudo confirmar con el servidor" — la regla de
@@ -739,5 +752,131 @@ export async function getAbonosPeriodoRemoto(
     } as MovimientoFiado));
   } catch {
     return null;
+  }
+}
+
+// Inserta el presupuesto y sus items — mismo patrón exacto que
+// sincronizarVenta (venta + venta_items): 23505 con el mismo id en un
+// reintento de la cola offline significa que ya está insertado de un
+// intento previo, no es un error real.
+export async function sincronizarPresupuesto(presupuesto: Presupuesto, negocioId: string): Promise<boolean> {
+  try {
+    const { error } = await supabase.from('presupuestos').insert({
+      id: presupuesto.id,
+      negocio_id: negocioId,
+      cliente_nombre: presupuesto.cliente_nombre ?? null,
+      fecha_vencimiento: presupuesto.fecha_vencimiento,
+      tasa_al_crear: presupuesto.tasa_al_crear,
+      total_usd: presupuesto.total_usd,
+      total_bs_estimado: presupuesto.total_bs_estimado,
+      creado_por: presupuesto.creado_por ?? null,
+      creado_por_nombre: presupuesto.creado_por_nombre ?? null,
+      creado_en: presupuesto.creado_en,
+    });
+    if (error && (error as { code?: string }).code !== '23505') throw error;
+
+    const itemsPayload = (presupuesto.items ?? []).map(item => ({
+      id: item.id,
+      presupuesto_id: presupuesto.id,
+      producto_id: item.producto_id ?? null,
+      nombre: item.nombre,
+      cantidad: item.cantidad,
+      gramos: item.gramos ?? null,
+      precio_unitario_usd: item.precioUnitarioUsd,
+      precio_unitario_bs: item.precioUnitarioBs,
+    }));
+
+    if (itemsPayload.length > 0) {
+      const { error: itemsError } = await supabase.from('presupuesto_items').insert(itemsPayload);
+      if (itemsError && (itemsError as { code?: string }).code !== '23505') throw itemsError;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Resumen para la lista (sin items) — vía la función presupuestos_listar,
+// que ya ordena vigentes primero y calcula 'vencido' contra la fecha del
+// servidor. No usa mi_estado_negocio() (a diferencia de las RPC
+// reportes_*): crear/convertir/anular presupuestos es trabajo operativo
+// diario, igual que fiado, y sigue disponible en 'restringido'.
+export async function getPresupuestosRemoto(
+  negocioId: string
+): Promise<Omit<Presupuesto, 'items' | 'sincronizado'>[] | null> {
+  try {
+    const { data, error } = await supabase.rpc('presupuestos_listar', { p_negocio_id: negocioId });
+    if (error) throw error;
+    interface FilaPresupuesto {
+      id: string;
+      cliente_nombre: string | null;
+      estado: string;
+      fecha_vencimiento: string;
+      tasa_al_crear: number | null;
+      total_usd: number;
+      total_bs_estimado: number;
+      creado_por_nombre: string | null;
+      creado_en: string;
+      venta_id: string | null;
+    }
+    return ((data ?? []) as FilaPresupuesto[]).map(p => ({
+      id: p.id,
+      cliente_nombre: p.cliente_nombre ?? undefined,
+      estado: p.estado as EstadoPresupuesto,
+      fecha_vencimiento: p.fecha_vencimiento,
+      tasa_al_crear: p.tasa_al_crear ?? 0,
+      total_usd: p.total_usd,
+      total_bs_estimado: p.total_bs_estimado,
+      creado_por_nombre: p.creado_por_nombre ?? undefined,
+      creado_en: p.creado_en,
+      venta_id: p.venta_id ?? undefined,
+    }));
+  } catch {
+    return null;
+  }
+}
+
+// Items de UN presupuesto, bajo demanda — para convertir uno que este
+// dispositivo no creó (los items no viajan en presupuestos_listar). Se
+// guarda al vuelo en IndexedDB al pedirse, así que una segunda conversión
+// del mismo presupuesto no necesita red de nuevo.
+export async function getPresupuestoItemsRemoto(presupuestoId: string): Promise<PresupuestoItem[] | null> {
+  try {
+    const { data, error } = await supabase
+      .from('presupuesto_items')
+      .select('id, producto_id, nombre, cantidad, gramos, precio_unitario_usd, precio_unitario_bs')
+      .eq('presupuesto_id', presupuestoId);
+    if (error) throw error;
+    return (data ?? []).map(it => ({
+      id: it.id,
+      producto_id: it.producto_id ?? undefined,
+      nombre: it.nombre,
+      cantidad: it.cantidad,
+      gramos: it.gramos ?? undefined,
+      precioUnitarioUsd: it.precio_unitario_usd,
+      precioUnitarioBs: it.precio_unitario_bs,
+    }));
+  } catch {
+    return null;
+  }
+}
+
+// Transición de estado (convertir o anular) — un UPDATE directo, no una
+// RPC: no hay ningún saldo ni balance que proteger acá (a diferencia de
+// fiado/stock), los constraints de la tabla ya rechazan un 'convertido'
+// sin venta_id o un 'anulado' sin motivo. Mismo criterio que
+// actualizarCierreIdVentas: se pide .select() de vuelta porque un UPDATE
+// bloqueado por RLS no lanza excepción, devuelve data vacía.
+export async function actualizarPresupuestoSupabase(
+  id: string,
+  cambios: Partial<Pick<Presupuesto, 'estado' | 'convertido_en' | 'venta_id' | 'anulado_en' | 'motivo_anulacion'>>
+): Promise<boolean> {
+  try {
+    const { data, error } = await supabase.from('presupuestos').update(cambios).eq('id', id).select('id');
+    if (error) throw error;
+    return !!data && data.length > 0;
+  } catch {
+    return false;
   }
 }
