@@ -30,6 +30,7 @@ import {
   getSaldoFiadoRemoto,
   sincronizarPresupuesto,
   actualizarPresupuestoSupabase,
+  updateDatosNegocio,
 } from './sync';
 import {
   OperacionPendiente,
@@ -49,10 +50,12 @@ import {
   PayloadAplicarMovimientoFiado,
   PayloadCrearPresupuesto,
   PayloadActualizarPresupuesto,
+  PayloadActualizarDatosNegocio,
   Producto,
   CierreCaja,
   ClienteFiado,
   Presupuesto,
+  DatosNegocio,
 } from '@/types';
 
 // Backoff exponencial por operación: 2s, 4s, 8s... tope 60s.
@@ -149,6 +152,12 @@ export async function encolarActualizarUsaStock(usaStock: boolean, negocioId: st
   await encolar('actualizar_usa_stock', payload, 'usa-stock-pendiente');
 }
 
+export async function encolarActualizarDatosNegocio(datos: DatosNegocio, negocioId: string): Promise<void> {
+  const payload: PayloadActualizarDatosNegocio = { datos, negocioId };
+  // id fijo: varios guardados seguidos sin red dejan solo el último en cola.
+  await encolar('actualizar_datos_negocio', payload, 'datos-negocio-pendiente');
+}
+
 export async function encolarAplicarMovimientoStock(movimientoId: string, negocioId: string): Promise<void> {
   const payload: PayloadAplicarMovimientoStock = { movimientoId, negocioId };
   // id fijo = id del movimiento: la RPC ya es idempotente por su cuenta,
@@ -227,6 +236,10 @@ async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
     case 'actualizar_usa_stock': {
       const { usaStock, negocioId } = op.payload as PayloadActualizarUsaStock;
       return await updateUsaStock(usaStock, negocioId);
+    }
+    case 'actualizar_datos_negocio': {
+      const { datos, negocioId } = op.payload as PayloadActualizarDatosNegocio;
+      return await updateDatosNegocio(datos, negocioId);
     }
     case 'aplicar_movimiento_stock': {
       const { movimientoId } = op.payload as PayloadAplicarMovimientoStock;

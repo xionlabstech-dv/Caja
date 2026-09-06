@@ -10,6 +10,7 @@ import {
   saveClientesFiado,
   actualizarSaldoFiadoLocal,
   savePresupuestosResumen,
+  setCachedDatosNegocio,
 } from './db';
 import {
   Producto,
@@ -24,6 +25,7 @@ import {
   Presupuesto,
   PresupuestoItem,
   EstadoPresupuesto,
+  DatosNegocio,
 } from '@/types';
 
 export async function syncFromSupabase(negocioId: string): Promise<Configuracion | null> {
@@ -157,6 +159,31 @@ export async function updateUsaStock(usaStock: boolean, negocioId: string): Prom
     if (error) throw error;
     if (!data || data.length === 0) return false;
     await setCachedUsaStock(usaStock);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Mismo patrón exacto que updateUsaCostos/updateUsaStock: un update directo
+// a negocios, sin RPC. Los cuatro campos son opcionales — un valor vacío se
+// manda como null en vez de una cadena vacía, para que "borrar el teléfono"
+// funcione igual que "nunca lo cargó".
+export async function updateDatosNegocio(datos: DatosNegocio, negocioId: string): Promise<boolean> {
+  try {
+    const { data, error } = await supabase
+      .from('negocios')
+      .update({
+        direccion: datos.direccion || null,
+        telefono: datos.telefono || null,
+        correo: datos.correo || null,
+        rif: datos.rif || null,
+      })
+      .eq('id', negocioId)
+      .select('id');
+    if (error) throw error;
+    if (!data || data.length === 0) return false;
+    await setCachedDatosNegocio(datos);
     return true;
   } catch {
     return false;

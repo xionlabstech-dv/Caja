@@ -17,7 +17,7 @@ export const LIMITE_USUARIOS_POR_NEGOCIO = 3;
 const RUTAS_ADMIN = [
   '/', '/resumen', '/fiado', '/mas',
   '/reportes', '/tasa', '/inventario', '/usuarios', '/movimientos',
-  '/presupuestos', '/presupuestos/nuevo',
+  '/presupuestos', '/presupuestos/nuevo', '/datos-negocio',
 ];
 const RUTAS_CAJERO = ['/', '/resumen', '/fiado', '/mas', '/presupuestos', '/presupuestos/nuevo'];
 
@@ -26,8 +26,10 @@ const RUTAS_CAJERO = ['/', '/resumen', '/fiado', '/mas', '/presupuestos', '/pres
 // La base ya lo bloquea de verdad (RLS); esto solo evita que el admin
 // entre a una pantalla que le va a rebotar todo. Fiado (fiar/abonar) y
 // Presupuestos son parte de vender, no de administrar — siguen disponibles
-// igual que Caja (mismo nivel de RLS que fiado: sin gate por estado).
-const RUTAS_OCULTAS_RESTRINGIDO = ['/inventario', '/movimientos', '/reportes'];
+// igual que Caja (mismo nivel de RLS que fiado: sin gate por estado). Datos
+// del negocio es administrativo, no de venta — mismo criterio que
+// Inventario/Reportes.
+const RUTAS_OCULTAS_RESTRINGIDO = ['/inventario', '/movimientos', '/reportes', '/datos-negocio'];
 
 export function rutasPermitidas(rol: Rol | null, estado?: EstadoNegocio): string[] {
   const base = rol === 'admin' ? RUTAS_ADMIN : RUTAS_CAJERO;

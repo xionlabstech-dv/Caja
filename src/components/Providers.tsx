@@ -22,11 +22,13 @@ import {
   getCachedFechaProximoPago,
   setCachedFechaProximoPago,
   getCachedUltimaSincronizacion,
+  getCachedDatosNegocio,
+  setCachedDatosNegocio,
   clearTenantData,
   contarPendientes,
 } from '@/lib/db';
 import { procesarCola, onFalloPermanente } from '@/lib/outbox';
-import { Configuracion, Rol, EstadoNegocio, ItemCarrito } from '@/types';
+import { Configuracion, Rol, EstadoNegocio, ItemCarrito, DatosNegocio } from '@/types';
 import LoginScreen from './LoginScreen';
 import SuspendedScreen from './SuspendedScreen';
 
@@ -59,6 +61,12 @@ interface AppContextType {
   // 'activo' si nunca hubo nada cacheado (ver getCachedEstado en db.ts).
   estado: EstadoNegocio;
   fechaProximoPago: string | null;
+  // Datos de contacto del negocio (dirección/teléfono/correo/RIF) — todos
+  // opcionales, cacheados igual que el resto de preferencias del negocio.
+  // Los edita solo el admin desde "Datos del negocio"; el documento de
+  // presupuesto los usa para mostrar quién emite la cotización.
+  datosNegocio: DatosNegocio;
+  setDatosNegocio: (d: DatosNegocio) => void;
   // Última vez que se refrescó el catálogo con éxito desde Supabase (ISO) —
   // null si nunca se ha logrado sincronizar en este dispositivo. La usa la
   // regla de confiabilidad del stock (Parte 5, ver src/lib/stock.ts).
@@ -119,6 +127,8 @@ const AppContext = createContext<AppContextType>({
   setUsaStock: () => {},
   estado: 'activo',
   fechaProximoPago: null,
+  datosNegocio: {},
+  setDatosNegocio: () => {},
   ultimaSincronizacion: null,
   authLoading: true,
   signOut: async () => {},
@@ -149,6 +159,7 @@ interface PerfilResuelto {
   usaStock: boolean;
   estado: EstadoNegocio;
   fechaProximoPago: string | null;
+  datosNegocio: DatosNegocio;
 }
 
 async function fetchPerfil(uid: string): Promise<PerfilResuelto | 'desactivado' | null> {
@@ -164,7 +175,7 @@ async function fetchPerfil(uid: string): Promise<PerfilResuelto | 'desactivado' 
 
     const { data: negocio } = await supabase
       .from('negocios')
-      .select('nombre, usa_costos, usa_stock, estado, fecha_proximo_pago')
+      .select('nombre, usa_costos, usa_stock, estado, fecha_proximo_pago, direccion, telefono, correo, rif')
       .eq('id', perfil.negocio_id)
       .single();
 
@@ -182,6 +193,12 @@ async function fetchPerfil(uid: string): Promise<PerfilResuelto | 'desactivado' 
       // como restringido/suspendido.
       estado: (negocio.estado as EstadoNegocio) ?? 'activo',
       fechaProximoPago: negocio.fecha_proximo_pago ?? null,
+      datosNegocio: {
+        direccion: negocio.direccion ?? undefined,
+        telefono: negocio.telefono ?? undefined,
+        correo: negocio.correo ?? undefined,
+        rif: negocio.rif ?? undefined,
+      },
     };
   } catch {
     return null;
@@ -207,12 +224,13 @@ async function resolverPerfil(uid: string): Promise<PerfilResuelto | 'desactivad
     await setCachedUsaStock(perfil.usaStock);
     await setCachedEstado(perfil.estado);
     await setCachedFechaProximoPago(perfil.fechaProximoPago);
+    await setCachedDatosNegocio(perfil.datosNegocio);
     return perfil;
   }
 
   const cachedId = await getCachedNegocioId();
   if (!cachedId) return null;
-  const [cachedNombre, cachedRol, cachedUserNombre, cachedUsaCostos, cachedUsaStock, cachedEstado, cachedFecha] =
+  const [cachedNombre, cachedRol, cachedUserNombre, cachedUsaCostos, cachedUsaStock, cachedEstado, cachedFecha, cachedDatosNegocio] =
     await Promise.all([
       getCachedNegocioNombre(),
       getCachedRol(),
@@ -221,6 +239,7 @@ async function resolverPerfil(uid: string): Promise<PerfilResuelto | 'desactivad
       getCachedUsaStock(),
       getCachedEstado(),
       getCachedFechaProximoPago(),
+      getCachedDatosNegocio(),
     ]);
   return {
     negocioId: cachedId,
@@ -231,6 +250,7 @@ async function resolverPerfil(uid: string): Promise<PerfilResuelto | 'desactivad
     usaStock: cachedUsaStock,
     estado: cachedEstado,
     fechaProximoPago: cachedFecha,
+    datosNegocio: cachedDatosNegocio,
   };
 }
 
@@ -250,6 +270,7 @@ export default function Providers({ children }: { children: ReactNode }) {
   // cache) — nunca arrancar mostrando restricciones que no corresponden.
   const [estado, setEstado] = useState<EstadoNegocio>('activo');
   const [fechaProximoPago, setFechaProximoPago] = useState<string | null>(null);
+  const [datosNegocio, setDatosNegocio] = useState<DatosNegocio>({});
   const [ultimaSincronizacion, setUltimaSincronizacion] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [pendientesCount, setPendientesCount] = useState(0);
@@ -342,6 +363,7 @@ export default function Providers({ children }: { children: ReactNode }) {
     setUsaStock(false);
     setEstado('activo');
     setFechaProximoPago(null);
+    setDatosNegocio({});
     setTasaState(0);
     setConfiguracion(null);
     setPendientesCount(0);
@@ -372,6 +394,7 @@ export default function Providers({ children }: { children: ReactNode }) {
       setUsaStock(false);
       setEstado('activo');
       setFechaProximoPago(null);
+      setDatosNegocio({});
       setCarrito([]);
       setShowCarrito(false);
       setPresupuestoConvirtiendoId(null);
@@ -395,6 +418,7 @@ export default function Providers({ children }: { children: ReactNode }) {
         setUsaStock(perfil.usaStock);
         setEstado(perfil.estado);
         setFechaProximoPago(perfil.fechaProximoPago);
+        setDatosNegocio(perfil.datosNegocio);
       }
     };
 
@@ -418,6 +442,7 @@ export default function Providers({ children }: { children: ReactNode }) {
         setUsaStock(false);
         setEstado('activo');
         setFechaProximoPago(null);
+        setDatosNegocio({});
       }
       // Otros eventos con session null (ej. refresh fallido sin red) se
       // ignoran a propósito: mantenemos la sesión local intacta.
@@ -584,7 +609,7 @@ export default function Providers({ children }: { children: ReactNode }) {
     <AppContext.Provider value={{
       tasa, setTasa, isOnline, configuracion, theme, toggleTheme,
       user, negocioId, negocioNombre, rol, userNombre, usaCostos, setUsaCostos,
-      usaStock, setUsaStock, estado, fechaProximoPago, ultimaSincronizacion, authLoading, signOut,
+      usaStock, setUsaStock, estado, fechaProximoPago, datosNegocio, setDatosNegocio, ultimaSincronizacion, authLoading, signOut,
       pendientesCount, syncStatus, sincronizarAhora, productosVersion,
       carrito, setCarrito, showCarrito, setShowCarrito,
       presupuestoConvirtiendoId, setPresupuestoConvirtiendoId,

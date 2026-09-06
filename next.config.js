@@ -22,7 +22,7 @@ const withPWA = require('next-pwa')({
     // sin depender de que el usuario ya las haya visitado antes.
     async manifestEntries => {
       const revision = process.env.VERCEL_GIT_COMMIT_SHA || String(Date.now());
-      const rutas = ['/', '/inventario', '/resumen', '/tasa', '/reportes', '/usuarios', '/movimientos', '/fiado', '/mas', '/presupuestos', '/presupuestos/nuevo'].map(url => ({ url, revision }));
+      const rutas = ['/', '/inventario', '/resumen', '/tasa', '/reportes', '/usuarios', '/movimientos', '/fiado', '/mas', '/presupuestos', '/presupuestos/nuevo', '/datos-negocio'].map(url => ({ url, revision }));
       return { manifest: [...manifestEntries, ...rutas], warnings: [] };
     },
   ],
