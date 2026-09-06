@@ -15,6 +15,7 @@ import {
   saveClienteFiado,
   saveMovimientoFiado,
   actualizarSaldoFiadoLocal,
+  getVentasSinCerrar,
 } from '@/lib/db';
 import {
   encolarRegistrarVenta,
@@ -28,6 +29,7 @@ import {
 import { updateUsaCostos, updateUsaStock } from '@/lib/sync';
 import { precioBS, precioUSD, costoUSD, formatBS, formatUSD } from '@/lib/precio';
 import { pareceCodigoBarra } from '@/lib/barcode';
+import { compartirComprobante } from '@/lib/comprobante';
 import { useApp } from '@/components/Providers';
 import Scanner from '@/components/Scanner';
 import ThemeToggle from '@/components/ThemeToggle';
@@ -129,6 +131,11 @@ export default function CajaPage() {
   // toque de elegir el método — pero si ese método es fiado hace falta
   // primero elegir cliente, así que se abre este selector en su lugar.
   const [seleccionandoClienteCalculado, setSeleccionandoClienteCalculado] = useState(false);
+
+  // Pantalla de éxito tras confirmar una venta — desde ahí se puede
+  // compartir el comprobante mientras el cliente sigue parado ahí.
+  const [ventaConfirmada, setVentaConfirmada] = useState<{ venta: Venta; numero: number } | null>(null);
+  const [compartiendoComprobante, setCompartiendoComprobante] = useState(false);
 
   // productosVersion depende de Providers: se re-lee la lista cuando el sync
   // inicial (o cualquier sync posterior) termina de escribir productos
@@ -727,7 +734,27 @@ export default function CajaPage() {
 
     setCarrito([]);
     cerrarPago();
-    showToast('Venta registrada');
+
+    // Número correlativo dentro del período abierto — el mismo criterio que
+    // ya usa Resumen (orden cronológico entre las ventas sin cerrar de todo
+    // el negocio). Se calcula sobre lo local nada más: alcanza para el
+    // comprobante recién hecho, que de todos modos aclara que no es un
+    // documento fiscal.
+    const ventasPeriodo = await getVentasSinCerrar();
+    const ordenadas = [...ventasPeriodo].sort((a, b) => a.fecha.localeCompare(b.fecha));
+    const numero = ordenadas.findIndex(v => v.id === venta.id) + 1;
+    setVentaConfirmada({ venta, numero: numero > 0 ? numero : ordenadas.length });
+  };
+
+  const compartirComprobanteVenta = async (venta: Venta, numero: number) => {
+    setCompartiendoComprobante(true);
+    try {
+      await compartirComprobante({ negocioNombre: negocioNombre || '', venta, numero });
+    } catch {
+      showToast('No se pudo generar el comprobante');
+    } finally {
+      setCompartiendoComprobante(false);
+    }
   };
 
   const cambioBS =
@@ -1364,6 +1391,45 @@ export default function CajaPage() {
                 className="w-full bg-emerald-600 text-white py-4 rounded-xl text-lg font-bold disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 Confirmar Venta
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Venta confirmada — momento natural para compartir el comprobante,
+          el cliente sigue ahí parado. */}
+      {ventaConfirmada && (
+        <div className="fixed inset-0 z-50 flex items-end">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setVentaConfirmada(null)} />
+          <div className="relative w-full max-w-lg mx-auto bg-white rounded-t-2xl">
+            <div className="p-6 text-center">
+              <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                <svg className="w-8 h-8 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <h2 className="text-lg font-bold text-gray-900">Venta registrada</h2>
+              <p className="text-2xl font-bold text-emerald-700 mt-1">{formatBS(ventaConfirmada.venta.total_bs)}</p>
+              {tasa > 0 && <p className="text-gray-400 text-sm">{formatUSD(ventaConfirmada.venta.total_usd)}</p>}
+            </div>
+            <div className="p-4 pt-0 space-y-2">
+              <button
+                onClick={() => setVentaConfirmada(null)}
+                className="w-full bg-emerald-600 text-white py-3.5 rounded-xl font-bold"
+              >
+                Nueva venta
+              </button>
+              <button
+                onClick={() => compartirComprobanteVenta(ventaConfirmada.venta, ventaConfirmada.numero)}
+                disabled={compartiendoComprobante}
+                className="w-full bg-gray-100 text-gray-700 py-3.5 rounded-xl font-semibold flex items-center justify-center gap-2 disabled:opacity-60"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M8.684 13.342a3 3 0 100-2.684m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                </svg>
+                {compartiendoComprobante ? 'Generando...' : 'Compartir comprobante'}
               </button>
             </div>
           </div>
