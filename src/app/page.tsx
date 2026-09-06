@@ -90,6 +90,7 @@ export default function CajaPage() {
     productosVersion, usaCostos, setUsaCostos, usaStock, setUsaStock, ultimaSincronizacion,
     carrito, setCarrito, showCarrito, setShowCarrito,
     presupuestoConvirtiendoId, setPresupuestoConvirtiendoId,
+    presupuestoClienteNombre,
   } = useApp();
   const router = useRouter();
   const [productos, setProductos] = useState<Producto[]>([]);
@@ -1263,10 +1264,13 @@ export default function CajaPage() {
                                 setMetodoMixtoActual(m.id);
                                 setMontoMixtoInput('');
                                 setClienteFiadoElegido(null);
-                                setBusquedaClienteFiado('');
+                                // Precarga con el cliente del presupuesto que se
+                                // está convirtiendo (si tenía uno) — le ahorra al
+                                // cajero escribirlo de nuevo, solo confirma o crea.
+                                setBusquedaClienteFiado(m.id === 'fiado' ? (presupuestoClienteNombre || '') : '');
                               } else if (m.id === 'fiado') {
                                 setSeleccionandoClienteCalculado(true);
-                                setBusquedaClienteFiado('');
+                                setBusquedaClienteFiado(presupuestoClienteNombre || '');
                               } else {
                                 agregarPagoMixtoCalculado(m.id);
                               }
@@ -1340,7 +1344,10 @@ export default function CajaPage() {
                           setMetodo(m.id);
                           setMontoRecibido('');
                           setClienteFiadoElegido(null);
-                          setBusquedaClienteFiado('');
+                          // Precarga con el cliente del presupuesto que se está
+                          // convirtiendo (si tenía uno) — le ahorra al cajero
+                          // escribirlo de nuevo, solo confirma o crea.
+                          setBusquedaClienteFiado(m.id === 'fiado' ? (presupuestoClienteNombre || '') : '');
                         }}
                         className={`py-3 px-2 rounded-xl text-sm font-medium transition-colors text-center ${
                           metodo === m.id

@@ -7,6 +7,7 @@ import { getPresupuestos, savePresupuesto, getProductos } from '@/lib/db';
 import { getPresupuestoItemsRemoto } from '@/lib/sync';
 import { encolarActualizarPresupuesto } from '@/lib/outbox';
 import { formatBS, formatUSD } from '@/lib/precio';
+import { compartirPresupuesto } from '@/lib/comprobante';
 import { useApp } from '@/components/Providers';
 import { useGuardarRuta } from '@/lib/useGuardarRuta';
 import ThemeToggle from '@/components/ThemeToggle';
@@ -47,12 +48,13 @@ const ESTADO_COLORS: Record<Presupuesto['estado'], string> = {
 export default function PresupuestosPage() {
   useGuardarRuta();
   const router = useRouter();
-  const { negocioId, isOnline, productosVersion, setCarrito, setPresupuestoConvirtiendoId } = useApp();
+  const { negocioNombre, negocioId, isOnline, productosVersion, setCarrito, setPresupuestoConvirtiendoId, setPresupuestoClienteNombre } = useApp();
 
   const [presupuestos, setPresupuestos] = useState<Presupuesto[]>([]);
   const [cargando, setCargando] = useState(true);
   const [expandido, setExpandido] = useState<string | null>(null);
   const [convirtiendo, setConvirtiendo] = useState<string | null>(null);
+  const [compartiendo, setCompartiendo] = useState<string | null>(null);
   const [toast, setToast] = useState('');
 
   const [anulando, setAnulando] = useState<Presupuesto | null>(null);
@@ -99,6 +101,20 @@ export default function PresupuestosPage() {
     setAnulando(null);
     setMotivoAnular('');
     showToast('Presupuesto anulado');
+  };
+
+  // Disponible para cualquier presupuesto, no solo los vigentes — si no se
+  // compartió al crearlo, esta es la única forma de generar el documento
+  // después.
+  const compartir = async (p: Presupuesto) => {
+    setCompartiendo(p.id);
+    try {
+      await compartirPresupuesto({ negocioNombre: negocioNombre || '', presupuesto: p });
+    } catch {
+      showToast('No se pudo generar el documento');
+    } finally {
+      setCompartiendo(null);
+    }
   };
 
   const convertirPresupuesto = async (p: Presupuesto) => {
@@ -175,6 +191,10 @@ export default function PresupuestosPage() {
 
       setCarrito(carritoNuevo);
       setPresupuestoConvirtiendoId(p.id);
+      // No une clientes_fiado con presupuestos (son tablas distintas a
+      // propósito) — solo le ahorra al cajero escribir de nuevo el nombre
+      // que ya se cotizó si elige fiar parte de esta venta.
+      setPresupuestoClienteNombre(p.cliente_nombre ?? null);
       router.push('/');
     } finally {
       setConvirtiendo(null);
@@ -285,8 +305,16 @@ export default function PresupuestosPage() {
                         </p>
                       )}
 
+                      <button
+                        onClick={() => compartir(p)}
+                        disabled={compartiendo === p.id}
+                        className="w-full py-2.5 rounded-xl text-sm font-semibold bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 disabled:opacity-50 mt-1"
+                      >
+                        {compartiendo === p.id ? 'Generando...' : 'Compartir'}
+                      </button>
+
                       {p.estado === 'vigente' && (
-                        <div className="flex gap-2 pt-1">
+                        <div className="flex gap-2">
                           <button
                             onClick={() => convertirPresupuesto(p)}
                             disabled={convirtiendo === p.id}
