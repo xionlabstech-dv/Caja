@@ -717,6 +717,17 @@ export default function CajaPage() {
         ? pagosMixtos.find(p => p.metodo === 'fiado')?.clienteFiadoId
         : clienteFiadoElegido?.id;
       if (pagoFiado && clienteId) {
+        // Snapshot de texto de los productos de ESTA venta — mismo criterio
+        // de cantidad/peso que ya usa la app (ver el detalle de items en
+        // Resumen/Presupuestos). No es "lo que se fió" en términos
+        // monetarios exactos: con pago mixto, el cargo puede cubrir solo una
+        // parte del total, así que esto queda como contexto, no como un
+        // desglose financiero de esa porción.
+        const detalleItems = carrito
+          .map(item => item.esPorPeso
+            ? `${item.gramos}g ${item.producto.nombre}`
+            : `${item.cantidad}× ${item.producto.nombre}`)
+          .join(', ');
         const movimientoFiado: MovimientoFiado = {
           id: crypto.randomUUID(),
           cliente_id: clienteId,
@@ -725,6 +736,7 @@ export default function CajaPage() {
           monto_bs: pagoFiado.monto_bs,
           tasa_usada: tasa,
           venta_id: venta.id,
+          detalleItems: detalleItems || undefined,
           usuario_id: user?.id,
           usuario_nombre: userNombre || undefined,
           ocurrido_en: now.toISOString(),

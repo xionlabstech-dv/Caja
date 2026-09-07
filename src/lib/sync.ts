@@ -686,6 +686,7 @@ export async function aplicarMovimientoFiadoRemoto(m: MovimientoFiado): Promise<
       p_venta_id: m.venta_id ?? null,
       p_nota: m.nota ?? null,
       p_ocurrido_en: m.ocurrido_en,
+      p_detalle_items: m.detalleItems ?? null,
     }));
   } catch (err) {
     // La llamada ni siquiera volvió con una respuesta — sin red, timeout.
@@ -717,7 +718,7 @@ export async function getMovimientosFiadoPorClienteRemoto(
     const { data, error } = await supabase
       .from('fiado_movimientos')
       .select(
-        'id, cliente_id, tipo, monto_usd, monto_bs, tasa_usada, venta_id, usuario_id, usuario_nombre, nota, saldo_resultante, ocurrido_en'
+        'id, cliente_id, tipo, monto_usd, monto_bs, tasa_usada, venta_id, detalle_items, usuario_id, usuario_nombre, nota, saldo_resultante, ocurrido_en'
       )
       .eq('cliente_id', clienteId)
       .order('ocurrido_en', { ascending: false })
@@ -732,6 +733,7 @@ export async function getMovimientosFiadoPorClienteRemoto(
       monto_bs: m.monto_bs,
       tasa_usada: m.tasa_usada,
       venta_id: m.venta_id ?? undefined,
+      detalleItems: m.detalle_items ?? undefined,
       usuario_id: m.usuario_id ?? undefined,
       usuario_nombre: m.usuario_nombre ?? undefined,
       nota: m.nota ?? undefined,
