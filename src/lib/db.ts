@@ -1,5 +1,5 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
-import { Producto, Configuracion, Venta, CierreCaja, OperacionPendiente, Rol, MovimientoStock, MetodoPago, EstadoNegocio, ClienteFiado, MovimientoFiado, Presupuesto } from '@/types';
+import { Producto, Configuracion, Venta, CierreCaja, OperacionPendiente, Rol, MovimientoStock, MetodoPago, EstadoNegocio, ClienteFiado, MovimientoFiado, Presupuesto, DatosNegocio } from '@/types';
 
 interface MetaItem {
   key: string;
@@ -333,6 +333,25 @@ export async function getCachedFechaProximoPago(): Promise<string | null> {
 export async function setCachedFechaProximoPago(fecha: string | null): Promise<void> {
   const db = await getDB();
   await db.put('meta', { key: 'fecha_proximo_pago', value: fecha ?? '' });
+}
+
+// Datos de contacto del negocio (dirección/teléfono/correo/RIF) — los
+// cuatro viajan siempre juntos (un solo formulario, un solo guardado), así
+// que se cachean como un único JSON en vez de una llave por campo.
+export async function getCachedDatosNegocio(): Promise<DatosNegocio> {
+  const db = await getDB();
+  const item = await db.get('meta', 'datos_negocio');
+  if (!item?.value) return {};
+  try {
+    return JSON.parse(item.value) as DatosNegocio;
+  } catch {
+    return {};
+  }
+}
+
+export async function setCachedDatosNegocio(datos: DatosNegocio): Promise<void> {
+  const db = await getDB();
+  await db.put('meta', { key: 'datos_negocio', value: JSON.stringify(datos) });
 }
 
 // Marca temporal de la última vez que se refrescó el catálogo desde

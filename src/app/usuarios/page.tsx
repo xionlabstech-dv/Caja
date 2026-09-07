@@ -15,7 +15,7 @@ function usernameDe(email: string): string {
 const FORM_VACIO = { usuario: '', password: '', nombre: '', rol: 'cajero' as Rol };
 
 export default function UsuariosPage() {
-  useGuardarRuta();
+  const permitida = useGuardarRuta();
   const { user, negocioId, isOnline } = useApp();
 
   const [usuarios, setUsuarios] = useState<UsuarioNegocio[] | null>(null);
@@ -53,6 +53,8 @@ export default function UsuariosPage() {
   }, [isOnline]);
 
   useEffect(() => { cargar(); }, [cargar]);
+
+  if (!permitida) return null;
 
   const activos = usuarios?.filter(u => u.activo) ?? [];
   const enLimite = activos.length >= LIMITE_USUARIOS_POR_NEGOCIO;

@@ -62,7 +62,7 @@ function formatearNombre(nombre: string): string {
 }
 
 export default function ReportesPage() {
-  useGuardarRuta();
+  const permitida = useGuardarRuta();
   const { negocioId, isOnline, rol, usaCostos, usaStock, tasa } = useApp();
   const [periodoTipo, setPeriodoTipo] = useState<TipoPeriodo>('hoy');
   const [loading, setLoading] = useState(true);
@@ -120,6 +120,8 @@ export default function ReportesPage() {
 
     return () => { cancelado = true; };
   }, [periodoTipo, isOnline, negocioId, ordenTop, usaStock]);
+
+  if (!permitida) return null;
 
   const ticketPromedioBs = totales && totales.cantidad_ventas > 0 ? totales.total_bs / totales.cantidad_ventas : 0;
   const ticketPromedioUsd = totales && totales.cantidad_ventas > 0 ? totales.total_usd / totales.cantidad_ventas : 0;

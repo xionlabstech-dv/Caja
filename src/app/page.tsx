@@ -86,7 +86,7 @@ const METODOS_PAGO: { id: MetodoPago; label: string }[] = [
 
 export default function CajaPage() {
   const {
-    tasa, isOnline, negocioNombre, signOut, user, pendientesCount, negocioId, rol, userNombre,
+    tasa, isOnline, negocioNombre, datosNegocio, signOut, user, pendientesCount, negocioId, rol, userNombre,
     productosVersion, usaCostos, setUsaCostos, usaStock, setUsaStock, ultimaSincronizacion,
     carrito, setCarrito, showCarrito, setShowCarrito,
     presupuestoConvirtiendoId, setPresupuestoConvirtiendoId,
@@ -779,7 +779,7 @@ export default function CajaPage() {
   const compartirComprobanteVenta = async (venta: Venta, numero: number) => {
     setCompartiendoComprobante(true);
     try {
-      await compartirComprobante({ negocioNombre: negocioNombre || '', venta, numero });
+      await compartirComprobante({ negocioNombre: negocioNombre || '', datosNegocio, venta, numero });
     } catch {
       showToast('No se pudo generar el comprobante');
     } finally {

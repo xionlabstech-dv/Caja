@@ -9,12 +9,14 @@ import { useGuardarRuta } from '@/lib/useGuardarRuta';
 import ThemeToggle from '@/components/ThemeToggle';
 
 export default function TasaPage() {
-  useGuardarRuta();
+  const permitida = useGuardarRuta();
   const { tasa, setTasa, configuracion, isOnline, negocioId } = useApp();
   const [input, setInput] = useState('');
   const [guardando, setGuardando] = useState(false);
   const [mensaje, setMensaje] = useState('');
   const [error, setError] = useState('');
+
+  if (!permitida) return null;
 
   const handleGuardar = async () => {
     const nueva = parseFloat(input.replace(',', '.'));

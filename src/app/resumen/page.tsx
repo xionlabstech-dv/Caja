@@ -106,7 +106,7 @@ function formatearNombre(nombre: string): string {
 }
 
 export default function ResumenPage() {
-  const { tasa, negocioId, negocioNombre, isOnline, user, userNombre, rol, estado, usaStock, sincronizarAhora } = useApp();
+  const { tasa, negocioId, negocioNombre, datosNegocio, isOnline, user, userNombre, rol, estado, usaStock, sincronizarAhora } = useApp();
   const [ventas, setVentas] = useState<Venta[]>([]);
   const [abonos, setAbonos] = useState<MovimientoFiado[]>([]);
   const [cierres, setCierres] = useState<CierreCaja[]>([]);
@@ -136,7 +136,7 @@ export default function ResumenPage() {
   const compartirComprobanteVenta = async (venta: Venta, numero: number) => {
     setCompartiendoComprobante(venta.id);
     try {
-      await compartirComprobante({ negocioNombre: negocioNombre || '', venta, numero });
+      await compartirComprobante({ negocioNombre: negocioNombre || '', datosNegocio, venta, numero });
     } catch {
       showToast('No se pudo generar el comprobante');
     } finally {

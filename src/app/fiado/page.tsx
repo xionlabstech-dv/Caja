@@ -29,7 +29,7 @@ function fmtFecha(iso: string) {
 const EPSILON_SALDO = 0.005;
 
 export default function FiadoPage() {
-  useGuardarRuta();
+  const permitida = useGuardarRuta();
   const { tasa, isOnline, negocioId, user, userNombre, productosVersion } = useApp();
 
   const [clientes, setClientes] = useState<ClienteFiado[]>([]);
@@ -69,6 +69,11 @@ export default function FiadoPage() {
   useEffect(() => onFalloPermanente(() => {
     getClientesFiado().then(cs => setClientes(cs));
   }), []);
+
+  // Recién ahora, con todos los hooks ya llamados, se puede cortar el
+  // render sin violar el orden de hooks — evita el frame de contenido
+  // indebido antes de que useGuardarRuta redirija.
+  if (!permitida) return null;
 
   const deudores = clientes
     .filter(c => c.saldo_usd > EPSILON_SALDO)

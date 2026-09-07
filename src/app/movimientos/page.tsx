@@ -84,7 +84,7 @@ const TIPO_COLORS: Record<TipoMovimiento, string> = {
 };
 
 export default function MovimientosPage() {
-  useGuardarRuta();
+  const permitida = useGuardarRuta();
   const { negocioId, isOnline, user, userNombre } = useApp();
 
   const [productos, setProductos] = useState<Producto[]>([]);
@@ -140,6 +140,8 @@ export default function MovimientosPage() {
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { cargar(); }, [isOnline]);
+
+  if (!permitida) return null;
 
   const abrirForm = () => {
     setProductoSel(null);

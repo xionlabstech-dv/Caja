@@ -308,6 +308,17 @@ export interface Presupuesto {
   sincronizado?: boolean;
 }
 
+// Datos de contacto del negocio (quien emite), todos opcionales — un
+// negocio puede cargar solo el teléfono y dejar el resto vacío. Se usan en
+// la pantalla "Datos del negocio" y en el documento de presupuesto.
+export interface DatosNegocio {
+  nombreComercial?: string;
+  direccion?: string;
+  telefono?: string;
+  correo?: string;
+  rif?: string;
+}
+
 export type TipoPendiente =
   | 'crear_producto'
   | 'editar_producto'
@@ -322,7 +333,8 @@ export type TipoPendiente =
   | 'crear_cliente_fiado'
   | 'aplicar_movimiento_fiado'
   | 'crear_presupuesto'
-  | 'actualizar_presupuesto';
+  | 'actualizar_presupuesto'
+  | 'actualizar_datos_negocio';
 
 export interface PayloadCrearProducto {
   producto: Producto;
@@ -393,6 +405,11 @@ export interface PayloadActualizarPresupuesto {
   negocioId: string;
 }
 
+export interface PayloadActualizarDatosNegocio {
+  datos: DatosNegocio;
+  negocioId: string;
+}
+
 export type PayloadPendiente =
   | PayloadCrearProducto
   | PayloadEditarProducto
@@ -407,7 +424,8 @@ export type PayloadPendiente =
   | PayloadCrearClienteFiado
   | PayloadAplicarMovimientoFiado
   | PayloadCrearPresupuesto
-  | PayloadActualizarPresupuesto;
+  | PayloadActualizarPresupuesto
+  | PayloadActualizarDatosNegocio;
 
 export interface OperacionPendiente {
   id: string;
