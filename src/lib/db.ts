@@ -335,6 +335,21 @@ export async function setCachedFechaProximoPago(fecha: string | null): Promise<v
   await db.put('meta', { key: 'fecha_proximo_pago', value: fecha ?? '' });
 }
 
+// Cupo de usuarios del plan — de solo lectura desde el cliente (el negocio
+// no lo edita). Default 2 si nunca se cacheó nada, igual que el default de
+// la columna en Supabase.
+export async function getCachedLimiteUsuarios(): Promise<number> {
+  const db = await getDB();
+  const item = await db.get('meta', 'limite_usuarios');
+  const n = item?.value ? Number(item.value) : NaN;
+  return Number.isFinite(n) ? n : 2;
+}
+
+export async function setCachedLimiteUsuarios(limite: number): Promise<void> {
+  const db = await getDB();
+  await db.put('meta', { key: 'limite_usuarios', value: String(limite) });
+}
+
 // Datos de contacto del negocio (dirección/teléfono/correo/RIF) — los
 // cuatro viajan siempre juntos (un solo formulario, un solo guardado), así
 // que se cachean como un único JSON en vez de una llave por campo.

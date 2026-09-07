@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useApp } from '@/components/Providers';
 import { useGuardarRuta } from '@/lib/useGuardarRuta';
-import { LIMITE_USUARIOS_POR_NEGOCIO } from '@/lib/roles';
 import { listarUsuarios, crearUsuario, cambiarRol, cambiarActivo, eliminarUsuario, UsuarioNegocio } from '@/lib/usuarios';
 import { Rol } from '@/types';
 import ThemeToggle from '@/components/ThemeToggle';
@@ -16,7 +15,7 @@ const FORM_VACIO = { usuario: '', password: '', nombre: '', rol: 'cajero' as Rol
 
 export default function UsuariosPage() {
   const permitida = useGuardarRuta();
-  const { user, negocioId, isOnline } = useApp();
+  const { user, negocioId, isOnline, limiteUsuarios } = useApp();
 
   const [usuarios, setUsuarios] = useState<UsuarioNegocio[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -57,7 +56,7 @@ export default function UsuariosPage() {
   if (!permitida) return null;
 
   const activos = usuarios?.filter(u => u.activo) ?? [];
-  const enLimite = activos.length >= LIMITE_USUARIOS_POR_NEGOCIO;
+  const enLimite = activos.length >= limiteUsuarios;
 
   const abrirCrear = () => {
     setForm(FORM_VACIO);
@@ -141,7 +140,7 @@ export default function UsuariosPage() {
         <div>
           <h1 className="text-xl font-bold">Usuarios</h1>
           <p className="text-emerald-200 text-sm mt-0.5">
-            {usuarios ? `${activos.length} de ${LIMITE_USUARIOS_POR_NEGOCIO} usuarios` : 'Gestión de acceso'}
+            {usuarios ? `${activos.length} de ${limiteUsuarios} usuarios` : 'Gestión de acceso'}
           </p>
         </div>
         <ThemeToggle />
@@ -182,7 +181,7 @@ export default function UsuariosPage() {
             </button>
             {enLimite && (
               <p className="text-center text-xs text-gray-400 -mt-2">
-                Llegaste al máximo de {LIMITE_USUARIOS_POR_NEGOCIO} usuarios activos. Desactiva a alguien para poder agregar otro.
+                Llegaste al máximo de {limiteUsuarios} usuarios activos. Desactiva a alguien para poder agregar otro.
               </p>
             )}
 
