@@ -322,6 +322,7 @@ export default function FiadoPage() {
               <div className="text-center py-3 bg-orange-50 dark:bg-orange-900/20 rounded-xl">
                 <p className="text-xs font-semibold text-orange-500 uppercase tracking-wide mb-1">Debe actualmente</p>
                 <p className="text-xl font-bold text-orange-600 dark:text-orange-400">{formatUSD(abonando.saldo_usd)}</p>
+                {tasa > 0 && <p className="text-sm text-gray-400 mt-1">{formatBS(abonando.saldo_usd * tasa)}</p>}
               </div>
 
               <div>
