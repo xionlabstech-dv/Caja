@@ -1,14 +1,21 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { ClienteFiado, MovimientoFiado } from '@/types';
+import { ClienteFiado, MovimientoFiado, MetodoAbono } from '@/types';
 import { getClientesFiado, actualizarSaldoFiadoLocal, saveMovimientoFiado, getMovimientosFiadoPorCliente } from '@/lib/db';
 import { getMovimientosFiadoPorClienteRemoto } from '@/lib/sync';
 import { encolarAplicarMovimientoFiado, onFalloPermanente } from '@/lib/outbox';
 import { formatBS, formatUSD } from '@/lib/precio';
+import { METODOS_PAGO } from '@/lib/metodos';
 import { useApp } from '@/components/Providers';
 import { useGuardarRuta } from '@/lib/useGuardarRuta';
 import ThemeToggle from '@/components/ThemeToggle';
+
+// Un abono nunca es 'fiado' — no tiene sentido pagar una deuda de fiado
+// con más fiado (mismo check que ya existe en Supabase).
+const METODOS_ABONO = METODOS_PAGO.filter(
+  (m): m is { id: MetodoAbono; label: string } => m.id !== 'fiado'
+);
 
 function formatearNombre(nombre: string): string {
   return nombre
@@ -35,10 +42,11 @@ export default function FiadoPage() {
   const [clientes, setClientes] = useState<ClienteFiado[]>([]);
   const [cargando, setCargando] = useState(true);
   const [expandido, setExpandido] = useState<string | null>(null);
-  const [detalleCargos, setDetalleCargos] = useState<Record<string, MovimientoFiado[]>>({});
+  const [detalleMovimientos, setDetalleMovimientos] = useState<Record<string, MovimientoFiado[]>>({});
 
   const [abonando, setAbonando] = useState<ClienteFiado | null>(null);
-  const [montoAbonoBs, setMontoAbonoBs] = useState('');
+  const [metodoAbono, setMetodoAbono] = useState<MetodoAbono | null>(null);
+  const [montoAbono, setMontoAbono] = useState('');
   const [guardandoAbono, setGuardandoAbono] = useState(false);
   const [errorAbono, setErrorAbono] = useState('');
   const [toast, setToast] = useState('');
@@ -89,36 +97,52 @@ export default function FiadoPage() {
   const expandirCliente = async (clienteId: string) => {
     setExpandido(prev => (prev === clienteId ? null : clienteId));
     const local = await getMovimientosFiadoPorCliente(clienteId);
-    setDetalleCargos(prev => ({ ...prev, [clienteId]: local.filter(m => m.tipo === 'cargo') }));
+    setDetalleMovimientos(prev => ({ ...prev, [clienteId]: local }));
     if (isOnline) {
       const remotos = await getMovimientosFiadoPorClienteRemoto(clienteId, 10);
       if (remotos) {
         await Promise.all(remotos.map(m => saveMovimientoFiado(m)));
-        setDetalleCargos(prev => ({ ...prev, [clienteId]: remotos.filter(m => m.tipo === 'cargo') }));
+        setDetalleMovimientos(prev => ({ ...prev, [clienteId]: remotos }));
       }
     }
   };
 
   const abrirAbonar = (cliente: ClienteFiado) => {
     setAbonando(cliente);
-    setMontoAbonoBs('');
+    setMetodoAbono(null);
+    setMontoAbono('');
     setErrorAbono('');
   };
 
   const cerrarAbonar = () => {
     setAbonando(null);
-    setMontoAbonoBs('');
+    setMetodoAbono(null);
+    setMontoAbono('');
     setErrorAbono('');
   };
 
-  const montoAbonoNum = parseFloat(montoAbonoBs);
-  const montoAbonoUsd = abonando && montoAbonoNum > 0 && tasa > 0 ? montoAbonoNum / tasa : 0;
+  const abonoEsUsd = metodoAbono === 'efectivo_usd';
+  const montoAbonoNum = parseFloat(montoAbono);
+  // El monto real es el que entregó el cliente, en la moneda del método
+  // elegido — el equivalente en la otra moneda se calcula una sola vez, con
+  // la tasa de este instante, y se guarda tal cual (nunca se deriva de otro
+  // monto después).
+  const montoAbonoUsd = abonando && montoAbonoNum > 0
+    ? (abonoEsUsd ? montoAbonoNum : (tasa > 0 ? montoAbonoNum / tasa : 0))
+    : 0;
+  const montoAbonoBsCalculado = abonando && montoAbonoNum > 0
+    ? (abonoEsUsd ? (tasa > 0 ? montoAbonoNum * tasa : 0) : montoAbonoNum)
+    : 0;
   const restanteDespues = abonando && montoAbonoNum > 0 ? abonando.saldo_usd - montoAbonoUsd : null;
   const excedeDeuda = abonando !== null && montoAbonoNum > 0 && montoAbonoUsd > abonando.saldo_usd + EPSILON_SALDO;
 
   const confirmarAbono = async () => {
     if (!abonando || !negocioId) return;
-    if (!montoAbonoBs.trim() || isNaN(montoAbonoNum) || montoAbonoNum <= 0) {
+    if (!metodoAbono) {
+      setErrorAbono('Elige un método de pago');
+      return;
+    }
+    if (!montoAbono.trim() || isNaN(montoAbonoNum) || montoAbonoNum <= 0) {
       setErrorAbono('Ingresa un monto válido');
       return;
     }
@@ -129,16 +153,14 @@ export default function FiadoPage() {
 
     setGuardandoAbono(true);
     const now = new Date().toISOString();
-    // El monto real es el que entregó el cliente, en bolívares — el
-    // equivalente en $ se calcula una sola vez, con la tasa de este
-    // instante, y se guarda tal cual (nunca se deriva de otro monto).
     const movimiento: MovimientoFiado = {
       id: crypto.randomUUID(),
       cliente_id: abonando.id,
       tipo: 'abono',
       monto_usd: montoAbonoUsd,
-      monto_bs: montoAbonoNum,
+      monto_bs: montoAbonoBsCalculado,
       tasa_usada: tasa,
+      metodoPago: metodoAbono,
       usuario_id: user?.id,
       usuario_nombre: userNombre || undefined,
       ocurrido_en: now,
@@ -216,11 +238,11 @@ export default function FiadoPage() {
 
                 {expandido === c.id && (
                   <div className="px-3 pb-3 border-t border-gray-50 dark:border-slate-700 pt-2">
-                    {(detalleCargos[c.id]?.length ?? 0) === 0 ? (
+                    {(detalleMovimientos[c.id]?.length ?? 0) === 0 ? (
                       <p className="text-xs text-gray-400 py-1">Sin detalle disponible</p>
                     ) : (
                       <div className="space-y-1.5 mb-2">
-                        {detalleCargos[c.id].map(m => (
+                        {detalleMovimientos[c.id].map(m => (
                           <div key={m.id}>
                             <div className="flex items-center justify-between text-xs">
                               <span className="text-gray-500 dark:text-gray-400">{fmtFecha(m.ocurrido_en)}</span>
@@ -229,6 +251,11 @@ export default function FiadoPage() {
                             {m.tipo === 'cargo' && m.detalleItems && (
                               <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
                                 Productos de esa venta: {m.detalleItems}
+                              </p>
+                            )}
+                            {m.tipo === 'abono' && m.metodoPago && (
+                              <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
+                                {METODOS_PAGO.find(x => x.id === m.metodoPago)?.label ?? m.metodoPago}
                               </p>
                             )}
                           </div>
@@ -273,17 +300,44 @@ export default function FiadoPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Monto recibido (Bs)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={montoAbonoBs}
-                  onChange={e => { setMontoAbonoBs(e.target.value); setErrorAbono(''); }}
-                  className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-3 text-xl font-bold bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-400"
-                  placeholder="0.00"
-                  autoFocus
-                />
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Método de pago</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {METODOS_ABONO.map(m => (
+                    <button
+                      key={m.id}
+                      onClick={() => {
+                        setMetodoAbono(m.id);
+                        setMontoAbono('');
+                        setErrorAbono('');
+                      }}
+                      className={`py-3 px-2 rounded-xl text-sm font-medium transition-colors text-center ${
+                        metodoAbono === m.id
+                          ? 'bg-emerald-600 text-white shadow-sm'
+                          : 'bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200'
+                      }`}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
               </div>
+
+              {metodoAbono && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Monto recibido ({abonoEsUsd ? '$' : 'Bs'})
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={montoAbono}
+                    onChange={e => { setMontoAbono(e.target.value); setErrorAbono(''); }}
+                    className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-3 text-xl font-bold bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-400"
+                    placeholder="0.00"
+                    autoFocus
+                  />
+                </div>
+              )}
 
               {montoAbonoNum > 0 && (
                 <div className={`rounded-xl p-3 space-y-1 ${excedeDeuda ? 'bg-red-50 dark:bg-red-900/20' : 'bg-gray-50 dark:bg-slate-700'}`}>
@@ -311,7 +365,7 @@ export default function FiadoPage() {
             <div className="p-4 border-t border-gray-100 dark:border-slate-700">
               <button
                 onClick={confirmarAbono}
-                disabled={guardandoAbono || !montoAbonoBs || montoAbonoNum <= 0 || excedeDeuda}
+                disabled={guardandoAbono || !metodoAbono || !montoAbono || montoAbonoNum <= 0 || excedeDeuda}
                 className="w-full bg-emerald-600 text-white py-4 rounded-xl text-lg font-bold disabled:opacity-40"
               >
                 {guardandoAbono ? 'Guardando...' : 'Confirmar abono'}
