@@ -238,30 +238,55 @@ export default function FiadoPage() {
 
                 {expandido === c.id && (
                   <div className="px-3 pb-3 border-t border-gray-50 dark:border-slate-700 pt-2">
-                    {(detalleMovimientos[c.id]?.length ?? 0) === 0 ? (
-                      <p className="text-xs text-gray-400 py-1">Sin detalle disponible</p>
-                    ) : (
-                      <div className="space-y-1.5 mb-2">
-                        {detalleMovimientos[c.id].map(m => (
-                          <div key={m.id}>
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="text-gray-500 dark:text-gray-400">{fmtFecha(m.ocurrido_en)}</span>
-                              <span className="font-medium text-gray-700 dark:text-gray-300">{formatBS(m.monto_bs)}</span>
-                            </div>
-                            {m.tipo === 'cargo' && m.detalleItems && (
-                              <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
-                                Productos de esa venta: {m.detalleItems}
-                              </p>
-                            )}
-                            {m.tipo === 'abono' && m.metodoPago && (
-                              <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
-                                {METODOS_PAGO.find(x => x.id === m.metodoPago)?.label ?? m.metodoPago}
-                              </p>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                    {(() => {
+                      const movimientos = detalleMovimientos[c.id] ?? [];
+                      if (movimientos.length === 0) {
+                        return <p className="text-xs text-gray-400 py-1">Sin detalle disponible</p>;
+                      }
+                      // El arreglo viene de más reciente a más antiguo. El
+                      // primer saldo_resultante ~0 que aparece marca dónde
+                      // terminó el ciclo de deuda anterior — ese movimiento y
+                      // todos los que le siguen (más antiguos) ya están
+                      // saldados y se muestran tachados. Si nunca llegó a
+                      // cero (o quedó fuera de la ventana traída), no se
+                      // tacha nada. Se calcula una sola vez acá, no por fila.
+                      const indiceSaldado = movimientos.findIndex(
+                        m => m.saldo_resultante !== undefined && Math.abs(m.saldo_resultante) < EPSILON_SALDO
+                      );
+                      return (
+                        <div className="space-y-1.5 mb-2">
+                          {movimientos.map((m, i) => {
+                            const saldado = indiceSaldado !== -1 && i >= indiceSaldado;
+                            return (
+                              <div key={m.id}>
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="text-gray-500 dark:text-gray-400">{fmtFecha(m.ocurrido_en)}</span>
+                                  <span
+                                    className={
+                                      saldado
+                                        ? 'font-medium line-through text-gray-400 dark:text-gray-500'
+                                        : 'font-medium text-gray-700 dark:text-gray-300'
+                                    }
+                                  >
+                                    {formatBS(m.monto_bs)}
+                                  </span>
+                                </div>
+                                {m.tipo === 'cargo' && m.detalleItems && (
+                                  <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
+                                    Productos de esa venta: {m.detalleItems}
+                                  </p>
+                                )}
+                                {m.tipo === 'abono' && m.metodoPago && (
+                                  <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
+                                    {METODOS_PAGO.find(x => x.id === m.metodoPago)?.label ?? m.metodoPago}
+                                  </p>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
                     <button
                       onClick={() => abrirAbonar(c)}
                       className="w-full bg-emerald-600 text-white py-2.5 rounded-xl text-sm font-bold"
