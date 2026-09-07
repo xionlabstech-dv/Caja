@@ -151,6 +151,29 @@ export default function ResumenPage() {
       getUltimoCierre(),
     ]);
 
+    // Abonos del período actual: igual base offline-first que las ventas —
+    // local siempre visible, completado con el resto del negocio cuando hay
+    // red. No hay un flag "cierre_id" en fiado_movimientos como en ventas,
+    // así que el corte de período es por fecha (después del último cierre).
+    const abonosLocal = (await getMovimientosFiado()).filter(
+      m => m.tipo === 'abono' && (!uc || m.ocurrido_en > uc)
+    );
+
+    // Etapa 1 — pinta de inmediato con lo que ya hay en este dispositivo,
+    // sin esperar ninguna ida y vuelta a Supabase (reconciliación + fetch
+    // remoto de ventas y abonos, etapa 2 abajo). Con la señal típica de
+    // estos comercios esas idas y vueltas tardan, y hasta que terminaban la
+    // pantalla se quedaba en blanco aunque ya hubiera datos guardados acá.
+    setVentas(vLocal);
+    setCierres(c);
+    setUltimoCierreState(uc);
+    setAbonos(abonosLocal);
+    setSoloDispositivo(true);
+
+    // Etapa 2 — completa con el servidor si hay conexión. Mismo criterio de
+    // reconciliación y de qué gana entre local y remoto de siempre, solo
+    // que corre después de la primera pintada en vez de antes.
+
     // Reconciliación: ventas que este dispositivo cree pendientes pero que
     // otro dispositivo ya cerró en Supabase mientras tanto. Sin esto se
     // arrastrarían para siempre en el período local, duplicando totales en
@@ -197,16 +220,7 @@ export default function ResumenPage() {
 
     setVentas(ventasFinal);
     setSoloDispositivo(!completo);
-    setCierres(c);
-    setUltimoCierreState(uc);
 
-    // Abonos del período actual: igual base offline-first que las ventas —
-    // local siempre visible, completado con el resto del negocio cuando hay
-    // red. No hay un flag "cierre_id" en fiado_movimientos como en ventas,
-    // así que el corte de período es por fecha (después del último cierre).
-    const abonosLocal = (await getMovimientosFiado()).filter(
-      m => m.tipo === 'abono' && (!uc || m.ocurrido_en > uc)
-    );
     let abonosFinal = abonosLocal;
     if (isOnline && negocioId) {
       const remotos = await getAbonosPeriodoRemoto(negocioId, uc, new Date().toISOString());
