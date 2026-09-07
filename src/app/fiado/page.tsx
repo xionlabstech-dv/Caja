@@ -221,9 +221,16 @@ export default function FiadoPage() {
                     ) : (
                       <div className="space-y-1.5 mb-2">
                         {detalleCargos[c.id].map(m => (
-                          <div key={m.id} className="flex items-center justify-between text-xs">
-                            <span className="text-gray-500 dark:text-gray-400">{fmtFecha(m.ocurrido_en)}</span>
-                            <span className="font-medium text-gray-700 dark:text-gray-300">{formatBS(m.monto_bs)}</span>
+                          <div key={m.id}>
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-gray-500 dark:text-gray-400">{fmtFecha(m.ocurrido_en)}</span>
+                              <span className="font-medium text-gray-700 dark:text-gray-300">{formatBS(m.monto_bs)}</span>
+                            </div>
+                            {m.tipo === 'cargo' && m.detalleItems && (
+                              <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">
+                                Productos de esa venta: {m.detalleItems}
+                              </p>
+                            )}
                           </div>
                         ))}
                       </div>

@@ -251,6 +251,13 @@ export interface MovimientoFiado {
   // Solo en cargos originados por una venta — un abono no está ligado a
   // una venta puntual.
   venta_id?: string;
+  // Snapshot de texto de los productos de esa venta (no de "lo que se
+  // fió" en términos monetarios exactos — un cargo puede ser solo una
+  // porción de una venta con pago mixto) — igual criterio que
+  // cliente_nombre acá y producto_nombre en MovimientoStock: se escribe
+  // una sola vez al crear el cargo, para verse offline sin depender de
+  // que la venta original siga cacheada. Solo en cargos, nunca en abonos.
+  detalleItems?: string;
   usuario_id?: string;
   usuario_nombre?: string;
   nota?: string;
