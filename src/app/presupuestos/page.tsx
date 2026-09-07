@@ -46,7 +46,7 @@ const ESTADO_COLORS: Record<Presupuesto['estado'], string> = {
 };
 
 export default function PresupuestosPage() {
-  useGuardarRuta();
+  const permitida = useGuardarRuta();
   const router = useRouter();
   const { negocioNombre, datosNegocio, negocioId, isOnline, productosVersion, setCarrito, setPresupuestoConvirtiendoId, setPresupuestoClienteNombre } = useApp();
 
@@ -76,6 +76,8 @@ export default function PresupuestosPage() {
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { cargar(); }, [productosVersion]);
+
+  if (!permitida) return null;
 
   const abrirAnular = (p: Presupuesto) => {
     setAnulando(p);

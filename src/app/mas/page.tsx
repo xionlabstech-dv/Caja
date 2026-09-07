@@ -69,9 +69,11 @@ const ITEMS = [
 ];
 
 export default function MasPage() {
-  useGuardarRuta();
+  const permitida = useGuardarRuta();
   const { rol, estado } = useApp();
   const permitidas = rutasPermitidas(rol, estado);
+
+  if (!permitida) return null;
   const visibles = ITEMS.filter(item => permitidas.includes(item.href));
 
   return (

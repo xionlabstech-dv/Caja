@@ -69,7 +69,7 @@ function parseNum(s: string): number {
 }
 
 export default function InventarioPage() {
-  useGuardarRuta();
+  const permitida = useGuardarRuta();
   const router = useRouter();
   const { tasa, isOnline, negocioId, productosVersion, rol, usaCostos, usaStock, ultimaSincronizacion } = useApp();
   const [productos, setProductos] = useState<Producto[]>([]);
@@ -106,6 +106,8 @@ export default function InventarioPage() {
   // productosVersion: ver comentario en src/app/page.tsx — misma corrida de
   // carrera entre el sync inicial de Providers y el primer fetch local.
   useEffect(() => { cargar(); }, [productosVersion]);
+
+  if (!permitida) return null;
 
   const filtrados = productos
     .filter(p =>

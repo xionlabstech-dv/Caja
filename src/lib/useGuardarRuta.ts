@@ -9,10 +9,16 @@ import { esRutaPermitida } from './roles';
 // parado — cubre el caso de un cajero navegando directo por URL a una
 // pantalla de admin (Reportes, Tasa, Inventario, Usuarios), ya que ocultar
 // la pestaña en BottomNav no impide escribir la URL a mano.
-export function useGuardarRuta() {
+//
+// Devuelve si la ruta actual está permitida, para que la página pueda evitar
+// pintar el contenido real durante el frame previo al redirect (mientras
+// authLoading o rol === null se considera permitida a propósito: el perfil
+// todavía no resolvió y no hay que bloquear el primer render legítimo).
+export function useGuardarRuta(): boolean {
   const { rol, estado, authLoading } = useApp();
   const router = useRouter();
   const pathname = usePathname();
+  const permitida = authLoading || rol === null || esRutaPermitida(rol, pathname, estado);
 
   useEffect(() => {
     if (authLoading) return;
@@ -21,4 +27,6 @@ export function useGuardarRuta() {
       router.replace('/');
     }
   }, [rol, estado, authLoading, pathname, router]);
+
+  return permitida;
 }

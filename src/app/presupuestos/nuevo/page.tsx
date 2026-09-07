@@ -34,7 +34,7 @@ function hoyISO(): string {
 }
 
 export default function NuevoPresupuestoPage() {
-  useGuardarRuta();
+  const permitida = useGuardarRuta();
   const router = useRouter();
   const { tasa, isOnline, usaStock, ultimaSincronizacion, negocioId, user, userNombre, negocioNombre, datosNegocio, productosVersion } = useApp();
 
@@ -144,6 +144,8 @@ export default function NuevoPresupuestoPage() {
     }
     return null;
   }, [agregarItem]);
+
+  if (!permitida) return null;
 
   const handleBuscadorKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== 'Enter') return;
