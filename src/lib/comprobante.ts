@@ -21,6 +21,14 @@ const ANCHO = 560;
 const PAD = 24;
 const ESCALA = 2;
 
+// Columnas de la tabla de items — Descripción / Cantidad / Precio unitario
+// / Total — compartidas por comprobante de venta y presupuesto. Los bordes
+// derechos de cada columna (el texto crece hacia la izquierda desde ahí).
+const COL_CANT_X = ANCHO - PAD - 180;
+const COL_PRECIO_X = ANCHO - PAD - 90;
+const COL_TOTAL_X = ANCHO - PAD;
+const COL_DESC_ANCHO_MAX = COL_CANT_X - PAD - 10;
+
 function trazarLinea(ctx: CanvasRenderingContext2D, ancho: number, y: number) {
   ctx.strokeStyle = '#e5e7eb';
   ctx.lineWidth = 1;
@@ -147,14 +155,17 @@ async function compartirArchivo(blob: Blob, nombreArchivo: string, titulo: strin
 
 export interface DatosComprobante {
   negocioNombre: string;
+  // Opcional a propósito: si el admin nunca cargó "Datos del negocio", el
+  // documento sigue funcionando, solo con el nombre de cuenta de siempre.
+  datosNegocio?: DatosNegocio;
   venta: Venta;
   numero: number;
 }
 
 function dibujarComprobante(ctx: CanvasRenderingContext2D, ancho: number, datos: DatosComprobante): number {
-  const { negocioNombre, venta, numero } = datos;
+  const { negocioNombre, datosNegocio, venta, numero } = datos;
   const centroX = ancho / 2;
-  let y = dibujarEncabezado(ctx, ancho, negocioNombre, 'Comprobante de venta');
+  let y = dibujarEncabezado(ctx, ancho, datosNegocio?.nombreComercial || negocioNombre, 'Comprobante de venta');
 
   if (venta.anulada) {
     y += 6;
@@ -200,34 +211,36 @@ function dibujarComprobante(ctx: CanvasRenderingContext2D, ancho: number, datos:
   y += 18;
 
   trazarLinea(ctx, ancho, y);
-  y += 24;
+  y += 20;
+
+  ctx.font = 'bold 10px sans-serif';
+  ctx.fillStyle = '#9ca3af';
+  ctx.textAlign = 'left';
+  ctx.fillText('DESCRIPCIÓN', PAD, y);
+  ctx.textAlign = 'right';
+  ctx.fillText('CANT.', COL_CANT_X, y);
+  ctx.fillText('P. UNIT.', COL_PRECIO_X, y);
+  ctx.fillText('TOTAL', COL_TOTAL_X, y);
+  y += 12;
+  trazarLinea(ctx, ancho, y);
+  y += 20;
 
   for (const item of venta.items) {
     const esPeso = item.gramos !== undefined;
-    const etiquetaCantidad = esPeso ? `${item.gramos}g` : `${item.cantidad}×`;
+    const cantidadTexto = esPeso ? `${item.gramos}g` : `${item.cantidad}`;
+    const precioTexto = esPeso ? `${formatBS(item.precioUnitarioBs)}/kg` : formatBS(item.precioUnitarioBs);
 
-    ctx.font = '13px sans-serif';
+    ctx.font = '12px sans-serif';
     ctx.fillStyle = '#111827';
     ctx.textAlign = 'left';
-    const nombreLinea = truncar(ctx, `${etiquetaCantidad} ${item.nombre}`, ancho - PAD * 2 - 90);
-    ctx.fillText(nombreLinea, PAD, y);
+    ctx.fillText(truncar(ctx, item.nombre, COL_DESC_ANCHO_MAX), PAD, y);
     ctx.textAlign = 'right';
-    ctx.fillText(formatBS(item.subtotal_bs), ancho - PAD, y);
-    y += 16;
-
-    const detalleUnitario = esPeso
-      ? `${formatBS(item.precioUnitarioBs)} / kg`
-      : item.cantidad > 1
-        ? `${formatBS(item.precioUnitarioBs)} c/u`
-        : '';
-    if (detalleUnitario) {
-      ctx.font = '10px sans-serif';
-      ctx.fillStyle = '#9ca3af';
-      ctx.textAlign = 'left';
-      ctx.fillText(detalleUnitario, PAD, y);
-      y += 14;
-    }
-    y += 6;
+    ctx.fillStyle = '#374151';
+    ctx.fillText(cantidadTexto, COL_CANT_X, y);
+    ctx.fillText(precioTexto, COL_PRECIO_X, y);
+    ctx.fillStyle = '#111827';
+    ctx.fillText(formatBS(item.subtotal_bs), COL_TOTAL_X, y);
+    y += 20;
   }
 
   trazarLinea(ctx, ancho, y);
@@ -338,18 +351,10 @@ function dibujarDatosNegocio(ctx: CanvasRenderingContext2D, ancho: number, y: nu
   return y + 4;
 }
 
-// Columnas de la tabla de items — Descripción / Cantidad / Precio unitario
-// / Total, en vez de la lista simple de antes. Los bordes derechos de cada
-// columna (el texto crece hacia la izquierda desde ahí).
-const COL_CANT_X = ANCHO - PAD - 180;
-const COL_PRECIO_X = ANCHO - PAD - 90;
-const COL_TOTAL_X = ANCHO - PAD;
-const COL_DESC_ANCHO_MAX = COL_CANT_X - PAD - 10;
-
 function dibujarPresupuesto(ctx: CanvasRenderingContext2D, ancho: number, datos: DatosPresupuesto): number {
   const { negocioNombre, datosNegocio, presupuesto, numero } = datos;
   const centroX = ancho / 2;
-  let y = dibujarEncabezado(ctx, ancho, negocioNombre, 'Presupuesto');
+  let y = dibujarEncabezado(ctx, ancho, datosNegocio?.nombreComercial || negocioNombre, 'Presupuesto');
   y = dibujarDatosNegocio(ctx, ancho, y, datosNegocio);
 
   // La fecha de vencimiento es lo que le avisa al cliente que el precio en
