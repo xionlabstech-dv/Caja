@@ -174,6 +174,7 @@ export async function updateDatosNegocio(datos: DatosNegocio, negocioId: string)
     const { data, error } = await supabase
       .from('negocios')
       .update({
+        nombre_comercial: datos.nombreComercial || null,
         direccion: datos.direccion || null,
         telefono: datos.telefono || null,
         correo: datos.correo || null,

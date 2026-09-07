@@ -10,28 +10,50 @@ import { useGuardarRuta } from '@/lib/useGuardarRuta';
 import ThemeToggle from '@/components/ThemeToggle';
 
 export default function DatosNegocioPage() {
-  useGuardarRuta();
+  const permitida = useGuardarRuta();
   const { negocioId, isOnline, datosNegocio, setDatosNegocio } = useApp();
 
+  const [nombreComercial, setNombreComercial] = useState('');
   const [direccion, setDireccion] = useState('');
   const [telefono, setTelefono] = useState('');
   const [correo, setCorreo] = useState('');
   const [rif, setRif] = useState('');
   const [guardando, setGuardando] = useState(false);
+  const [editando, setEditando] = useState(false);
   const [toast, setToast] = useState('');
 
   // Se sincroniza con el contexto (no solo al montar): si otra pestaña o el
   // sync de sesión trae datos más recientes, el formulario los refleja.
   useEffect(() => {
+    setNombreComercial(datosNegocio.nombreComercial ?? '');
     setDireccion(datosNegocio.direccion ?? '');
     setTelefono(datosNegocio.telefono ?? '');
     setCorreo(datosNegocio.correo ?? '');
     setRif(datosNegocio.rif ?? '');
   }, [datosNegocio]);
 
+  if (!permitida) return null;
+
+  // Si ya hay algo guardado, el formulario arranca bloqueado (modo lectura)
+  // y hay que tocar "Editar" para cambiarlo — evita que alguien lo borre por
+  // accidente sin querer editarlo.
+  const hayDatosGuardados = Boolean(
+    datosNegocio.nombreComercial || datosNegocio.direccion || datosNegocio.telefono || datosNegocio.correo || datosNegocio.rif
+  );
+  const bloqueado = hayDatosGuardados && !editando;
+
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(''), 3000);
+  };
+
+  const cancelar = () => {
+    setNombreComercial(datosNegocio.nombreComercial ?? '');
+    setDireccion(datosNegocio.direccion ?? '');
+    setTelefono(datosNegocio.telefono ?? '');
+    setCorreo(datosNegocio.correo ?? '');
+    setRif(datosNegocio.rif ?? '');
+    setEditando(false);
   };
 
   // Mismo patrón exacto que usa_costos/usa_stock: optimista + verificado, y
@@ -40,6 +62,7 @@ export default function DatosNegocioPage() {
     if (!negocioId) return;
     const anterior = datosNegocio;
     const nuevo: DatosNegocio = {
+      nombreComercial: nombreComercial.trim() || undefined,
       direccion: direccion.trim() || undefined,
       telefono: telefono.trim() || undefined,
       correo: correo.trim() || undefined,
@@ -53,6 +76,7 @@ export default function DatosNegocioPage() {
     if (!isOnline) {
       await encolarActualizarDatosNegocio(nuevo, negocioId);
       setGuardando(false);
+      setEditando(false);
       showToast('Guardado localmente — se sincronizará cuando haya conexión');
       return;
     }
@@ -65,6 +89,7 @@ export default function DatosNegocioPage() {
       showToast('No se pudo guardar el cambio. Intenta de nuevo.');
       return;
     }
+    setEditando(false);
     showToast('Datos guardados');
   };
 
@@ -85,13 +110,26 @@ export default function DatosNegocioPage() {
           </p>
 
           <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Nombre comercial</label>
+            <input
+              type="text"
+              value={nombreComercial}
+              onChange={e => setNombreComercial(e.target.value)}
+              disabled={bloqueado}
+              placeholder="Ej: Charcutería Mayga"
+              className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-3 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-400 disabled:bg-gray-50 dark:disabled:bg-slate-800 disabled:text-gray-500 dark:disabled:text-gray-400"
+            />
+          </div>
+
+          <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Dirección</label>
             <input
               type="text"
               value={direccion}
               onChange={e => setDireccion(e.target.value)}
+              disabled={bloqueado}
               placeholder="Ej: Av. Principal, local 3"
-              className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-3 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-400"
+              className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-3 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-400 disabled:bg-gray-50 dark:disabled:bg-slate-800 disabled:text-gray-500 dark:disabled:text-gray-400"
             />
           </div>
 
@@ -101,8 +139,9 @@ export default function DatosNegocioPage() {
               type="tel"
               value={telefono}
               onChange={e => setTelefono(e.target.value)}
+              disabled={bloqueado}
               placeholder="Ej: 0414-1234567"
-              className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-3 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-400"
+              className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-3 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-400 disabled:bg-gray-50 dark:disabled:bg-slate-800 disabled:text-gray-500 dark:disabled:text-gray-400"
             />
           </div>
 
@@ -112,8 +151,9 @@ export default function DatosNegocioPage() {
               type="email"
               value={correo}
               onChange={e => setCorreo(e.target.value)}
+              disabled={bloqueado}
               placeholder="Ej: contacto@negocio.com"
-              className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-3 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-400"
+              className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-3 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-400 disabled:bg-gray-50 dark:disabled:bg-slate-800 disabled:text-gray-500 dark:disabled:text-gray-400"
             />
           </div>
 
@@ -123,19 +163,40 @@ export default function DatosNegocioPage() {
               type="text"
               value={rif}
               onChange={e => setRif(e.target.value)}
+              disabled={bloqueado}
               placeholder="Ej: J-12345678-9"
-              className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-3 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-400"
+              className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-3 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-400 disabled:bg-gray-50 dark:disabled:bg-slate-800 disabled:text-gray-500 dark:disabled:text-gray-400"
             />
           </div>
         </div>
 
-        <button
-          onClick={guardar}
-          disabled={guardando}
-          className="w-full bg-emerald-600 text-white py-3.5 rounded-xl font-bold disabled:opacity-40"
-        >
-          {guardando ? 'Guardando...' : 'Guardar'}
-        </button>
+        {bloqueado ? (
+          <button
+            onClick={() => setEditando(true)}
+            className="w-full bg-emerald-600 text-white py-3.5 rounded-xl font-bold"
+          >
+            Editar
+          </button>
+        ) : (
+          <div className="flex gap-3">
+            {hayDatosGuardados && (
+              <button
+                onClick={cancelar}
+                disabled={guardando}
+                className="flex-1 bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 py-3.5 rounded-xl font-bold disabled:opacity-40"
+              >
+                Cancelar
+              </button>
+            )}
+            <button
+              onClick={guardar}
+              disabled={guardando}
+              className="flex-1 bg-emerald-600 text-white py-3.5 rounded-xl font-bold disabled:opacity-40"
+            >
+              {guardando ? 'Guardando...' : hayDatosGuardados ? 'Actualizar' : 'Guardar'}
+            </button>
+          </div>
+        )}
       </div>
 
       {toast && (

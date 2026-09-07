@@ -175,7 +175,7 @@ async function fetchPerfil(uid: string): Promise<PerfilResuelto | 'desactivado' 
 
     const { data: negocio } = await supabase
       .from('negocios')
-      .select('nombre, usa_costos, usa_stock, estado, fecha_proximo_pago, direccion, telefono, correo, rif')
+      .select('nombre, usa_costos, usa_stock, estado, fecha_proximo_pago, nombre_comercial, direccion, telefono, correo, rif')
       .eq('id', perfil.negocio_id)
       .single();
 
@@ -194,6 +194,7 @@ async function fetchPerfil(uid: string): Promise<PerfilResuelto | 'desactivado' 
       estado: (negocio.estado as EstadoNegocio) ?? 'activo',
       fechaProximoPago: negocio.fecha_proximo_pago ?? null,
       datosNegocio: {
+        nombreComercial: negocio.nombre_comercial ?? undefined,
         direccion: negocio.direccion ?? undefined,
         telefono: negocio.telefono ?? undefined,
         correo: negocio.correo ?? undefined,

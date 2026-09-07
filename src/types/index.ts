@@ -312,6 +312,7 @@ export interface Presupuesto {
 // negocio puede cargar solo el teléfono y dejar el resto vacío. Se usan en
 // la pantalla "Datos del negocio" y en el documento de presupuesto.
 export interface DatosNegocio {
+  nombreComercial?: string;
   direccion?: string;
   telefono?: string;
   correo?: string;
