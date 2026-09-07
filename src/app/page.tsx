@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Producto, ItemCarrito, MetodoPago, MetodoPagoVenta, PagoVenta, Venta, VentaItem, MovimientoStock, ClienteFiado, MovimientoFiado, Presupuesto } from '@/types';
+import { METODOS_PAGO } from '@/lib/metodos';
 import {
   getProductos,
   getProductoPorCodigo,
@@ -74,15 +75,6 @@ function reproducirBeep() {
     // Audio not supported
   }
 }
-
-const METODOS_PAGO: { id: MetodoPago; label: string }[] = [
-  { id: 'efectivo_bs', label: 'Efectivo Bs' },
-  { id: 'pago_movil', label: 'Pago Móvil' },
-  { id: 'biopago', label: 'Biopago' },
-  { id: 'tarjeta', label: 'Tarjeta' },
-  { id: 'efectivo_usd', label: 'Efectivo $' },
-  { id: 'fiado', label: 'Fiado' },
-];
 
 export default function CajaPage() {
   const {

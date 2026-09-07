@@ -66,6 +66,11 @@ export type MetodoPago = 'efectivo_bs' | 'pago_movil' | 'biopago' | 'tarjeta' | 
 // pago individual (PagoVenta.metodo) siempre es un MetodoPago real.
 export type MetodoPagoVenta = MetodoPago | 'mixto';
 
+// Un abono nunca puede ser 'fiado' — no tiene sentido pagar una deuda de
+// fiado con más fiado (mismo check que ya existe en Supabase sobre
+// fiado_movimientos.metodo_pago).
+export type MetodoAbono = Exclude<MetodoPago, 'fiado'>;
+
 export type Rol = 'admin' | 'cajero';
 
 // Estado de suscripción del negocio. El bloqueo real vive en Supabase (RLS
@@ -258,6 +263,9 @@ export interface MovimientoFiado {
   // una sola vez al crear el cargo, para verse offline sin depender de
   // que la venta original siga cacheada. Solo en cargos, nunca en abonos.
   detalleItems?: string;
+  // Solo en abonos — un cargo no lleva método propio, nace de venta_pagos.
+  // Nunca 'fiado' (ver MetodoAbono).
+  metodoPago?: MetodoAbono;
   usuario_id?: string;
   usuario_nombre?: string;
   nota?: string;
