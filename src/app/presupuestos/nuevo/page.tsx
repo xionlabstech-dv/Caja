@@ -416,6 +416,7 @@ export default function NuevoPresupuestoPage() {
 
         <div className="flex items-center justify-between pt-1">
           <div>
+            <p className="text-[11px] text-gray-400">{items.length} {items.length === 1 ? 'producto' : 'productos'}</p>
             <p className="text-xs text-gray-400">Total</p>
             <p className="text-xl font-bold text-gray-900 dark:text-white">{formatBS(totalBs)}</p>
             {tasa > 0 && <p className="text-xs text-gray-400">{formatUSD(totalUsd)}</p>}
