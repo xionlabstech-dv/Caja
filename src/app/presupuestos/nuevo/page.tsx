@@ -53,6 +53,11 @@ export default function NuevoPresupuestoPage() {
   const [guardado, setGuardado] = useState<Presupuesto | null>(null);
   const [numeroGuardado, setNumeroGuardado] = useState(0);
   const [compartiendo, setCompartiendo] = useState(false);
+  // Mismo criterio que showCarrito/showPago en Caja — el catálogo ocupa
+  // toda la pantalla, y el carrito/los datos del presupuesto viven en
+  // hojas inferiores que se abren desde el botón flotante.
+  const [showCarrito, setShowCarrito] = useState(false);
+  const [showDatos, setShowDatos] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const showToast = (msg: string) => {
@@ -305,46 +310,6 @@ export default function NuevoPresupuestoPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 pb-3 space-y-2">
-        {items.length > 0 && (
-          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 divide-y divide-gray-50 dark:divide-slate-700 mb-2">
-            {items.map(item => (
-              <div key={item.id} className="flex items-center gap-3 p-3">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                    {formatearNombre(item.nombre)}
-                  </p>
-                  <p className="text-xs text-gray-400">
-                    {item.gramos !== undefined ? `${item.gramos}g` : `${item.cantidad}×`}
-                    {' · '}{formatBS(itemSubtotalBs(item))}
-                  </p>
-                </div>
-                {item.gramos === undefined ? (
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <button
-                      onClick={() => actualizarCantidad(item.id, -1)}
-                      className="w-7 h-7 rounded-full bg-gray-100 dark:bg-slate-700 flex items-center justify-center text-gray-600 dark:text-gray-300 font-bold"
-                    >
-                      −
-                    </button>
-                    <span className="w-5 text-center text-sm font-semibold text-gray-800 dark:text-gray-200">{item.cantidad}</span>
-                    <button
-                      onClick={() => actualizarCantidad(item.id, 1)}
-                      className="w-7 h-7 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center text-emerald-700 dark:text-emerald-400 font-bold"
-                    >
-                      +
-                    </button>
-                  </div>
-                ) : null}
-                <button onClick={() => quitarItem(item.id)} className="text-gray-300 flex-shrink-0" aria-label="Quitar">
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
         {productosFiltrados.length === 0 ? (
           <div className="text-center text-gray-400 py-12">
             <p>{busqueda ? `No se encontró "${busqueda}"` : 'Sin productos'}</p>
@@ -390,46 +355,161 @@ export default function NuevoPresupuestoPage() {
         )}
       </div>
 
-      <div className="p-4 border-t border-gray-100 dark:border-slate-700 bg-white dark:bg-slate-800 space-y-3">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Cliente (opcional)</label>
-          <input
-            type="text"
-            value={clienteNombre}
-            onChange={e => setClienteNombre(e.target.value)}
-            placeholder="Nombre del cliente"
-            className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-2.5 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-400"
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Válido hasta</label>
-          <input
-            type="date"
-            value={fechaVencimiento}
-            min={hoyISO()}
-            onChange={e => setFechaVencimiento(e.target.value)}
-            className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-2.5 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-400"
-          />
-        </div>
+      {/* Floating cart — mismo criterio que Caja: solo si hay items y
+          ninguna hoja está abierta. */}
+      {items.length > 0 && !showCarrito && !showDatos && (
+        <button
+          onClick={() => setShowCarrito(true)}
+          className="fixed bottom-20 right-4 bg-emerald-600 text-white px-5 py-3 rounded-2xl shadow-xl shadow-emerald-900/30 flex items-center gap-2 z-30"
+        >
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"
+            />
+          </svg>
+          <span key={items.length} className="font-bold animate-cart-pop">{items.length}</span>
+          <span className="hidden sm:inline">·</span>
+          <span className="font-semibold text-sm hidden sm:inline">{formatBS(totalBs)}</span>
+        </button>
+      )}
 
-        {error && <p className="text-red-500 text-sm">{error}</p>}
+      {/* Cart bottom sheet — mismo patrón que Caja: acá el usuario ajusta
+          cantidades y quita items antes de pasar a los datos del
+          presupuesto. La lista de arriba desapareció apenas se hacía
+          scroll al catálogo; acá siempre queda a un toque del botón
+          flotante. */}
+      {showCarrito && (
+        <div className="fixed inset-0 z-50 flex items-end">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowCarrito(false)} />
+          <div className="relative w-full max-w-lg mx-auto bg-white dark:bg-slate-800 rounded-t-2xl max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-slate-700">
+              <h2 className="text-lg font-bold text-gray-900 dark:text-white">Tu presupuesto</h2>
+              <button onClick={() => setShowCarrito(false)} className="p-1 text-gray-400">
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
 
-        <div className="flex items-center justify-between pt-1">
-          <div>
-            <p className="text-[11px] text-gray-400">{items.length} {items.length === 1 ? 'producto' : 'productos'}</p>
-            <p className="text-xs text-gray-400">Total</p>
-            <p className="text-xl font-bold text-gray-900 dark:text-white">{formatBS(totalBs)}</p>
-            {tasa > 0 && <p className="text-xs text-gray-400">{formatUSD(totalUsd)}</p>}
+            <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              {items.map(item => (
+                <div key={item.id} className="flex items-center gap-3 bg-gray-50 dark:bg-slate-700 rounded-xl p-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                      {formatearNombre(item.nombre)}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {item.gramos !== undefined ? `${item.gramos}g` : `${item.cantidad}×`}
+                      {' · '}{formatBS(itemSubtotalBs(item))}
+                    </p>
+                  </div>
+                  {item.gramos === undefined ? (
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <button
+                        onClick={() => actualizarCantidad(item.id, -1)}
+                        className="w-7 h-7 rounded-full bg-gray-100 dark:bg-slate-600 flex items-center justify-center text-gray-600 dark:text-gray-300 font-bold"
+                      >
+                        −
+                      </button>
+                      <span className="w-5 text-center text-sm font-semibold text-gray-800 dark:text-gray-200">{item.cantidad}</span>
+                      <button
+                        onClick={() => actualizarCantidad(item.id, 1)}
+                        className="w-7 h-7 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center text-emerald-700 dark:text-emerald-400 font-bold"
+                      >
+                        +
+                      </button>
+                    </div>
+                  ) : null}
+                  <button onClick={() => quitarItem(item.id)} className="text-gray-300 flex-shrink-0" aria-label="Quitar">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="p-4 border-t border-gray-100 dark:border-slate-700">
+              <div className="flex justify-between items-center mb-3">
+                <span className="text-gray-600 dark:text-gray-300">Total</span>
+                <div className="text-right">
+                  <p className="text-2xl font-bold text-gray-900 dark:text-white">{formatBS(totalBs)}</p>
+                  {tasa > 0 && <p className="text-sm text-gray-400">{formatUSD(totalUsd)}</p>}
+                </div>
+              </div>
+              <button
+                onClick={() => { setShowCarrito(false); setShowDatos(true); }}
+                className="w-full bg-emerald-600 text-white py-4 rounded-xl text-lg font-bold"
+              >
+                Continuar
+              </button>
+            </div>
           </div>
-          <button
-            onClick={guardarPresupuesto}
-            disabled={guardando || items.length === 0}
-            className="bg-emerald-600 text-white px-6 py-3.5 rounded-xl font-bold disabled:opacity-40"
-          >
-            {guardando ? 'Guardando...' : 'Guardar presupuesto'}
-          </button>
         </div>
-      </div>
+      )}
+
+      {/* Datos del presupuesto — mismo patrón de hoja que Caja para la
+          hoja de pago: tocar el backdrop vuelve al carrito, no pierde
+          todo. */}
+      {showDatos && (
+        <div className="fixed inset-0 z-50 flex items-end">
+          <div className="absolute inset-0 bg-black/40" onClick={() => { setShowDatos(false); setShowCarrito(true); }} />
+          <div className="relative w-full max-w-lg mx-auto bg-white dark:bg-slate-800 rounded-t-2xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-slate-700">
+              <h2 className="text-lg font-bold text-gray-900 dark:text-white">Datos del presupuesto</h2>
+              <button
+                onClick={() => { setShowDatos(false); setShowCarrito(true); }}
+                className="p-1 text-gray-400"
+              >
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Cliente (opcional)</label>
+                <input
+                  type="text"
+                  value={clienteNombre}
+                  onChange={e => setClienteNombre(e.target.value)}
+                  placeholder="Nombre del cliente"
+                  className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-2.5 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-400"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Válido hasta</label>
+                <input
+                  type="date"
+                  value={fechaVencimiento}
+                  min={hoyISO()}
+                  onChange={e => setFechaVencimiento(e.target.value)}
+                  className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-2.5 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-400"
+                />
+              </div>
+
+              <div>
+                <p className="text-xs text-gray-400">Total</p>
+                <p className="text-xl font-bold text-gray-900 dark:text-white">{formatBS(totalBs)}</p>
+                {tasa > 0 && <p className="text-xs text-gray-400">{formatUSD(totalUsd)}</p>}
+              </div>
+
+              {error && <p className="text-red-500 text-sm">{error}</p>}
+            </div>
+
+            <div className="p-4 border-t border-gray-100 dark:border-slate-700">
+              <button
+                onClick={guardarPresupuesto}
+                disabled={guardando || items.length === 0}
+                className="w-full bg-emerald-600 text-white py-4 rounded-xl text-lg font-bold disabled:opacity-40"
+              >
+                {guardando ? 'Guardando...' : 'Guardar presupuesto'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Weight input modal */}
       {showPeso && productoPeso && (
