@@ -70,8 +70,9 @@ async function consultarFuente(): Promise<{ ok: boolean; usd: number | null }> {
 // Ambas RPC son SECURITY DEFINER y ejecutables solo por service_role — de
 // ahí que esta función exista: el cliente (con la llave anon) nunca podría
 // llamarlas. Nunca lanza: una falla acá se refleja en `rpc_ok` en la
-// respuesta, no tumba el endpoint (que igual debe responder 200 si el
-// token era válido).
+// respuesta y hace que el endpoint responda 502 (ver `manejar` más abajo)
+// — a diferencia de un fallo de la fuente externa, esto sí es una falla
+// real que UptimeRobot debe detectar.
 async function llamarRpc(
   nombre: string,
   env: Env,
@@ -117,12 +118,25 @@ async function manejar({ request, env }: Contexto, conCuerpo: boolean): Promise<
     ? await llamarRpc('fn_actualizar_tasa_automatica_todos', env, { p_tasa_oficial: fuente.usd })
     : await llamarRpc('fn_marcar_actualizacion_tasa_fallida_todos', env, {});
 
-  // Siempre 200 con token válido, éxito o fallo de la fuente externa — esto
-  // no es un health check de terceros, UptimeRobot solo confirma que el
-  // endpoint sigue corriendo.
+  const rpcLlamada = fuente.ok ? 'actualizar' : 'marcar_fallida';
+
+  // Distinción clave: que la fuente externa (BCV) falle es un caso ya
+  // manejado — pasa de vez en cuando, no es una emergencia, y por eso
+  // sigue devolviendo 200 mientras la llamada a Supabase (la que
+  // corresponda, actualizar o marcar_fallida) haya funcionado. Un 502 es
+  // solo cuando esa llamada a Supabase en sí no respondió bien, sea cual
+  // sea la RPC — eso sí es una falla real que UptimeRobot debe detectar.
+  if (!rpcOk) {
+    return jsonResponse(
+      502,
+      { ok: false, tasa_oficial: fuente.usd, rpc: rpcLlamada, rpc_ok: false, error: `La llamada a ${rpcLlamada} en Supabase falló` },
+      conCuerpo
+    );
+  }
+
   return jsonResponse(
     200,
-    { ok: fuente.ok, tasa_oficial: fuente.usd, rpc: fuente.ok ? 'actualizar' : 'marcar_fallida', rpc_ok: rpcOk },
+    { ok: fuente.ok, tasa_oficial: fuente.usd, rpc: rpcLlamada, rpc_ok: true },
     conCuerpo
   );
 }
