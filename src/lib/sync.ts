@@ -114,7 +114,18 @@ export async function syncFromSupabase(negocioId: string): Promise<Configuracion
 // negocios). Todo UPDATE de este archivo pide sus filas de vuelta y trata
 // data vacía como fallo, nunca como éxito.
 
-export async function updateTasa(tasa: number, negocioId: string): Promise<boolean> {
+export interface ResultadoUpdateTasa {
+  ok: boolean;
+  mensaje?: string;
+}
+
+// Devuelve el mensaje del error (no solo un boolean) porque ahora puede
+// fallar por una razón que el usuario necesita ver tal cual: el trigger
+// trg_validar_piso_tasa_oficial en Supabase rechaza el UPDATE si la tasa
+// manual queda por debajo de la tasa oficial del día (la que carga el
+// endpoint automático /api/actualizar-tasa) — ver comentario de esa regla
+// en la pantalla de Tasa.
+export async function updateTasa(tasa: number, negocioId: string): Promise<ResultadoUpdateTasa> {
   try {
     const now = new Date().toISOString();
     const { data, error } = await supabase
@@ -124,12 +135,12 @@ export async function updateTasa(tasa: number, negocioId: string): Promise<boole
       .select('negocio_id');
 
     if (error) throw error;
-    if (!data || data.length === 0) return false;
+    if (!data || data.length === 0) return { ok: false };
 
     await saveConfiguracion({ id: 1, tasa, tasa_actualizada_en: now });
-    return true;
-  } catch {
-    return false;
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, mensaje: (err as { message?: string }).message };
   }
 }
 
