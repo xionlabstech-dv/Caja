@@ -67,17 +67,37 @@ async function consultarFuente(): Promise<{ ok: boolean; usd: number | null }> {
   }
 }
 
+interface ResultadoRpc {
+  ok: boolean;
+  // Solo se llenan cuando ok es false — con éxito no hace falta capturar
+  // nada de la respuesta.
+  status?: number;
+  cuerpo?: string;
+}
+
+// Por si Supabase alguna vez devolviera algo que incluya el secreto (no
+// debería — PostgREST no eco-envía headers de request en el cuerpo de
+// error — pero esto va directo a una respuesta HTTP externa, así que se
+// redacta igual, sin excepciones).
+function redactar(texto: string | undefined, secreto: string): string | undefined {
+  if (!texto || !secreto) return texto;
+  return texto.split(secreto).join('[REDACTED]');
+}
+
 // Ambas RPC son SECURITY DEFINER y ejecutables solo por service_role — de
 // ahí que esta función exista: el cliente (con la llave anon) nunca podría
 // llamarlas. Nunca lanza: una falla acá se refleja en `rpc_ok` en la
 // respuesta y hace que el endpoint responda 502 (ver `manejar` más abajo)
 // — a diferencia de un fallo de la fuente externa, esto sí es una falla
-// real que UptimeRobot debe detectar.
+// real que UptimeRobot debe detectar. Cuando falla, se captura el status y
+// el cuerpo que respondió Supabase para poder diagnosticar sin tener que
+// ir a mirar logs aparte (401 por key vencida no es lo mismo que 500 por
+// un error en la RPC).
 async function llamarRpc(
   nombre: string,
   env: Env,
   args: Record<string, unknown>
-): Promise<boolean> {
+): Promise<ResultadoRpc> {
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${nombre}`, {
       method: 'POST',
@@ -88,9 +108,11 @@ async function llamarRpc(
       },
       body: JSON.stringify(args),
     });
-    return res.ok;
-  } catch {
-    return false;
+    if (res.ok) return { ok: true };
+    const cuerpo = await res.text().catch(() => undefined);
+    return { ok: false, status: res.status, cuerpo: redactar(cuerpo, env.SUPABASE_SERVICE_ROLE_KEY) };
+  } catch (err) {
+    return { ok: false, cuerpo: redactar((err as { message?: string }).message, env.SUPABASE_SERVICE_ROLE_KEY) };
   }
 }
 
@@ -114,7 +136,7 @@ async function manejar({ request, env }: Contexto, conCuerpo: boolean): Promise<
 
   const fuente = await consultarFuente();
 
-  const rpcOk = fuente.ok && fuente.usd !== null
+  const resultadoRpc = fuente.ok && fuente.usd !== null
     ? await llamarRpc('fn_actualizar_tasa_automatica_todos', env, { p_tasa_oficial: fuente.usd })
     : await llamarRpc('fn_marcar_actualizacion_tasa_fallida_todos', env, {});
 
@@ -126,10 +148,18 @@ async function manejar({ request, env }: Contexto, conCuerpo: boolean): Promise<
   // corresponda, actualizar o marcar_fallida) haya funcionado. Un 502 es
   // solo cuando esa llamada a Supabase en sí no respondió bien, sea cual
   // sea la RPC — eso sí es una falla real que UptimeRobot debe detectar.
-  if (!rpcOk) {
+  if (!resultadoRpc.ok) {
     return jsonResponse(
       502,
-      { ok: false, tasa_oficial: fuente.usd, rpc: rpcLlamada, rpc_ok: false, error: `La llamada a ${rpcLlamada} en Supabase falló` },
+      {
+        ok: false,
+        tasa_oficial: fuente.usd,
+        rpc: rpcLlamada,
+        rpc_ok: false,
+        error: `La llamada a ${rpcLlamada} en Supabase falló`,
+        rpc_status: resultadoRpc.status,
+        rpc_error: resultadoRpc.cuerpo,
+      },
       conCuerpo
     );
   }
