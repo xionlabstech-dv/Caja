@@ -52,13 +52,24 @@ export default function TasaPage() {
     // updateTasa ahora verifica que el UPDATE haya afectado una fila real
     // (ver comentario en sync.ts) — si no, no hay que dejar la UI mostrando
     // una tasa que nunca se persistió.
-    const ok = await updateTasa(nueva, negocioId!);
+    const resultado = await updateTasa(nueva, negocioId!);
     setGuardando(false);
-    if (!ok) {
+    if (!resultado.ok) {
       if (configAnterior) await saveConfiguracion(configAnterior);
       else await deleteConfiguracion();
       setTasa(tasaAnterior);
-      setError('No se pudo guardar la tasa. Intenta de nuevo.');
+      // Un trigger en Supabase rechaza el UPDATE si la tasa manual queda
+      // por debajo de la tasa oficial del día (la que carga /api/actualizar-tasa
+      // automáticamente) — el mensaje trae el piso exacto entre paréntesis,
+      // ej. "La tasa no puede ser menor a la tasa oficial (848.5458)". Se
+      // extrae el número para mostrarlo con el formato de esta pantalla en
+      // vez del mensaje crudo de Postgres.
+      const piso = resultado.mensaje?.match(/tasa oficial \(([\d.]+)\)/)?.[1];
+      setError(
+        piso
+          ? `La tasa no puede ser menor a la oficial de hoy: $${piso}`
+          : 'No se pudo guardar la tasa. Intenta de nuevo.'
+      );
       return;
     }
     setInput('');

@@ -208,7 +208,7 @@ async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
     }
     case 'actualizar_tasa': {
       const { tasa, negocioId } = op.payload as PayloadActualizarTasa;
-      return await updateTasa(tasa, negocioId);
+      return (await updateTasa(tasa, negocioId)).ok;
     }
     case 'cerrar_caja': {
       const { cierre, negocioId } = op.payload as PayloadCerrarCaja;
