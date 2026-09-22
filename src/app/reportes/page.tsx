@@ -51,6 +51,7 @@ const MERMA_MOTIVO_LABELS: Record<string, string> = {
   dano: 'Daño',
   vencido: 'Vencido',
   consumo_propio: 'Consumo propio',
+  perdida: 'Pérdida',
 };
 
 function formatearNombre(nombre: string): string {
