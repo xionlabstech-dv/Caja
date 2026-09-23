@@ -530,6 +530,27 @@ export async function getVentasPendientesRemoto(negocioId: string): Promise<Vent
   }
 }
 
+// Cierres de caja de TODO el negocio, no solo los que este dispositivo
+// archivó — sin esto, un cierre hecho desde otro dispositivo (o este mismo
+// tras reinstalar/borrar almacenamiento) queda invisible en "Cierres
+// anteriores" aunque exista completo en Supabase. RLS ya lo permite
+// (negocio_id = mi_negocio(), misma política que ventas). limit(100): tope
+// razonable, esto no es un archivo histórico infinito.
+export async function getCierresRemoto(negocioId: string): Promise<CierreCaja[] | null> {
+  try {
+    const { data, error } = await supabase
+      .from('cierres_caja')
+      .select('*')
+      .eq('negocio_id', negocioId)
+      .order('periodo_fin', { ascending: false })
+      .limit(100);
+    if (error) throw error;
+    return data as CierreCaja[];
+  } catch {
+    return null;
+  }
+}
+
 // Anula una venta vía la RPC (SECURITY DEFINER, exige admin del lado
 // servidor). No pasa por el outbox ni por IndexedDB — a diferencia de
 // registrar una venta, anular requiere conexión: es una acción

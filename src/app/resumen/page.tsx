@@ -12,7 +12,7 @@ import {
   marcarVentaAnulada,
   getMovimientosFiado,
 } from '@/lib/db';
-import { getVentasPendientesRemoto, reconciliarCierresLocal, anularVenta, getAbonosPeriodoRemoto } from '@/lib/sync';
+import { getVentasPendientesRemoto, reconciliarCierresLocal, anularVenta, getAbonosPeriodoRemoto, getCierresRemoto } from '@/lib/sync';
 import { encolarCerrarCaja, encolarActualizarCierreVentas, procesarCola } from '@/lib/outbox';
 import { formatBS, formatUSD } from '@/lib/precio';
 import { compartirComprobante } from '@/lib/comprobante';
@@ -233,6 +233,30 @@ export default function ResumenPage() {
       }
     }
     setAbonos(abonosFinal);
+
+    // Cierres de TODO el negocio, no solo los que este dispositivo archivó
+    // — sin esto, un cierre hecho desde otro dispositivo (o este mismo tras
+    // reinstalar/borrar almacenamiento) queda invisible en "Cierres
+    // anteriores" aunque exista completo en Supabase. Mismo criterio que
+    // ventas/abonos: local siempre visible, completado con el servidor
+    // cuando hay conexión, y lo nuevo se cachea para verse offline después.
+    if (isOnline && negocioId) {
+      const cierresRemotosCompletos = await getCierresRemoto(negocioId);
+      if (cierresRemotosCompletos !== null) {
+        const porId = new Map(c.map(x => [x.id, x]));
+        const nuevos: CierreCaja[] = [];
+        for (const r of cierresRemotosCompletos) {
+          if (!porId.has(r.id)) {
+            porId.set(r.id, r);
+            nuevos.push(r);
+          }
+        }
+        if (nuevos.length > 0) {
+          await Promise.all(nuevos.map(cierre => saveCierre(cierre)));
+          setCierres(Array.from(porId.values()).sort((a, b) => b.periodo_fin.localeCompare(a.periodo_fin)));
+        }
+      }
+    }
   };
 
   // Se re-consulta al recuperar conexión: si esta pantalla se abrió offline
