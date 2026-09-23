@@ -12,7 +12,7 @@ import {
   marcarVentaAnulada,
   getMovimientosFiado,
 } from '@/lib/db';
-import { getVentasPendientesRemoto, reconciliarCierresLocal, anularVenta, getAbonosPeriodoRemoto, getCierresRemoto } from '@/lib/sync';
+import { getVentasPendientesRemoto, reconciliarCierresLocal, anularVenta, getAbonosPeriodoRemoto, getCierresRemoto, getVentasPorCierre } from '@/lib/sync';
 import { encolarCerrarCaja, encolarActualizarCierreVentas, procesarCola } from '@/lib/outbox';
 import { formatBS, formatUSD } from '@/lib/precio';
 import { compartirComprobante } from '@/lib/comprobante';
@@ -113,6 +113,16 @@ export default function ResumenPage() {
   const [ultimoCierre, setUltimoCierreState] = useState<string | null>(null);
   const [expandido, setExpandido] = useState<string | null>(null);
   const [expandidoCierre, setExpandidoCierre] = useState<string | null>(null);
+  // Detalle de ventas de un cierre — cargado bajo demanda al expandir, no
+  // para todos los cierres de una vez. Vive solo en memoria (no en
+  // IndexedDB): con que sobreviva mientras la pantalla está abierta alcanza
+  // para esta primera versión.
+  const [ventasPorCierreId, setVentasPorCierreId] = useState<Record<string, Venta[]>>({});
+  const [cargandoVentasCierreId, setCargandoVentasCierreId] = useState<string | null>(null);
+  // Clave "cierreId:ventaId" — a diferencia de `expandido` (ventas del
+  // período actual), acá hace falta el id del cierre también porque dos
+  // cierres distintos podrían tener una venta expandida al mismo tiempo.
+  const [expandidoVentaCierre, setExpandidoVentaCierre] = useState<string | null>(null);
   const [showConfirmCierre, setShowConfirmCierre] = useState(false);
   const [cerrando, setCerrando] = useState(false);
   // false apenas se confirma que tenemos la foto completa del negocio (se
@@ -396,6 +406,26 @@ export default function ResumenPage() {
     }
   };
 
+  // Detalle "qué vendió" de un cierre, bajo demanda — no se trae para todos
+  // los cierres al cargar Resumen, solo el que el dueño realmente abre. Si
+  // ya está en memoria no se vuelve a pedir (ni siquiera sin conexión: lo
+  // que ya se cargó una vez en esta sesión se sigue viendo).
+  const expandirCierre = async (cierreId: string) => {
+    const abriendo = expandidoCierre !== cierreId;
+    setExpandidoCierre(abriendo ? cierreId : null);
+    if (abriendo && !ventasPorCierreId[cierreId] && isOnline) {
+      setCargandoVentasCierreId(cierreId);
+      const remotas = await getVentasPorCierre(cierreId);
+      setCargandoVentasCierreId(null);
+      if (remotas !== null) {
+        setVentasPorCierreId(prev => ({ ...prev, [cierreId]: remotas }));
+      }
+      // Si remotas es null (falló) no se guarda nada — la sección muestra
+      // "Necesitas conexión" en vez de una lista vacía engañosa, y un
+      // próximo expand/collapse reintenta solo.
+    }
+  };
+
   const abrirAnular = (venta: Venta) => {
     setAnulando(venta);
     setMotivoAnular('');
@@ -663,7 +693,7 @@ export default function ResumenPage() {
                 <div key={cierre.id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
                   <button
                     className="w-full flex items-center justify-between p-4 text-left"
-                    onClick={() => setExpandidoCierre(isOpen ? null : cierre.id)}
+                    onClick={() => expandirCierre(cierre.id)}
                   >
                     <div>
                       <p className="font-semibold text-gray-800">{fmtFecha(cierre.periodo_fin)}</p>
@@ -720,6 +750,105 @@ export default function ResumenPage() {
                       <div className="flex justify-between text-sm">
                         <span className="text-gray-500">Cerrado por</span>
                         <span className="text-gray-600">{cierre.usuario_nombre || '—'}</span>
+                      </div>
+
+                      {/* Detalle de ventas del cierre — versión simple, solo
+                          para ver: sin compartir ni anular acá. Copia visual
+                          del bloque de "Ventas" del período actual (no
+                          extraída a componente compartido a propósito, ver
+                          brief). */}
+                      <div className="border-t border-gray-100 pt-3 mt-1 space-y-2">
+                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                          Ventas de este cierre
+                        </p>
+                        {cargandoVentasCierreId === cierre.id ? (
+                          <p className="text-sm text-gray-400 py-1">Cargando ventas…</p>
+                        ) : !ventasPorCierreId[cierre.id] ? (
+                          <p className="text-sm text-amber-600 py-1">Necesitas conexión para ver el detalle</p>
+                        ) : ventasPorCierreId[cierre.id].length === 0 ? (
+                          <p className="text-sm text-gray-400 py-1">Sin ventas registradas</p>
+                        ) : (
+                          [...ventasPorCierreId[cierre.id]]
+                            .sort((a, b) => a.fecha.localeCompare(b.fecha))
+                            .map((venta, i) => {
+                              const numeroEnCierre = i + 1;
+                              const hora = new Date(venta.fecha).toLocaleTimeString('es-VE', {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              });
+                              const ventaKey = `${cierre.id}:${venta.id}`;
+                              const ventaOpen = expandidoVentaCierre === ventaKey;
+
+                              return (
+                                <div key={venta.id} className="bg-gray-50 rounded-xl overflow-hidden">
+                                  <button
+                                    className="w-full flex items-center justify-between p-3 text-left"
+                                    onClick={() => setExpandidoVentaCierre(ventaOpen ? null : ventaKey)}
+                                  >
+                                    <div>
+                                      <p className="font-semibold text-gray-800 text-sm">Venta #{numeroEnCierre}</p>
+                                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                                        <span className="text-gray-400 text-xs">{hora}</span>
+                                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex items-center gap-1 ${METODO_COLORS[venta.metodo_pago]}`}>
+                                          {METODO_ICONS[venta.metodo_pago]}
+                                          {METODO_LABELS[venta.metodo_pago]}
+                                        </span>
+                                        {venta.anulada && (
+                                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-700">
+                                            Anulada
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <p className={`font-bold text-sm ${venta.anulada ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
+                                        {formatBS(venta.total_bs)}
+                                      </p>
+                                      <svg
+                                        className={`w-4 h-4 text-gray-400 transition-transform ${ventaOpen ? 'rotate-180' : ''}`}
+                                        fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                                      >
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                      </svg>
+                                    </div>
+                                  </button>
+
+                                  {ventaOpen && (
+                                    <div className="border-t border-gray-100 px-3 pb-3 pt-2 space-y-2">
+                                      {venta.items.map((item, idx) => (
+                                        <div key={idx} className="flex justify-between text-sm">
+                                          <span className="text-gray-600">
+                                            {item.gramos !== undefined
+                                              ? formatearNombre(item.nombre)
+                                              : `${item.cantidad}× ${formatearNombre(item.nombre)}`}
+                                          </span>
+                                          <span className="font-medium">{formatBS(item.subtotal_bs)}</span>
+                                        </div>
+                                      ))}
+                                      {venta.pagos.length > 1 && (
+                                        <div className="border-t border-gray-100 pt-2 space-y-1">
+                                          {venta.pagos.map(p => (
+                                            <div key={p.id} className="flex justify-between text-sm">
+                                              <span className="text-gray-500">{METODO_LABELS[p.metodo]}</span>
+                                              <span className="text-gray-600">{formatBS(p.monto_bs)}</span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                      <div className="border-t border-gray-100 pt-2 flex justify-between text-sm">
+                                        <span className="text-gray-500">Tasa usada</span>
+                                        <span className="text-gray-600">Bs {venta.tasa_usada.toLocaleString('es-VE')}</span>
+                                      </div>
+                                      <div className="flex justify-between text-sm">
+                                        <span className="text-gray-500">Vendida por</span>
+                                        <span className="text-gray-600">{venta.usuario_nombre || '—'}</span>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })
+                        )}
                       </div>
                     </div>
                   )}

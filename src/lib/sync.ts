@@ -431,6 +431,98 @@ export async function actualizarCierreIdVentas(ventaIds: string[], cierreId: str
 // resto del negocio sin cerrar. Devuelve null si no se pudo consultar (sin
 // red, error de Supabase), para que quien llama sepa distinguir "el negocio
 // no tiene más ventas pendientes" de "no se pudo confirmar".
+// Arma objetos Venta completos (items + pagos) a partir de filas ya
+// consultadas de `ventas` — compartido por getVentasPendientesRemoto y
+// getVentasPorCierre, que solo difieren en el filtro con el que piden esas
+// filas (negocio_id + cierre_id null vs. un cierre_id puntual).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function armarVentasCompletas(ventasData: any[]): Promise<Venta[]> {
+  const ids = ventasData.map(v => v.id as string);
+  // Columnas explícitas SIN costo_usd: Resumen (admin o cajero) nunca
+  // muestra costo/ganancia por venta, así que no hay razón para que ese
+  // dato viaje hasta el cliente en esta consulta.
+  const { data: itemsData } = await supabase
+    .from('venta_items')
+    .select('id, venta_id, producto_id, nombre, cantidad, precio_bs, precio_usd, es_por_peso, gramos')
+    .in('venta_id', ids);
+
+  const { data: pagosData } = await supabase
+    .from('venta_pagos')
+    .select('id, venta_id, orden, metodo, monto_bs, monto_usd')
+    .in('venta_id', ids);
+
+  const pagosPorVenta = new Map<string, PagoVenta[]>();
+  for (const p of pagosData ?? []) {
+    const lista = pagosPorVenta.get(p.venta_id) ?? [];
+    lista.push({
+      id: p.id,
+      orden: p.orden,
+      metodo: p.metodo,
+      monto_bs: p.monto_bs,
+      monto_usd: p.monto_usd,
+    });
+    pagosPorVenta.set(p.venta_id, lista);
+  }
+
+  const itemsPorVenta = new Map<string, VentaItem[]>();
+  for (const it of itemsData ?? []) {
+    const lista = itemsPorVenta.get(it.venta_id) ?? [];
+    // venta_items.precio_bs es el unitario (o por kg) y venta_items.cantidad
+    // es unidades o kg según es_por_peso — igual que arma confirmarVenta().
+    // Para items por peso, el modelo local usa cantidad=1 (dummy) y guarda
+    // el peso real en gramos; hay que deshacer aquí la conversión a kg que
+    // hizo sincronizarVenta() al insertar, o "cantidad" quedaría en kg en
+    // vez de 1 y desalinearía cualquier código que la use como # de items.
+    const esPorPeso = Boolean(it.es_por_peso);
+    lista.push({
+      id: it.id,
+      producto_id: it.producto_id,
+      nombre: it.nombre,
+      precio_bs: it.precio_bs,
+      cantidad: esPorPeso ? 1 : it.cantidad,
+      subtotal_bs: it.precio_bs * it.cantidad,
+      gramos: it.gramos ?? undefined,
+      precioUnitarioBs: it.precio_bs,
+      precioUnitarioUsd: it.precio_usd,
+    });
+    itemsPorVenta.set(it.venta_id, lista);
+  }
+
+  return ventasData.map(v => ({
+    id: v.id,
+    fecha: v.vendida_en,
+    fecha_dia: (v.vendida_en as string).split('T')[0],
+    items: itemsPorVenta.get(v.id) ?? [],
+    metodo_pago: v.metodo_pago,
+    // Fallback por si una venta llegara sin filas en venta_pagos (no
+    // debería pasar post-backfill, pero evita que Resumen reviente el
+    // desglose por método si alguna vez ocurre): un pago único con el
+    // total, igual al backfill que se hizo en Supabase.
+    pagos: pagosPorVenta.get(v.id) ?? [{
+      id: crypto.randomUUID(),
+      orden: 1,
+      metodo: v.metodo_pago,
+      monto_bs: v.total_bs,
+      monto_usd: v.total_usd,
+    }],
+    total_bs: v.total_bs,
+    total_usd: v.total_usd,
+    tasa_usada: v.tasa,
+    cierre_id: v.cierre_id ?? undefined,
+    sincronizada: true,
+    usuario_id: v.usuario_id ?? undefined,
+    usuario_nombre: v.usuario_nombre ?? undefined,
+    // Anulación: se trae siempre (no solo si anulada = true) para que una
+    // venta anulada por otro dispositivo llegue ya marcada, sin depender
+    // de que este dispositivo haya sido el que la anuló.
+    anulada: v.anulada ?? false,
+    anulada_en: v.anulada_en ?? undefined,
+    anulada_por: v.anulada_por ?? undefined,
+    anulada_por_nombre: v.anulada_por_nombre ?? undefined,
+    motivo_anulacion: v.motivo_anulacion ?? undefined,
+  }));
+}
+
 export async function getVentasPendientesRemoto(negocioId: string): Promise<Venta[] | null> {
   try {
     const { data: ventasData, error } = await supabase
@@ -440,91 +532,24 @@ export async function getVentasPendientesRemoto(negocioId: string): Promise<Vent
       .is('cierre_id', null);
     if (error) throw error;
     if (!ventasData || ventasData.length === 0) return [];
+    return await armarVentasCompletas(ventasData);
+  } catch {
+    return null;
+  }
+}
 
-    const ids = ventasData.map(v => v.id as string);
-    // Columnas explícitas SIN costo_usd: Resumen (admin o cajero) nunca
-    // muestra costo/ganancia por venta, así que no hay razón para que ese
-    // dato viaje hasta el cliente en esta consulta.
-    const { data: itemsData } = await supabase
-      .from('venta_items')
-      .select('id, venta_id, producto_id, nombre, cantidad, precio_bs, precio_usd, es_por_peso, gramos')
-      .in('venta_id', ids);
-
-    const { data: pagosData } = await supabase
-      .from('venta_pagos')
-      .select('id, venta_id, orden, metodo, monto_bs, monto_usd')
-      .in('venta_id', ids);
-
-    const pagosPorVenta = new Map<string, PagoVenta[]>();
-    for (const p of pagosData ?? []) {
-      const lista = pagosPorVenta.get(p.venta_id) ?? [];
-      lista.push({
-        id: p.id,
-        orden: p.orden,
-        metodo: p.metodo,
-        monto_bs: p.monto_bs,
-        monto_usd: p.monto_usd,
-      });
-      pagosPorVenta.set(p.venta_id, lista);
-    }
-
-    const itemsPorVenta = new Map<string, VentaItem[]>();
-    for (const it of itemsData ?? []) {
-      const lista = itemsPorVenta.get(it.venta_id) ?? [];
-      // venta_items.precio_bs es el unitario (o por kg) y venta_items.cantidad
-      // es unidades o kg según es_por_peso — igual que arma confirmarVenta().
-      // Para items por peso, el modelo local usa cantidad=1 (dummy) y guarda
-      // el peso real en gramos; hay que deshacer aquí la conversión a kg que
-      // hizo sincronizarVenta() al insertar, o "cantidad" quedaría en kg en
-      // vez de 1 y desalinearía cualquier código que la use como # de items.
-      const esPorPeso = Boolean(it.es_por_peso);
-      lista.push({
-        id: it.id,
-        producto_id: it.producto_id,
-        nombre: it.nombre,
-        precio_bs: it.precio_bs,
-        cantidad: esPorPeso ? 1 : it.cantidad,
-        subtotal_bs: it.precio_bs * it.cantidad,
-        gramos: it.gramos ?? undefined,
-        precioUnitarioBs: it.precio_bs,
-        precioUnitarioUsd: it.precio_usd,
-      });
-      itemsPorVenta.set(it.venta_id, lista);
-    }
-
-    return ventasData.map(v => ({
-      id: v.id,
-      fecha: v.vendida_en,
-      fecha_dia: (v.vendida_en as string).split('T')[0],
-      items: itemsPorVenta.get(v.id) ?? [],
-      metodo_pago: v.metodo_pago,
-      // Fallback por si una venta llegara sin filas en venta_pagos (no
-      // debería pasar post-backfill, pero evita que Resumen reviente el
-      // desglose por método si alguna vez ocurre): un pago único con el
-      // total, igual al backfill que se hizo en Supabase.
-      pagos: pagosPorVenta.get(v.id) ?? [{
-        id: crypto.randomUUID(),
-        orden: 1,
-        metodo: v.metodo_pago,
-        monto_bs: v.total_bs,
-        monto_usd: v.total_usd,
-      }],
-      total_bs: v.total_bs,
-      total_usd: v.total_usd,
-      tasa_usada: v.tasa,
-      cierre_id: v.cierre_id ?? undefined,
-      sincronizada: true,
-      usuario_id: v.usuario_id ?? undefined,
-      usuario_nombre: v.usuario_nombre ?? undefined,
-      // Anulación: se trae siempre (no solo si anulada = true) para que una
-      // venta anulada por otro dispositivo llegue ya marcada, sin depender
-      // de que este dispositivo haya sido el que la anuló.
-      anulada: v.anulada ?? false,
-      anulada_en: v.anulada_en ?? undefined,
-      anulada_por: v.anulada_por ?? undefined,
-      anulada_por_nombre: v.anulada_por_nombre ?? undefined,
-      motivo_anulacion: v.motivo_anulacion ?? undefined,
-    }));
+// Ventas de UN cierre puntual — para el detalle bajo demanda dentro de un
+// cierre expandido en "Cierres anteriores" (Resumen). Mismo helper que
+// getVentasPendientesRemoto, solo cambia el filtro.
+export async function getVentasPorCierre(cierreId: string): Promise<Venta[] | null> {
+  try {
+    const { data: ventasData, error } = await supabase
+      .from('ventas')
+      .select('*')
+      .eq('cierre_id', cierreId);
+    if (error) throw error;
+    if (!ventasData || ventasData.length === 0) return [];
+    return await armarVentasCompletas(ventasData);
   } catch {
     return null;
   }
