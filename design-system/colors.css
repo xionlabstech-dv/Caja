@@ -1,0 +1,126 @@
+:root{
+  /* ── Verde de marca — la única familia cromática de acción ──────────────
+     La app real usa emerald-600 (#059669). El sistema lo redefine un punto
+     más profundo y saturado para pasar 4.5:1 con texto blanco bajo sol. */
+  --verde-50:#E7F6EF;--verde-100:#C6EBDA;--verde-200:#8FD9BC;--verde-300:#4FC298;
+  --verde-400:#18AC79;--verde-500:#0A9A66;--verde-600:#04875A;--verde-700:#036B48;
+  --verde-800:#025337;--verde-900:#013B28;
+
+  /* ── Neutros claros ─────────────────────────────────────────────────── */
+  --gris-0:#FFFFFF;--gris-50:#F9FAFB;--gris-100:#F3F4F6;--gris-200:#E5E7EB;
+  --gris-300:#D1D5DB;--gris-400:#9CA3AF;--gris-500:#6B7280;--gris-600:#4B5563;
+  --gris-700:#374151;--gris-800:#1F2937;--gris-900:#111827;
+
+  /* ── Neutros oscuros (slate real, nunca negro puro) ─────────────────── */
+  --pizarra-700:#334155;--pizarra-750:#293548;--pizarra-800:#1E293B;--pizarra-900:#0F172A;
+
+  /* ── Semánticos — cada uno ya significa algo para el cajero ─────────── */
+  --rojo-50:#FEF2F2;--rojo-100:#FEE2E2;--rojo-500:#EF4444;--rojo-600:#DC2626;--rojo-700:#B91C1C;--rojo-300:#FCA5A5;
+  --naranja-50:#FFF7ED;--naranja-500:#F97316;--naranja-600:#EA580C;--naranja-400:#FB923C;
+  --ambar-50:#FFFBEB;--ambar-100:#FEF3C7;--ambar-200:#FDE68A;--ambar-300:#FCD34D;--ambar-700:#B45309;--ambar-800:#92400E;
+  --azul-50:#EFF6FF;--azul-100:#DBEAFE;--azul-700:#1D4ED8;--azul-300:#93C5FD;
+
+  /* ── Círculos de iniciales (fiado / catálogo) — set intacto de la app ── */
+  --avatar-1:#8B5CF6;--avatar-2:#3B82F6;--avatar-3:#06B6D4;--avatar-4:#14B8A6;
+  --avatar-5:#10B981;--avatar-6:#F59E0B;--avatar-7:#F97316;--avatar-8:#EC4899;
+
+  /* ── Chips por método de pago (valores de resumen/page.tsx) ─────────── */
+  --metodo-efectivo-bs-bg:#D1FAE5;--metodo-efectivo-bs-fg:#047857;
+  --metodo-pago-movil-bg:#DBEAFE;--metodo-pago-movil-fg:#1D4ED8;
+  --metodo-biopago-bg:#F3E8FF;--metodo-biopago-fg:#7E22CE;
+  --metodo-tarjeta-bg:#F1F5F9;--metodo-tarjeta-fg:#334155;
+  --metodo-efectivo-usd-bg:#FEF3C7;--metodo-efectivo-usd-fg:#B45309;
+  --metodo-fiado-bg:#FFEDD5;--metodo-fiado-fg:#C2410C;
+  --metodo-mixto-bg:#E0E7FF;--metodo-mixto-fg:#4338CA;
+
+  /* ── Alias semánticos — modo claro ──────────────────────────────────── */
+  --fondo-app:var(--gris-50);
+  --superficie-tarjeta:var(--gris-0);
+  --superficie-hundida:var(--gris-100);
+  --superficie-barra:var(--gris-0);
+  --borde-tarjeta:var(--gris-100);
+  --borde-campo:var(--gris-200);
+  --borde-divisor:var(--gris-100);
+
+  --texto-protagonista:var(--gris-900);
+  --texto-cuerpo:var(--gris-700);
+  --texto-apoyo:var(--gris-500);
+  --texto-metadato:var(--gris-400);
+  --texto-invertido:var(--gris-0);
+
+  --accion-primaria:var(--verde-600);
+  --accion-primaria-presion:var(--verde-700);
+  --accion-primaria-suave:var(--verde-50);
+  --accion-primaria-suave-texto:var(--verde-700);
+  --nav-activo:var(--verde-600);
+  --nav-inactivo:var(--gris-400);
+  --encabezado-fondo:var(--verde-600);
+  --encabezado-texto:var(--gris-0);
+  --encabezado-texto-apoyo:#A7E8CC;
+
+  --negativo:var(--rojo-600);
+  --negativo-fondo:var(--rojo-50);
+  --negativo-borde:var(--rojo-100);
+  --deuda:var(--naranja-600);
+  --deuda-fondo:var(--naranja-50);
+  --aviso:var(--ambar-700);
+  --aviso-fondo:var(--ambar-50);
+  --aviso-borde:var(--ambar-200);
+  --informativo:var(--azul-700);
+  --informativo-fondo:var(--azul-50);
+
+  --overlay:rgba(0,0,0,.4);
+  /* Tarjeta de contraste: el dato protagonista se despega del fondo claro */
+  --superficie-contraste:var(--gris-900);
+  --superficie-contraste-texto:var(--gris-0);
+  --superficie-contraste-etiqueta:var(--verde-300);
+  --toast-fondo:var(--gris-900);
+  --toast-texto:var(--gris-0);
+}
+
+/* ── Modo oscuro — se diseña en paralelo, no como variante ──────────────── */
+.dark{
+  --fondo-app:var(--pizarra-900);
+  --superficie-tarjeta:var(--pizarra-800);
+  --superficie-hundida:var(--pizarra-700);
+  --superficie-barra:var(--pizarra-800);
+  --borde-tarjeta:var(--pizarra-700);
+  --borde-campo:#475569;
+  --borde-divisor:var(--pizarra-700);
+
+  --texto-protagonista:#F1F5F9;
+  --texto-cuerpo:#CBD5E1;
+  --texto-apoyo:#94A3B8;
+  --texto-metadato:#64748B;
+
+  --accion-primaria:var(--verde-500);
+  --accion-primaria-presion:var(--verde-600);
+  --accion-primaria-suave:rgba(10,154,102,.14);
+  --accion-primaria-suave-texto:#4FC298;
+  --superficie-contraste:var(--verde-800);
+  --superficie-contraste-texto:#F1F5F9;
+  --superficie-contraste-etiqueta:var(--verde-200);
+  --nav-activo:#34D399;
+  --nav-inactivo:#64748B;
+  --encabezado-fondo:var(--verde-700);
+  --encabezado-texto-apoyo:#8FD9BC;
+
+  --negativo:var(--rojo-300);
+  --negativo-fondo:rgba(239,68,68,.1);
+  --negativo-borde:rgba(239,68,68,.3);
+  --deuda:var(--naranja-400);
+  --deuda-fondo:rgba(234,88,12,.14);
+  --aviso:var(--ambar-300);
+  --aviso-fondo:rgba(180,83,9,.2);
+  --aviso-borde:rgba(180,83,9,.4);
+  --informativo:var(--azul-300);
+  --informativo-fondo:rgba(29,78,216,.22);
+
+  --metodo-efectivo-bs-bg:rgba(4,135,90,.22);--metodo-efectivo-bs-fg:#6EE7B7;
+  --metodo-pago-movil-bg:rgba(29,78,216,.22);--metodo-pago-movil-fg:#93C5FD;
+  --metodo-biopago-bg:rgba(126,34,206,.22);--metodo-biopago-fg:#D8B4FE;
+  --metodo-tarjeta-bg:rgba(51,65,85,.6);--metodo-tarjeta-fg:#CBD5E1;
+  --metodo-efectivo-usd-bg:rgba(180,83,9,.22);--metodo-efectivo-usd-fg:#FCD34D;
+  --metodo-fiado-bg:rgba(194,65,12,.22);--metodo-fiado-fg:#FDBA74;
+  --metodo-mixto-bg:rgba(67,56,202,.22);--metodo-mixto-fg:#A5B4FC;
+}

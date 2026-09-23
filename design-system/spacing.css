@@ -1,0 +1,24 @@
+:root{
+  --esp-1:4px;--esp-2:8px;--esp-3:12px;--esp-4:16px;--esp-5:20px;--esp-6:24px;--esp-8:32px;--esp-10:40px;
+  /* Ritmo real de la app: 16px de margen de pantalla, 12px entre tarjetas. */
+  --margen-pantalla:16px;
+  --gap-lista:8px;
+  --gap-bloques:16px;
+  --pad-tarjeta:16px;
+  --pad-tarjeta-heroe:20px;
+
+  /* Objetivos de toque — dedo, nunca cursor. */
+  --toque-min:44px;
+  --toque-comodo:48px;
+  --alto-boton:52px;       /* botón de acción principal */
+  --alto-boton-compacto:44px;
+
+  --radio-chip:9999px;
+  --radio-campo:12px;
+  --radio-tarjeta:12px;
+  --radio-tarjeta-grande:16px;
+  --radio-hoja:16px;
+  --radio-marca:24px;
+  /* max-w-lg: la app vive centrada a 512px */
+  --ancho-app:512px; /* @kind spacing */
+}

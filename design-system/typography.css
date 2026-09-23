@@ -1,0 +1,39 @@
+:root{
+  --fuente-ui:Inter,system-ui,-apple-system,BlinkMacSystemFont,sans-serif; /* @kind font */
+  /* Los montos usan la misma familia con cifras tabulares y cero rasurado:
+     los dígitos quedan del mismo ancho y el 0 no se confunde con la O. */
+  --fuente-monto:Inter,system-ui,sans-serif; /* @kind font */
+  --features-monto:"tnum" 1,"zero" 1,"cv05" 1; /* @kind other */
+
+  /* Máximo tres tamaños por pantalla: protagonista, apoyo, metadato. */
+  /* saldo/total de pantalla dedicada */
+  --tam-protagonista-xl:48px; /* @kind font */
+  /* número principal de tarjeta héroe */
+  --tam-protagonista:36px; /* @kind font */
+  /* precio en la fila de producto */
+  --tam-monto-fila:24px; /* @kind font */
+  /* h1 de encabezado */
+  --tam-titulo:20px; /* @kind font */
+  /* h2 de hoja/modal */
+  --tam-subtitulo:18px; /* @kind font */
+  /* input, botón, texto base */
+  --tam-cuerpo:16px; /* @kind font */
+  /* texto secundario */
+  --tam-apoyo:14px; /* @kind font */
+  /* chips, fechas, etiquetas */
+  --tam-metadato:12px; /* @kind font */
+  /* detalle de movimiento */
+  --tam-micro:11px; /* @kind font */
+
+  --peso-regular:400; /* @kind font */
+  --peso-medio:500; /* @kind font */
+  --peso-semibold:600; /* @kind font */
+  --peso-bold:700; /* @kind font */
+  --alto-apretado:1.1; /* @kind font */
+  --alto-titulo:1.25; /* @kind font */
+  --alto-cuerpo:1.45; /* @kind font */
+  --tracking-titulo:-0.02em; /* @kind other */
+  --tracking-etiqueta:0.06em; /* @kind other */
+}
+body{font-family:var(--fuente-ui);-webkit-font-smoothing:antialiased}
+.caja-monto{font-family:var(--fuente-monto);font-feature-settings:var(--features-monto);font-variant-numeric:tabular-nums slashed-zero}
