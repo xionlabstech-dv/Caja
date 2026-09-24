@@ -28,6 +28,13 @@ import {
   DatosNegocio,
 } from '@/types';
 
+// Límite de tiempo para llamadas RPC que no pueden quedarse esperando para
+// siempre — un teléfono conectado a un WiFi sin salida real a internet
+// "cree" que tiene señal, pero fetch() nunca vuelve por sí solo. Se usa con
+// .abortSignal(), el mecanismo nativo que ya trae @supabase/supabase-js 2.x
+// (vía postgrest-js) — no hace falta un Promise.race a mano.
+const TIMEOUT_RPC_MS = 10000;
+
 export async function syncFromSupabase(negocioId: string): Promise<Configuracion | null> {
   try {
     const PAGE_SIZE = 1000;
@@ -622,6 +629,11 @@ export interface ResultadoMovimientoStock {
 export async function aplicarMovimientoStockRemoto(m: MovimientoStock): Promise<ResultadoMovimientoStock> {
   let data: unknown;
   let error: { message?: string } | null;
+  // Propio (no un AbortController manual): AbortSignal.timeout() ya trae su
+  // temporizador y se limpia solo. .aborted después del await distingue
+  // "se agotó el tiempo" de un rechazo real del servidor, sin depender del
+  // texto del mensaje de error.
+  const signal = AbortSignal.timeout(TIMEOUT_RPC_MS);
   try {
     ({ data, error } = await supabase.rpc('aplicar_movimiento_stock', {
       p_id: m.id,
@@ -632,11 +644,17 @@ export async function aplicarMovimientoStockRemoto(m: MovimientoStock): Promise<
       p_ocurrido_en: m.ocurrido_en,
       p_venta_id: m.venta_id ?? null,
       p_nota: m.nota ?? null,
-    }));
+    }).abortSignal(signal));
   } catch (err) {
     return { ok: false, mensaje: (err as { message?: string }).message, permanente: false };
   }
   if (error) {
+    if (signal.aborted) {
+      // Igual que si nunca hubiera vuelto respuesta: se sale por el mismo
+      // camino que un fallo de red transitorio, nunca el de rechazo
+      // definitivo del servidor.
+      return { ok: false, mensaje: 'Tiempo de espera agotado', permanente: false };
+    }
     return { ok: false, mensaje: error.message, permanente: true };
   }
   const nuevoStock = data as number;
@@ -732,6 +750,9 @@ export interface ResultadoMovimientoFiado {
 export async function aplicarMovimientoFiadoRemoto(m: MovimientoFiado): Promise<ResultadoMovimientoFiado> {
   let data: unknown;
   let error: { message?: string } | null;
+  // Ver comentario en aplicarMovimientoStockRemoto: mismo mecanismo de
+  // límite de tiempo, más urgente acá porque hay dinero de por medio.
+  const signal = AbortSignal.timeout(TIMEOUT_RPC_MS);
   try {
     ({ data, error } = await supabase.rpc('aplicar_movimiento_fiado', {
       p_id: m.id,
@@ -745,12 +766,17 @@ export async function aplicarMovimientoFiadoRemoto(m: MovimientoFiado): Promise<
       p_ocurrido_en: m.ocurrido_en,
       p_detalle_items: m.detalleItems ?? null,
       p_metodo_pago: m.metodoPago ?? null,
-    }));
+    }).abortSignal(signal));
   } catch (err) {
     // La llamada ni siquiera volvió con una respuesta — sin red, timeout.
     return { ok: false, mensaje: (err as { message?: string }).message, permanente: false };
   }
   if (error) {
+    if (signal.aborted) {
+      // Se agotó el tiempo de espera — mismo camino que un fallo de red
+      // transitorio, nunca el de rechazo definitivo del servidor.
+      return { ok: false, mensaje: 'Tiempo de espera agotado', permanente: false };
+    }
     // El servidor respondió y rechazó la operación — definitivo.
     return { ok: false, mensaje: error.message, permanente: true };
   }
@@ -895,7 +921,9 @@ export async function getPresupuestosRemoto(
   negocioId: string
 ): Promise<Omit<Presupuesto, 'items' | 'sincronizado'>[] | null> {
   try {
-    const { data, error } = await supabase.rpc('presupuestos_listar', { p_negocio_id: negocioId });
+    const { data, error } = await supabase
+      .rpc('presupuestos_listar', { p_negocio_id: negocioId })
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
     if (error) throw error;
     interface FilaPresupuesto {
       id: string;
