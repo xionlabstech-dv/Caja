@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Producto, MovimientoStock } from '@/types';
+import { Producto, MovimientoStock, MotivoMovimiento } from '@/types';
+import { TipoUI, TIPO_TAB_LABELS, MOTIVOS } from '@/lib/tiposMovimiento';
 import { getProductos, saveProducto, deleteProductoDB, saveMovimiento, actualizarStockLocal } from '@/lib/db';
 import { encolarCrearProducto, encolarEditarProducto, encolarEliminarProducto, encolarAplicarMovimientoStock } from '@/lib/outbox';
 import { createProductoSupabase, updateProductoSupabase, softDeleteProducto, aplicarMovimientoStockRemoto } from '@/lib/sync';
@@ -15,6 +16,7 @@ import Scanner from '@/components/Scanner';
 import ThemeToggle from '@/components/ThemeToggle';
 import StockBadge from '@/components/StockBadge';
 import Button from '@/components/ui/Button';
+import Input from '@/components/ui/Input';
 import BottomSheet from '@/components/ui/BottomSheet';
 import ChipFiltro from '@/components/ui/ChipFiltro';
 import Icon from '@/components/ui/Icon';
@@ -30,7 +32,7 @@ const MOTIVOS_MERMA: { value: MotivoMerma; label: string }[] = [
   { value: 'consumo_propio', label: 'Consumo propio' },
 ];
 
-function fmtCantidadMerma(n: number): string {
+function fmtCantidad(n: number): string {
   return n.toLocaleString('es-VE', { maximumFractionDigits: 3 });
 }
 
@@ -121,6 +123,16 @@ export default function InventarioPage() {
   const [gramosMerma, setGramosMerma] = useState('');
   const [notaMerma, setNotaMerma] = useState('');
   const [guardandoMerma, setGuardandoMerma] = useState(false);
+  // Sheet de "Registrar movimiento" — mismo formulario de Movimientos
+  // (src/app/movimientos/page.tsx), pero sin buscador: el producto ya es
+  // editando, fijo desde el principio.
+  const [showRegistroMovimiento, setShowRegistroMovimiento] = useState(false);
+  const [tipoRM, setTipoRM] = useState<TipoUI>('entrada');
+  const [motivoRM, setMotivoRM] = useState<MotivoMovimiento>('compra');
+  const [cantidadRM, setCantidadRM] = useState('');
+  const [notaRM, setNotaRM] = useState('');
+  const [guardandoRM, setGuardandoRM] = useState(false);
+  const [errorRM, setErrorRM] = useState('');
   // Calculadora auxiliar "costo desde caja/bulto" — nada de esto se
   // persiste, solo el costo unitario resultante se escribe en form.costo.
   const [showCalcCaja, setShowCalcCaja] = useState(false);
@@ -551,6 +563,108 @@ export default function InventarioPage() {
     setShowMerma(false);
     await cargar();
     showToast('Merma registrada');
+  };
+
+  const abrirRegistroMovimiento = () => {
+    setTipoRM('entrada');
+    setMotivoRM(MOTIVOS.entrada[0].value);
+    setCantidadRM('');
+    setNotaRM('');
+    setErrorRM('');
+    setShowRegistroMovimiento(true);
+  };
+
+  const cambiarTipoRM = (t: TipoUI) => {
+    setTipoRM(t);
+    setMotivoRM(MOTIVOS[t][0].value);
+    setCantidadRM('');
+    setErrorRM('');
+  };
+
+  // Mismo patrón que Movimientos: en ajuste se ingresa la cantidad REAL
+  // contada, no la diferencia — se calcula sola contra la existencia actual.
+  const cantidadRMNum = parseFloat(cantidadRM);
+  const stockActualRM = editando?.stock ?? 0;
+  const diferenciaConteoRM =
+    tipoRM === 'ajuste' && cantidadRM.trim() && !isNaN(cantidadRMNum) ? cantidadRMNum - stockActualRM : null;
+
+  const guardarRM = async () => {
+    if (!editando || !negocioId) return;
+    if (!cantidadRM.trim() || isNaN(cantidadRMNum)) { setErrorRM('Ingresa una cantidad válida'); return; }
+    if (tipoRM !== 'ajuste' && cantidadRMNum <= 0) { setErrorRM('La cantidad debe ser mayor a 0'); return; }
+
+    let cantidadAplicada: number;
+    if (tipoRM === 'ajuste') {
+      cantidadAplicada = diferenciaConteoRM ?? 0;
+      if (cantidadAplicada === 0) {
+        setErrorRM('El conteo coincide con la existencia actual — no hay nada que ajustar');
+        return;
+      }
+    } else {
+      // A diferencia de merma (siempre salida): acá el tipo lo elige el
+      // usuario — en entrada la cantidad suma al stock, en salida resta.
+      cantidadAplicada = tipoRM === 'entrada' ? cantidadRMNum : -cantidadRMNum;
+    }
+
+    setGuardandoRM(true);
+    setErrorRM('');
+
+    const now = new Date().toISOString();
+    const stockDespues = (editando.stock ?? 0) + cantidadAplicada;
+    const movimiento: MovimientoStock = {
+      id: crypto.randomUUID(),
+      producto_id: editando.id,
+      producto_nombre: editando.nombre,
+      tipo: tipoRM,
+      motivo: motivoRM,
+      cantidad: cantidadAplicada,
+      stock_resultante: stockDespues,
+      usuario_id: user?.id,
+      usuario_nombre: userNombre || undefined,
+      nota: notaRM.trim() || undefined,
+      ocurrido_en: now,
+      sincronizado: false,
+    };
+
+    // Mismo camino offline-first que ya usa "Registrar merma" en este mismo
+    // archivo — optimista local primero, nunca se revierte solo porque
+    // falle la red.
+    await saveMovimiento(movimiento);
+    await actualizarStockLocal(editando.id, stockDespues);
+    setEditando(e => (e ? { ...e, stock: stockDespues } : e));
+    setForm(f => ({ ...f, stock: String(stockDespues) }));
+
+    if (!isOnline) {
+      await encolarAplicarMovimientoStock(movimiento.id, negocioId);
+      setGuardandoRM(false);
+      setShowRegistroMovimiento(false);
+      await cargar();
+      showToast('Guardado localmente — se sincronizará cuando haya conexión');
+      return;
+    }
+
+    const resultado = await aplicarMovimientoStockRemoto(movimiento);
+    setGuardandoRM(false);
+
+    if (resultado.permanente) {
+      showToast(`No se pudo registrar: ${resultado.mensaje ?? 'el servidor lo rechazó'}`);
+      setShowRegistroMovimiento(false);
+      await cargar();
+      return;
+    }
+
+    if (!resultado.ok) {
+      await encolarAplicarMovimientoStock(movimiento.id, negocioId);
+      setShowRegistroMovimiento(false);
+      await cargar();
+      showToast('Guardado localmente — no se pudo confirmar con el servidor todavía, se reintentará');
+      return;
+    }
+
+    await saveMovimiento({ ...movimiento, sincronizado: true, stock_resultante: resultado.nuevoStock });
+    setShowRegistroMovimiento(false);
+    await cargar();
+    showToast('Movimiento registrado');
   };
 
   // Se bloquea "Existencia actual" en cuanto el producto tiene aunque sea
@@ -1109,14 +1223,24 @@ export default function InventarioPage() {
                         />
                       </div>
                       {editando && (
-                        <button
-                          type="button"
-                          onClick={abrirMerma}
-                          className="w-full flex items-center gap-3 py-3 px-3 rounded-xl bg-gray-100 text-gray-600"
-                        >
-                          <Icon nombre="registrarMerma" tamano={20} />
-                          <span className="font-medium text-sm">Registrar merma</span>
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            onClick={abrirMerma}
+                            className="w-full flex items-center gap-3 py-3 px-3 rounded-xl bg-gray-100 text-gray-600"
+                          >
+                            <Icon nombre="registrarMerma" tamano={20} />
+                            <span className="font-medium text-sm">Registrar merma</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={abrirRegistroMovimiento}
+                            className="w-full flex items-center gap-3 py-3 px-3 rounded-xl bg-gray-100 text-gray-600"
+                          >
+                            <Icon nombre="registrarMovimiento" tamano={20} />
+                            <span className="font-medium text-sm">Registrar movimiento</span>
+                          </button>
+                        </>
                       )}
                     </>
                   )}
@@ -1146,7 +1270,7 @@ export default function InventarioPage() {
             <div>
               <p className="font-caja font-semibold text-texto">{formatearNombre(editando.nombre)}</p>
               <p className="font-caja text-sm text-texto-3">
-                Quedan {fmtCantidadMerma(editando.stock ?? 0)} {editando.por_peso ? 'kg' : 'uds'}
+                Quedan {fmtCantidad(editando.stock ?? 0)} {editando.por_peso ? 'kg' : 'uds'}
               </p>
             </div>
 
@@ -1189,7 +1313,7 @@ export default function InventarioPage() {
                     −
                   </button>
                   <span className="font-caja cifra text-2xl font-bold text-texto w-24 text-center">
-                    {fmtCantidadMerma(cantidadMerma)}
+                    {fmtCantidad(cantidadMerma)}
                   </span>
                   <button
                     type="button"
@@ -1228,7 +1352,92 @@ export default function InventarioPage() {
             >
               {guardandoMerma
                 ? 'Guardando...'
-                : `Registrar ${fmtCantidadMerma(cantidadMermaAplicada)} ${editando.por_peso ? 'kg' : 'uds'}`}
+                : `Registrar ${fmtCantidad(cantidadMermaAplicada)} ${editando.por_peso ? 'kg' : 'uds'}`}
+            </Button>
+          </div>
+        )}
+      </BottomSheet>
+
+      {/* Registrar movimiento — mismo formulario de Movimientos, sin buscador
+          (el producto ya es "editando"), atajo desde el sheet de editar
+          producto, solo admin */}
+      <BottomSheet
+        abierto={showRegistroMovimiento}
+        onCerrar={() => setShowRegistroMovimiento(false)}
+        titulo="Registrar movimiento"
+      >
+        {editando && (
+          <div className="space-y-5">
+            <div>
+              <p className="font-caja font-semibold text-texto">{formatearNombre(editando.nombre)}</p>
+              <p className="font-caja text-sm text-texto-3">
+                Existencia actual: {editando.stock != null ? fmtCantidad(editando.stock) : 'sin inicializar'}
+                {editando.por_peso ? ' kg' : ''}
+              </p>
+            </div>
+
+            <div>
+              <p className="font-caja text-sm font-semibold text-texto-3 mb-2">Tipo</p>
+              <div className="flex gap-2">
+                {(['entrada', 'salida', 'ajuste'] as TipoUI[]).map(t => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => cambiarTipoRM(t)}
+                    className={`flex-1 py-2.5 rounded-[12px] text-sm font-semibold transition-colors ${
+                      tipoRM === t ? 'bg-marca text-texto-invertido' : 'bg-tarjeta-hundida text-texto-2'
+                    }`}
+                  >
+                    {TIPO_TAB_LABELS[t]}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {tipoRM !== 'ajuste' && (
+              <div>
+                <p className="font-caja text-sm font-semibold text-texto-3 mb-2">Motivo</p>
+                <div className="flex flex-wrap gap-2">
+                  {MOTIVOS[tipoRM].map(m => (
+                    <ChipFiltro key={m.value} activo={motivoRM === m.value} onClick={() => setMotivoRM(m.value)}>
+                      {m.label}
+                    </ChipFiltro>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <Input
+              label={
+                tipoRM === 'ajuste'
+                  ? `Cantidad real contada${editando.por_peso ? ' (kilos)' : ''}`
+                  : `Cantidad${editando.por_peso ? ' (kilos)' : ''}`
+              }
+              type="number"
+              step="0.001"
+              value={cantidadRM}
+              onChange={e => setCantidadRM(e.target.value)}
+              placeholder="0"
+            />
+
+            {diferenciaConteoRM !== null && (
+              <p className={`font-caja text-sm font-medium ${diferenciaConteoRM >= 0 ? 'text-marca' : 'text-negativo'}`}>
+                Diferencia: {diferenciaConteoRM >= 0 ? '+' : ''}{fmtCantidad(diferenciaConteoRM)}
+              </p>
+            )}
+
+            <Input
+              label="Nota (opcional)"
+              type="text"
+              value={notaRM}
+              onChange={e => setNotaRM(e.target.value)}
+              placeholder="Opcional"
+            />
+
+            {errorRM && <p className="font-caja text-sm text-negativo">{errorRM}</p>}
+
+            <Button variante="primario" disabled={guardandoRM} onClick={guardarRM} className="w-full">
+              {guardandoRM ? 'Guardando...' : 'Registrar'}
             </Button>
           </div>
         )}
