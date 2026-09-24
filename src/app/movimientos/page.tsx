@@ -5,6 +5,7 @@ import { Producto, MovimientoStock, TipoMovimiento, MotivoMovimiento } from '@/t
 import { getProductos, saveMovimiento, getMovimientos, actualizarStockLocal } from '@/lib/db';
 import { encolarAplicarMovimientoStock } from '@/lib/outbox';
 import { getMovimientosRemoto, aplicarMovimientoStockRemoto } from '@/lib/sync';
+import { TipoUI, TIPO_TAB_LABELS, MOTIVOS } from '@/lib/tiposMovimiento';
 import { useApp } from '@/components/Providers';
 import { useGuardarRuta } from '@/lib/useGuardarRuta';
 import Scanner from '@/components/Scanner';
@@ -27,29 +28,6 @@ function fmtFecha(iso: string) {
 function fmtCantidad(n: number) {
   return n.toLocaleString('es-VE', { maximumFractionDigits: 3 });
 }
-
-type TipoUI = 'entrada' | 'salida' | 'ajuste';
-
-const TIPO_TAB_LABELS: Record<TipoUI, string> = {
-  entrada: 'Entrada',
-  salida: 'Salida',
-  ajuste: 'Ajuste por conteo',
-};
-
-const MOTIVOS: Record<TipoUI, { value: MotivoMovimiento; label: string }[]> = {
-  entrada: [
-    { value: 'compra', label: 'Compra' },
-    { value: 'devolucion_cliente', label: 'Devolución de cliente' },
-  ],
-  salida: [
-    { value: 'consumo_propio', label: 'Consumo propio' },
-    { value: 'dano', label: 'Daño' },
-    { value: 'vencido', label: 'Vencido' },
-    { value: 'perdida', label: 'Pérdida' },
-    { value: 'devolucion_proveedor', label: 'Devolución a proveedor' },
-  ],
-  ajuste: [{ value: 'conteo_fisico', label: 'Conteo físico' }],
-};
 
 const TIPO_LABELS: Record<TipoMovimiento, string> = {
   entrada: 'Entrada', salida: 'Salida', ajuste: 'Ajuste', venta: 'Venta', anulacion: 'Anulación',
