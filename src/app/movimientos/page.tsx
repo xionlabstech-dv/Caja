@@ -491,7 +491,7 @@ export default function MovimientosPage() {
                   type="text"
                   value={nota}
                   onChange={e => setNota(e.target.value)}
-                  placeholder="Ej: Factura #123"
+                  placeholder="Ej: Compra semanal"
                   className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-3 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-400"
                 />
               </div>
