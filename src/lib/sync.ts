@@ -629,13 +629,9 @@ export interface ResultadoMovimientoStock {
 export async function aplicarMovimientoStockRemoto(m: MovimientoStock): Promise<ResultadoMovimientoStock> {
   let data: unknown;
   let error: { message?: string } | null;
-  // Propio (no un AbortController manual): AbortSignal.timeout() ya trae su
-  // temporizador y se limpia solo. .aborted después del await distingue
-  // "se agotó el tiempo" de un rechazo real del servidor, sin depender del
-  // texto del mensaje de error.
-  const signal = AbortSignal.timeout(TIMEOUT_RPC_MS);
+  let status: number;
   try {
-    ({ data, error } = await supabase.rpc('aplicar_movimiento_stock', {
+    ({ data, error, status } = await supabase.rpc('aplicar_movimiento_stock', {
       p_id: m.id,
       p_producto_id: m.producto_id,
       p_tipo: m.tipo,
@@ -644,17 +640,20 @@ export async function aplicarMovimientoStockRemoto(m: MovimientoStock): Promise<
       p_ocurrido_en: m.ocurrido_en,
       p_venta_id: m.venta_id ?? null,
       p_nota: m.nota ?? null,
-    }).abortSignal(signal));
+    }).abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS)));
   } catch (err) {
     return { ok: false, mensaje: (err as { message?: string }).message, permanente: false };
   }
   if (error) {
-    if (signal.aborted) {
-      // Igual que si nunca hubiera vuelto respuesta: se sale por el mismo
-      // camino que un fallo de red transitorio, nunca el de rechazo
-      // definitivo del servidor.
-      return { ok: false, mensaje: 'Tiempo de espera agotado', permanente: false };
+    if (status === 0) {
+      // Nunca hubo respuesta HTTP real — sin señal, DNS caído, timeout
+      // propio, o cualquier otro fallo de conexión (postgrest-js siempre
+      // devuelve status 0 en ese caso, sin lanzar excepción). Siempre
+      // transitorio: mismo camino que un fallo de red normal.
+      return { ok: false, mensaje: error.message, permanente: false };
     }
+    // El servidor sí respondió (status real: 400, 403, 500...) y rechazó
+    // la operación — ahí sí es definitivo.
     return { ok: false, mensaje: error.message, permanente: true };
   }
   const nuevoStock = data as number;
@@ -750,11 +749,11 @@ export interface ResultadoMovimientoFiado {
 export async function aplicarMovimientoFiadoRemoto(m: MovimientoFiado): Promise<ResultadoMovimientoFiado> {
   let data: unknown;
   let error: { message?: string } | null;
+  let status: number;
   // Ver comentario en aplicarMovimientoStockRemoto: mismo mecanismo de
   // límite de tiempo, más urgente acá porque hay dinero de por medio.
-  const signal = AbortSignal.timeout(TIMEOUT_RPC_MS);
   try {
-    ({ data, error } = await supabase.rpc('aplicar_movimiento_fiado', {
+    ({ data, error, status } = await supabase.rpc('aplicar_movimiento_fiado', {
       p_id: m.id,
       p_cliente_id: m.cliente_id,
       p_tipo: m.tipo,
@@ -766,16 +765,17 @@ export async function aplicarMovimientoFiadoRemoto(m: MovimientoFiado): Promise<
       p_ocurrido_en: m.ocurrido_en,
       p_detalle_items: m.detalleItems ?? null,
       p_metodo_pago: m.metodoPago ?? null,
-    }).abortSignal(signal));
+    }).abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS)));
   } catch (err) {
     // La llamada ni siquiera volvió con una respuesta — sin red, timeout.
     return { ok: false, mensaje: (err as { message?: string }).message, permanente: false };
   }
   if (error) {
-    if (signal.aborted) {
-      // Se agotó el tiempo de espera — mismo camino que un fallo de red
-      // transitorio, nunca el de rechazo definitivo del servidor.
-      return { ok: false, mensaje: 'Tiempo de espera agotado', permanente: false };
+    if (status === 0) {
+      // Nunca hubo respuesta HTTP real — sin señal, DNS caído, timeout
+      // propio, o cualquier otro fallo de conexión. Siempre transitorio,
+      // mismo camino que un fallo de red normal.
+      return { ok: false, mensaje: error.message, permanente: false };
     }
     // El servidor respondió y rechazó la operación — definitivo.
     return { ok: false, mensaje: error.message, permanente: true };
