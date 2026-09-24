@@ -24,6 +24,7 @@ import {
   HandCoins,
   Package,
   PackageMinus,
+  PackageOpen,
   History,
   CircleDollarSign,
   Users,
@@ -74,6 +75,7 @@ export const ICONOS = {
   editar: Pencil,
   eliminar: Trash2,
   registrarMerma: PackageMinus,
+  registrarMovimiento: PackageOpen,
   cerrarSesion: LogOut,
   cerrar: X, // no es un concepto de negocio del brief: cierre de hoja/modal/toast
 
