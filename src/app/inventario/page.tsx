@@ -114,7 +114,11 @@ export default function InventarioPage() {
   // producto, nunca reemplaza sus datos (editando/form siguen intactos).
   const [showMerma, setShowMerma] = useState(false);
   const [motivoMerma, setMotivoMerma] = useState<MotivoMerma | null>(null);
+  // Cantidad en unidades (stepper) — solo se usa si el producto NO es por
+  // peso. Por peso pide gramos directo, igual que agregarPorPeso() en Caja
+  // (src/app/page.tsx, sheet "Pesar"), y se convierte a kg más abajo.
   const [cantidadMerma, setCantidadMerma] = useState(1);
+  const [gramosMerma, setGramosMerma] = useState('');
   const [notaMerma, setNotaMerma] = useState('');
   const [guardandoMerma, setGuardandoMerma] = useState(false);
   // Calculadora auxiliar "costo desde caja/bulto" — nada de esto se
@@ -470,30 +474,35 @@ export default function InventarioPage() {
     showToast('Producto eliminado');
   };
 
-  const pasoMerma = editando?.por_peso ? 0.5 : 1;
+  // Gramos → kg, igual que agregarPorPeso() en Caja: precio * (g / 1000).
+  const gramosMermaNum = parseFloat(gramosMerma);
+  const cantidadMermaAplicada = editando?.por_peso
+    ? (gramosMermaNum > 0 ? gramosMermaNum / 1000 : 0)
+    : cantidadMerma;
 
   const abrirMerma = () => {
     setMotivoMerma(null);
-    setCantidadMerma(pasoMerma);
+    setCantidadMerma(1);
+    setGramosMerma('');
     setNotaMerma('');
     setShowMerma(true);
   };
 
   const guardarMerma = async () => {
-    if (!editando || !motivoMerma || !negocioId) return;
+    if (!editando || !motivoMerma || !negocioId || cantidadMermaAplicada <= 0) return;
 
     setGuardandoMerma(true);
 
     const now = new Date().toISOString();
     const stockActual = editando.stock ?? 0;
-    const stockDespues = stockActual - cantidadMerma;
+    const stockDespues = stockActual - cantidadMermaAplicada;
     const movimiento: MovimientoStock = {
       id: crypto.randomUUID(),
       producto_id: editando.id,
       producto_nombre: editando.nombre,
       tipo: 'salida',
       motivo: motivoMerma,
-      cantidad: -cantidadMerma,
+      cantidad: -cantidadMermaAplicada,
       stock_resultante: stockDespues,
       usuario_id: user?.id,
       usuario_nombre: userNombre || undefined,
@@ -1152,32 +1161,49 @@ export default function InventarioPage() {
               </div>
             </div>
 
-            <div>
-              <p className="font-caja text-sm font-semibold text-texto-3 mb-2">Cantidad</p>
-              <div className="flex items-center justify-center gap-4">
-                <button
-                  type="button"
-                  onClick={() => setCantidadMerma(c => Math.max(pasoMerma, c - pasoMerma))}
-                  className="w-11 h-11 rounded-full bg-tarjeta-hundida flex items-center justify-center text-xl font-bold text-texto-2"
-                  aria-label="Restar"
-                >
-                  −
-                </button>
-                <span className="font-caja cifra text-2xl font-bold text-texto w-24 text-center">
-                  {fmtCantidadMerma(cantidadMerma)}{editando.por_peso ? ' kg' : ''}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setCantidadMerma(c => c + pasoMerma)}
-                  className="w-11 h-11 rounded-full bg-marca-suave flex items-center justify-center text-xl font-bold text-marca-suave-texto"
-                  aria-label="Sumar"
-                >
-                  +
-                </button>
+            {editando.por_peso ? (
+              <div>
+                <p className="font-caja text-sm font-semibold text-texto-3 mb-2">Cantidad (gramos)</p>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  step="1"
+                  min="1"
+                  value={gramosMerma}
+                  onChange={e => setGramosMerma(e.target.value)}
+                  placeholder="Gramos"
+                  className="font-caja w-full rounded-[12px] border border-borde-campo bg-tarjeta text-texto px-4 py-4 text-3xl font-bold text-center outline-none focus:border-foco"
+                  autoFocus
+                />
               </div>
-            </div>
+            ) : (
+              <div>
+                <p className="font-caja text-sm font-semibold text-texto-3 mb-2">Cantidad</p>
+                <div className="flex items-center justify-center gap-4">
+                  <button
+                    type="button"
+                    onClick={() => setCantidadMerma(c => Math.max(1, c - 1))}
+                    className="w-11 h-11 rounded-full bg-tarjeta-hundida flex items-center justify-center text-xl font-bold text-texto-2"
+                    aria-label="Restar"
+                  >
+                    −
+                  </button>
+                  <span className="font-caja cifra text-2xl font-bold text-texto w-24 text-center">
+                    {fmtCantidadMerma(cantidadMerma)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setCantidadMerma(c => c + 1)}
+                    className="w-11 h-11 rounded-full bg-marca-suave flex items-center justify-center text-xl font-bold text-marca-suave-texto"
+                    aria-label="Sumar"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+            )}
 
-            {cantidadMerma > (editando.stock ?? 0) && (
+            {cantidadMermaAplicada > (editando.stock ?? 0) && (
               <p className="font-caja text-sm text-aviso bg-aviso-fondo border border-aviso-borde rounded-[12px] px-3 py-2">
                 Supera la existencia actual — igual se puede registrar.
               </p>
@@ -1196,13 +1222,13 @@ export default function InventarioPage() {
 
             <Button
               variante="primario"
-              disabled={!motivoMerma || guardandoMerma}
+              disabled={!motivoMerma || cantidadMermaAplicada <= 0 || guardandoMerma}
               onClick={guardarMerma}
               className="w-full"
             >
               {guardandoMerma
                 ? 'Guardando...'
-                : `Registrar ${fmtCantidadMerma(cantidadMerma)} ${editando.por_peso ? 'kg' : 'uds'}`}
+                : `Registrar ${fmtCantidadMerma(cantidadMermaAplicada)} ${editando.por_peso ? 'kg' : 'uds'}`}
             </Button>
           </div>
         )}
