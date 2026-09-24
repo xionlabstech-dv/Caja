@@ -2,10 +2,10 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Producto } from '@/types';
-import { getProductos, saveProducto, deleteProductoDB } from '@/lib/db';
-import { encolarCrearProducto, encolarEditarProducto, encolarEliminarProducto } from '@/lib/outbox';
-import { createProductoSupabase, updateProductoSupabase, softDeleteProducto } from '@/lib/sync';
+import { Producto, MovimientoStock } from '@/types';
+import { getProductos, saveProducto, deleteProductoDB, saveMovimiento, actualizarStockLocal } from '@/lib/db';
+import { encolarCrearProducto, encolarEditarProducto, encolarEliminarProducto, encolarAplicarMovimientoStock } from '@/lib/outbox';
+import { createProductoSupabase, updateProductoSupabase, softDeleteProducto, aplicarMovimientoStockRemoto } from '@/lib/sync';
 import { precioBS, precioUSD, formatBS, formatUSD } from '@/lib/precio';
 import { stockBajo } from '@/lib/stock';
 import { pareceCodigoBarra } from '@/lib/barcode';
@@ -14,6 +14,25 @@ import { useGuardarRuta } from '@/lib/useGuardarRuta';
 import Scanner from '@/components/Scanner';
 import ThemeToggle from '@/components/ThemeToggle';
 import StockBadge from '@/components/StockBadge';
+import Button from '@/components/ui/Button';
+import BottomSheet from '@/components/ui/BottomSheet';
+import ChipFiltro from '@/components/ui/ChipFiltro';
+import Icon from '@/components/ui/Icon';
+
+// Los 4 motivos de merma que se registran desde acá — un subconjunto fijo
+// de MotivoMovimiento. El resto (compra, devolución, conteo físico...)
+// sigue viviendo solo en Movimientos.
+type MotivoMerma = 'dano' | 'vencido' | 'perdida' | 'consumo_propio';
+const MOTIVOS_MERMA: { value: MotivoMerma; label: string }[] = [
+  { value: 'dano', label: 'Daño' },
+  { value: 'vencido', label: 'Vencido' },
+  { value: 'perdida', label: 'Pérdida' },
+  { value: 'consumo_propio', label: 'Consumo propio' },
+];
+
+function fmtCantidadMerma(n: number): string {
+  return n.toLocaleString('es-VE', { maximumFractionDigits: 3 });
+}
 
 function formatearNombre(nombre: string): string {
   return nombre
@@ -71,7 +90,7 @@ function parseNum(s: string): number {
 export default function InventarioPage() {
   const permitida = useGuardarRuta();
   const router = useRouter();
-  const { tasa, isOnline, negocioId, productosVersion, rol, usaCostos, usaStock, ultimaSincronizacion } = useApp();
+  const { tasa, isOnline, negocioId, productosVersion, rol, usaCostos, usaStock, ultimaSincronizacion, user, userNombre } = useApp();
   const [productos, setProductos] = useState<Producto[]>([]);
   const [cargandoProductos, setCargandoProductos] = useState(true);
   const [busqueda, setBusqueda] = useState('');
@@ -91,6 +110,17 @@ export default function InventarioPage() {
   const [showScanner, setShowScanner] = useState(false);
   const [showScannerBuscar, setShowScannerBuscar] = useState(false);
   const [toast, setToast] = useState('');
+  // Sheet de "Registrar merma" — se abre encima del sheet de editar
+  // producto, nunca reemplaza sus datos (editando/form siguen intactos).
+  const [showMerma, setShowMerma] = useState(false);
+  const [motivoMerma, setMotivoMerma] = useState<MotivoMerma | null>(null);
+  // Cantidad en unidades (stepper) — solo se usa si el producto NO es por
+  // peso. Por peso pide gramos directo, igual que agregarPorPeso() en Caja
+  // (src/app/page.tsx, sheet "Pesar"), y se convierte a kg más abajo.
+  const [cantidadMerma, setCantidadMerma] = useState(1);
+  const [gramosMerma, setGramosMerma] = useState('');
+  const [notaMerma, setNotaMerma] = useState('');
+  const [guardandoMerma, setGuardandoMerma] = useState(false);
   // Calculadora auxiliar "costo desde caja/bulto" — nada de esto se
   // persiste, solo el costo unitario resultante se escribe en form.costo.
   const [showCalcCaja, setShowCalcCaja] = useState(false);
@@ -442,6 +472,85 @@ export default function InventarioPage() {
     }
     await cargar();
     showToast('Producto eliminado');
+  };
+
+  // Gramos → kg, igual que agregarPorPeso() en Caja: precio * (g / 1000).
+  const gramosMermaNum = parseFloat(gramosMerma);
+  const cantidadMermaAplicada = editando?.por_peso
+    ? (gramosMermaNum > 0 ? gramosMermaNum / 1000 : 0)
+    : cantidadMerma;
+
+  const abrirMerma = () => {
+    setMotivoMerma(null);
+    setCantidadMerma(1);
+    setGramosMerma('');
+    setNotaMerma('');
+    setShowMerma(true);
+  };
+
+  const guardarMerma = async () => {
+    if (!editando || !motivoMerma || !negocioId || cantidadMermaAplicada <= 0) return;
+
+    setGuardandoMerma(true);
+
+    const now = new Date().toISOString();
+    const stockActual = editando.stock ?? 0;
+    const stockDespues = stockActual - cantidadMermaAplicada;
+    const movimiento: MovimientoStock = {
+      id: crypto.randomUUID(),
+      producto_id: editando.id,
+      producto_nombre: editando.nombre,
+      tipo: 'salida',
+      motivo: motivoMerma,
+      cantidad: -cantidadMermaAplicada,
+      stock_resultante: stockDespues,
+      usuario_id: user?.id,
+      usuario_nombre: userNombre || undefined,
+      nota: notaMerma.trim() || undefined,
+      ocurrido_en: now,
+      sincronizado: false,
+    };
+
+    // Mismo camino que Movimientos: optimista local primero, nunca se
+    // revierte solo porque falle la red — la merma ya ocurrió en la
+    // realidad. Este sheet no bloquea nada más de la app mientras está
+    // abierto, así que tampoco puede bloquear un cobro si queda olvidado.
+    await saveMovimiento(movimiento);
+    await actualizarStockLocal(editando.id, stockDespues);
+    setEditando(e => (e ? { ...e, stock: stockDespues } : e));
+    setForm(f => ({ ...f, stock: String(stockDespues) }));
+
+    if (!isOnline) {
+      await encolarAplicarMovimientoStock(movimiento.id, negocioId);
+      setGuardandoMerma(false);
+      setShowMerma(false);
+      await cargar();
+      showToast('Guardado localmente — se sincronizará cuando haya conexión');
+      return;
+    }
+
+    const resultado = await aplicarMovimientoStockRemoto(movimiento);
+    setGuardandoMerma(false);
+
+    if (resultado.permanente) {
+      showToast(`No se pudo registrar: ${resultado.mensaje ?? 'el servidor lo rechazó'}`);
+      setShowMerma(false);
+      await cargar();
+      return;
+    }
+
+    if (!resultado.ok) {
+      await encolarAplicarMovimientoStock(movimiento.id, negocioId);
+      setShowMerma(false);
+      await cargar();
+      showToast('Guardado localmente — no se pudo confirmar con el servidor todavía, se reintentará');
+      return;
+    }
+
+    await saveMovimiento({ ...movimiento, sincronizado: true, stock_resultante: resultado.nuevoStock });
+    setShowMerma(false);
+    await cargar();
+    showToast('Merma registrada');
   };
 
   // Se bloquea "Existencia actual" en cuanto el producto tiene aunque sea
@@ -999,6 +1108,16 @@ export default function InventarioPage() {
                           placeholder="Opcional"
                         />
                       </div>
+                      {editando && (
+                        <button
+                          type="button"
+                          onClick={abrirMerma}
+                          className="w-full flex items-center gap-3 py-3 px-3 rounded-xl bg-gray-100 text-gray-600"
+                        >
+                          <Icon nombre="registrarMerma" tamano={20} />
+                          <span className="font-medium text-sm">Registrar merma</span>
+                        </button>
+                      )}
                     </>
                   )}
                 </div>
@@ -1019,6 +1138,101 @@ export default function InventarioPage() {
           </div>
         </div>
       )}
+
+      {/* Registrar merma — atajo desde el sheet de editar producto, solo admin */}
+      <BottomSheet abierto={showMerma} onCerrar={() => setShowMerma(false)} titulo="Registrar merma">
+        {editando && (
+          <div className="space-y-5">
+            <div>
+              <p className="font-caja font-semibold text-texto">{formatearNombre(editando.nombre)}</p>
+              <p className="font-caja text-sm text-texto-3">
+                Quedan {fmtCantidadMerma(editando.stock ?? 0)} {editando.por_peso ? 'kg' : 'uds'}
+              </p>
+            </div>
+
+            <div>
+              <p className="font-caja text-sm font-semibold text-texto-3 mb-2">Motivo</p>
+              <div className="flex flex-wrap gap-2">
+                {MOTIVOS_MERMA.map(m => (
+                  <ChipFiltro key={m.value} activo={motivoMerma === m.value} onClick={() => setMotivoMerma(m.value)}>
+                    {m.label}
+                  </ChipFiltro>
+                ))}
+              </div>
+            </div>
+
+            {editando.por_peso ? (
+              <div>
+                <p className="font-caja text-sm font-semibold text-texto-3 mb-2">Cantidad (gramos)</p>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  step="1"
+                  min="1"
+                  value={gramosMerma}
+                  onChange={e => setGramosMerma(e.target.value)}
+                  placeholder="Gramos"
+                  className="font-caja w-full rounded-[12px] border border-borde-campo bg-tarjeta text-texto px-4 py-4 text-3xl font-bold text-center outline-none focus:border-foco"
+                  autoFocus
+                />
+              </div>
+            ) : (
+              <div>
+                <p className="font-caja text-sm font-semibold text-texto-3 mb-2">Cantidad</p>
+                <div className="flex items-center justify-center gap-4">
+                  <button
+                    type="button"
+                    onClick={() => setCantidadMerma(c => Math.max(1, c - 1))}
+                    className="w-11 h-11 rounded-full bg-tarjeta-hundida flex items-center justify-center text-xl font-bold text-texto-2"
+                    aria-label="Restar"
+                  >
+                    −
+                  </button>
+                  <span className="font-caja cifra text-2xl font-bold text-texto w-24 text-center">
+                    {fmtCantidadMerma(cantidadMerma)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setCantidadMerma(c => c + 1)}
+                    className="w-11 h-11 rounded-full bg-marca-suave flex items-center justify-center text-xl font-bold text-marca-suave-texto"
+                    aria-label="Sumar"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {cantidadMermaAplicada > (editando.stock ?? 0) && (
+              <p className="font-caja text-sm text-aviso bg-aviso-fondo border border-aviso-borde rounded-[12px] px-3 py-2">
+                Supera la existencia actual — igual se puede registrar.
+              </p>
+            )}
+
+            <div>
+              <label className="font-caja text-sm font-semibold text-texto-3 mb-2 block">Nota (opcional)</label>
+              <textarea
+                value={notaMerma}
+                onChange={e => setNotaMerma(e.target.value)}
+                rows={2}
+                className="font-caja w-full rounded-[12px] border border-borde-campo bg-tarjeta text-texto text-base px-4 py-3 placeholder:text-texto-4 outline-none focus:border-foco"
+                placeholder="Opcional"
+              />
+            </div>
+
+            <Button
+              variante="primario"
+              disabled={!motivoMerma || cantidadMermaAplicada <= 0 || guardandoMerma}
+              onClick={guardarMerma}
+              className="w-full"
+            >
+              {guardandoMerma
+                ? 'Guardando...'
+                : `Registrar ${fmtCantidadMerma(cantidadMermaAplicada)} ${editando.por_peso ? 'kg' : 'uds'}`}
+            </Button>
+          </div>
+        )}
+      </BottomSheet>
 
       {/* Confirm delete */}
       {confirmDelete && (
