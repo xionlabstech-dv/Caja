@@ -1,3 +1,13 @@
+/* Inter autoalojada (@fontsource, sin CDN en tiempo real) — solo queda
+   disponible como fuente para las clases .font-caja/.cifra de más abajo.
+   No se aplica a `body`: las pantallas viejas siguen con la fuente del
+   sistema hasta que se migren una por una. */
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/500.css';
+@import '@fontsource/inter/600.css';
+@import '@fontsource/inter/700.css';
+@import '@fontsource/inter/800.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -20,6 +30,116 @@ body {
 input[type='number']::-webkit-inner-spin-button,
 input[type='number']::-webkit-outer-spin-button {
   -webkit-appearance: none;
+}
+
+/* ── Sistema de diseño — tokens de color (Brief 01) ───────────────────────────
+   Fuente: design-system/tokens/colors.css en la rama referencias-diseno, con
+   dos resoluciones del brief sobre ese archivo: la tarjeta tinta usa #0C1A14
+   fijo en los dos modos (el archivo traía --superficie-contraste variable,
+   descartado); todo lo demás replica los alias semánticos del archivo tal
+   cual. El oscuro responde a la misma clase `.dark` que ya usa el resto de
+   la app — no se agrega ningún mecanismo nuevo. Estas variables no se usan
+   todavía en ninguna pantalla existente (ver componentes en
+   src/components/ui/ y la página /sistema-diseno). */
+:root {
+  --marca: #04875A;
+  --marca-presion: #036B48;
+  --marca-suave: #E7F6EF;
+  --marca-suave-texto: #036B48;
+  /* Foco de campo (--verde-400 en colors.css) — un tono fijo de la familia
+     verde, no un alias semántico: no cambia entre claro y oscuro. */
+  --foco: #18AC79;
+
+  --tinta: #0C1A14;
+  --tinta-texto: #FFFFFF;
+  --tinta-etiqueta: #4FC298;
+
+  --superficie: #F9FAFB;
+  --superficie-barra: #FFFFFF;
+  --tarjeta: #FFFFFF;
+  --tarjeta-hundida: #F3F4F6;
+
+  --borde-tarjeta: #F3F4F6;
+  --borde-campo: #E5E7EB;
+  --borde-divisor: #F3F4F6;
+
+  --texto: #111827;
+  --texto-2: #374151;
+  --texto-3: #6B7280;
+  --texto-4: #9CA3AF;
+  --texto-invertido: #FFFFFF;
+
+  --negativo: #DC2626;
+  --negativo-fondo: #FEF2F2;
+  --negativo-borde: #FEE2E2;
+  --deuda: #EA580C;
+  --deuda-fondo: #FFF7ED;
+  --aviso: #B45309;
+  --aviso-fondo: #FFFBEB;
+  --aviso-borde: #FDE68A;
+  --informativo: #1D4ED8;
+  --informativo-fondo: #EFF6FF;
+
+  --overlay: rgba(0, 0, 0, .4);
+  --toast-fondo: #111827;
+  --toast-texto: #FFFFFF;
+}
+
+.dark {
+  --marca: #0A9A66;
+  --marca-presion: #04875A;
+  --marca-suave: rgba(10, 154, 102, .14);
+  --marca-suave-texto: #4FC298;
+
+  /* Tinta: fija, no cambia en oscuro (resolución del brief). */
+
+  --superficie: #0F172A;
+  --superficie-barra: #1E293B;
+  --tarjeta: #1E293B;
+  --tarjeta-hundida: #334155;
+
+  --borde-tarjeta: #334155;
+  --borde-campo: #475569;
+  --borde-divisor: #334155;
+
+  --texto: #F1F5F9;
+  --texto-2: #CBD5E1;
+  --texto-3: #94A3B8;
+  --texto-4: #64748B;
+
+  --negativo: #FCA5A5;
+  --negativo-fondo: rgba(239, 68, 68, .1);
+  --negativo-borde: rgba(239, 68, 68, .3);
+  --deuda: #FB923C;
+  --deuda-fondo: rgba(234, 88, 12, .14);
+  --aviso: #FCD34D;
+  --aviso-fondo: rgba(180, 83, 9, .2);
+  --aviso-borde: rgba(180, 83, 9, .4);
+  --informativo: #93C5FD;
+  --informativo-fondo: rgba(29, 78, 216, .22);
+
+  --toast-fondo: #111827;
+  --toast-texto: #FFFFFF;
+}
+
+/* ── Sistema de diseño — utilidades de tipografía (Brief 01) ─────────────────
+   .font-caja: Inter real (autoalojada) para pantallas nuevas — el body
+   sigue sin tocarse. .cifra: cifras tabulares + cero rasurado, para montos. */
+.font-caja {
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+.cifra {
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+
+/* Entrada de hoja inferior (--dur-hoja 220ms / --curva-salida en
+   design-system/tokens/motion.css) — usada por BottomSheet. */
+@keyframes caja-hoja-entra {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+.caja-hoja-entra {
+  animation: caja-hoja-entra 220ms ease-out;
 }
 
 /* ── Dark mode semantic overrides ───────────────────────────────────────────── */
