@@ -334,6 +334,12 @@ export interface DatosNegocio {
   rif?: string;
   formatoComprobante?: 'ticket' | 'carta' | 'media_carta';
   formatoPresupuesto?: 'carta' | 'media_carta';
+  // Fecha en que un admin pidió cerrar/eliminar el negocio (solicitar_
+  // eliminacion_negocio) — null/undefined si no hay solicitud activa. Se
+  // borra al ejecutarse el cierre o al cancelar la solicitud (cancelar_
+  // eliminacion_negocio). Solo lectura desde el cliente: la columna no se
+  // escribe con un UPDATE directo, solo a través de esas dos funciones.
+  solicitudEliminacionEn?: string | null;
 }
 
 export type TipoPendiente =
