@@ -8,8 +8,6 @@ import {
   getProductos,
   getProductoPorCodigo,
   saveVenta,
-  setCachedUsaCostos,
-  setCachedUsaStock,
   saveMovimiento,
   actualizarStockLocal,
   getClientesFiado,
@@ -22,15 +20,12 @@ import {
 } from '@/lib/db';
 import {
   encolarRegistrarVenta,
-  encolarActualizarUsaCostos,
-  encolarActualizarUsaStock,
   encolarAplicarMovimientoStock,
   encolarCrearClienteFiado,
   encolarAplicarMovimientoFiado,
   encolarActualizarPresupuesto,
   onFalloPermanente,
 } from '@/lib/outbox';
-import { updateUsaCostos, updateUsaStock, conCandado } from '@/lib/sync';
 import { precioBS, precioUSD, costoUSD, formatBS, formatUSD } from '@/lib/precio';
 import { pareceCodigoBarra } from '@/lib/barcode';
 import { compartirComprobante } from '@/lib/comprobante';
@@ -38,7 +33,6 @@ import { useApp } from '@/components/Providers';
 import Scanner from '@/components/Scanner';
 import ThemeToggle from '@/components/ThemeToggle';
 import StockBadge from '@/components/StockBadge';
-import { supabase } from '@/lib/supabase';
 
 function avatarColor(nombre: string): string {
   const idx = nombre.charCodeAt(0) % 8;
@@ -78,8 +72,8 @@ function reproducirBeep() {
 
 export default function CajaPage() {
   const {
-    tasa, isOnline, negocioNombre, datosNegocio, signOut, user, pendientesCount, negocioId, rol, userNombre,
-    productosVersion, usaCostos, setUsaCostos, usaStock, setUsaStock, ultimaSincronizacion,
+    tasa, isOnline, negocioNombre, datosNegocio, user, pendientesCount, negocioId, rol, userNombre,
+    productosVersion, usaStock, ultimaSincronizacion,
     carrito, setCarrito, showCarrito, setShowCarrito,
     presupuestoConvirtiendoId, setPresupuestoConvirtiendoId,
     presupuestoClienteNombre,
@@ -105,13 +99,6 @@ export default function CajaPage() {
   const [metodoMixtoActual, setMetodoMixtoActual] = useState<MetodoPago | null>(null);
   const [montoMixtoInput, setMontoMixtoInput] = useState('');
   const [toast, setToast] = useState('');
-  const [showPerfil, setShowPerfil] = useState(false);
-  const [passActual, setPassActual] = useState('');
-  const [passNueva, setPassNueva] = useState('');
-  const [passConfirmar, setPassConfirmar] = useState('');
-  const [passError, setPassError] = useState('');
-  const [passCargando, setPassCargando] = useState(false);
-  const [showConfirmStock, setShowConfirmStock] = useState(false);
   const [showConfirmVaciar, setShowConfirmVaciar] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -171,142 +158,6 @@ export default function CajaPage() {
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(''), 2500);
-  };
-
-  // El switch responde al instante (estado + cache local), pero solo se da
-  // por guardado cuando hay confirmación real: con red, se espera el
-  // resultado verificado de la escritura; sin red, no hay forma de
-  // confirmar nada ahora mismo, así que se encola para reintentar al
-  // reconectar (offline-first, igual que la tasa).
-  const handleToggleUsaCostos = async () => {
-    if (!negocioId) return;
-    const anterior = usaCostos;
-    const nuevo = !usaCostos;
-    await setCachedUsaCostos(nuevo);
-    setUsaCostos(nuevo);
-
-    if (!isOnline) {
-      await encolarActualizarUsaCostos(nuevo, negocioId);
-      showToast('Guardado localmente — se sincronizará cuando haya conexión');
-      return;
-    }
-
-    // updateUsaCostos ahora verifica que el UPDATE haya afectado una fila de
-    // verdad (ver comentario en sync.ts) — si no, no hubo guardado real
-    // (ej. RLS lo bloqueó en silencio) y no hay que dejar el switch
-    // mostrando un estado que nunca se persistió.
-    const resultado = await updateUsaCostos(nuevo, negocioId);
-    if (!resultado.ok) {
-      if (resultado.permanente === false) {
-        // No hubo respuesta real (sin señal, timeout) — no es un rechazo
-        // del servidor, no hay que revertir: se encola igual que offline.
-        await encolarActualizarUsaCostos(nuevo, negocioId);
-        showToast('Guardado localmente — se sincronizará cuando haya conexión');
-        return;
-      }
-      await setCachedUsaCostos(anterior);
-      setUsaCostos(anterior);
-      showToast('No se pudo guardar el cambio. Intenta de nuevo.');
-      return;
-    }
-    showToast(nuevo ? 'Control de costos activado' : 'Control de costos desactivado');
-  };
-
-  // Activar pide confirmación explícita (el compromiso de registrar toda la
-  // mercancía que entra); desactivar no la necesita — no borra datos, solo
-  // deja de mostrarlos.
-  const handleToggleUsaStock = () => {
-    if (!usaStock) {
-      setShowConfirmStock(true);
-      return;
-    }
-    aplicarUsaStock(false);
-  };
-
-  const confirmarActivarStock = () => {
-    setShowConfirmStock(false);
-    aplicarUsaStock(true);
-  };
-
-  // Mismo patrón offline-first + verificación que usa_costos.
-  const aplicarUsaStock = async (nuevo: boolean) => {
-    if (!negocioId) return;
-    const anterior = usaStock;
-    await setCachedUsaStock(nuevo);
-    setUsaStock(nuevo);
-
-    if (!isOnline) {
-      await encolarActualizarUsaStock(nuevo, negocioId);
-      showToast('Guardado localmente — se sincronizará cuando haya conexión');
-      return;
-    }
-
-    const resultado = await updateUsaStock(nuevo, negocioId);
-    if (!resultado.ok) {
-      if (resultado.permanente === false) {
-        await encolarActualizarUsaStock(nuevo, negocioId);
-        showToast('Guardado localmente — se sincronizará cuando haya conexión');
-        return;
-      }
-      await setCachedUsaStock(anterior);
-      setUsaStock(anterior);
-      showToast('No se pudo guardar el cambio. Intenta de nuevo.');
-      return;
-    }
-    showToast(nuevo ? 'Control de inventario activado' : 'Control de inventario desactivado');
-  };
-
-  const abrirPerfil = () => {
-    setPassActual('');
-    setPassNueva('');
-    setPassConfirmar('');
-    setPassError('');
-    setShowPerfil(true);
-  };
-
-  const cambiarPassword = async () => {
-    setPassError('');
-    if (passNueva !== passConfirmar) {
-      setPassError('Las contraseñas no coinciden');
-      return;
-    }
-    if (passNueva.length < 6) {
-      setPassError('La nueva contraseña debe tener al menos 6 caracteres');
-      return;
-    }
-    setPassCargando(true);
-
-    // Candado: si el teléfono cree tener señal pero no llega a internet de
-    // verdad, no hay forma de distinguir "no hubo respuesta" de "la
-    // contraseña está mal" sin esto — antes las dos caían en el mismo
-    // mensaje de "Contraseña actual incorrecta".
-    const resultadoSignIn = await conCandado(supabase.auth.signInWithPassword({
-      email: user?.email ?? '',
-      password: passActual,
-    }));
-    if (resultadoSignIn === 'candado') {
-      setPassError('No se pudo confirmar, verifica tu conexión e intenta de nuevo');
-      setPassCargando(false);
-      return;
-    }
-    if (resultadoSignIn.error) {
-      setPassError('Contraseña actual incorrecta');
-      setPassCargando(false);
-      return;
-    }
-
-    const resultadoUpdate = await conCandado(supabase.auth.updateUser({ password: passNueva }));
-    setPassCargando(false);
-    if (resultadoUpdate === 'candado') {
-      setPassError('No se pudo confirmar, verifica tu conexión e intenta de nuevo');
-      return;
-    }
-    if (resultadoUpdate.error) {
-      setPassError('Error al actualizar la contraseña');
-      return;
-    }
-    setShowPerfil(false);
-    showToast('Contraseña actualizada');
   };
 
   const productosFiltrados = busqueda
@@ -849,9 +700,9 @@ export default function CajaPage() {
       {/* Header */}
       <header className="bg-emerald-600 text-white px-4 pt-4 pb-3 flex items-center justify-between sticky top-0 z-30">
         <button
-          onClick={abrirPerfil}
+          onClick={() => router.push('/perfil')}
           className="flex items-center gap-1.5 min-w-0 text-left"
-          aria-label="Ver perfil del negocio"
+          aria-label="Ver mi perfil"
         >
           <div className="min-w-0">
             <h1 className="text-xl font-bold truncate">
@@ -865,7 +716,7 @@ export default function CajaPage() {
             )}
           </div>
           <svg
-            className={`w-4 h-4 text-emerald-200 flex-shrink-0 transition-transform ${showPerfil ? 'rotate-180' : ''}`}
+            className="w-4 h-4 text-emerald-200 flex-shrink-0"
             fill="none" viewBox="0 0 24 24" stroke="currentColor"
           >
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -1567,194 +1418,6 @@ export default function CajaPage() {
 
       {/* Scanner */}
       {showScanner && <Scanner continuous onDetect={handleScan} onClose={() => setShowScanner(false)} />}
-
-      {/* Profile sheet */}
-      {showPerfil && (
-        <div className="fixed inset-0 z-50 flex items-end">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setShowPerfil(false)} />
-          <div className="relative w-full max-w-lg mx-auto bg-white dark:bg-slate-800 rounded-t-2xl max-h-[90vh] overflow-y-auto flex flex-col">
-            {/* Drag handle + close */}
-            <div className="flex items-center justify-between px-4 pt-4 pb-0">
-              <div className="w-8 h-1 bg-gray-200 dark:bg-slate-600 rounded-full mx-auto" />
-              <button
-                onClick={() => setShowPerfil(false)}
-                className="absolute right-4 top-4 p-1 text-gray-400 dark:text-gray-500"
-              >
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            {/* Avatar + usuario en sesión */}
-            <div className="flex flex-col items-center py-5 px-6">
-              <div className={`w-20 h-20 rounded-full ${avatarColor(userNombre || negocioNombre || 'U')} flex items-center justify-center mb-3 shadow-md`}>
-                <span className="text-white text-3xl font-bold">
-                  {(userNombre || negocioNombre || 'U').charAt(0).toUpperCase()}
-                </span>
-              </div>
-              <p className="text-xl font-bold text-gray-900 dark:text-white">{userNombre || 'Usuario'}</p>
-              <p className="text-sm text-gray-400 mt-0.5">
-                {negocioNombre || 'Negocio'}
-                {rol && ` · ${rol === 'admin' ? 'Admin' : 'Cajero'}`}
-              </p>
-            </div>
-
-            <div className="border-t border-gray-100 dark:border-slate-700 mx-4" />
-
-            {/* Change password */}
-            <div className="p-4 space-y-3">
-              <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                Cambiar contraseña
-              </p>
-              <input
-                type="password"
-                value={passActual}
-                onChange={e => { setPassActual(e.target.value); setPassError(''); }}
-                placeholder="Contraseña actual"
-                className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-3 text-base bg-white dark:bg-slate-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-emerald-400"
-              />
-              <input
-                type="password"
-                value={passNueva}
-                onChange={e => { setPassNueva(e.target.value); setPassError(''); }}
-                placeholder="Nueva contraseña"
-                className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-3 text-base bg-white dark:bg-slate-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-emerald-400"
-              />
-              <input
-                type="password"
-                value={passConfirmar}
-                onChange={e => { setPassConfirmar(e.target.value); setPassError(''); }}
-                placeholder="Confirmar nueva contraseña"
-                className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-3 text-base bg-white dark:bg-slate-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-emerald-400"
-              />
-              {passError && (
-                <p className="text-red-500 dark:text-red-400 text-sm">{passError}</p>
-              )}
-              <button
-                onClick={cambiarPassword}
-                disabled={passCargando || !passActual || !passNueva || !passConfirmar}
-                className="w-full bg-emerald-600 text-white py-3 rounded-xl font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                {passCargando ? 'Guardando...' : 'Guardar contraseña'}
-              </button>
-            </div>
-
-            {rol === 'admin' && (
-              <>
-                <div className="border-t border-gray-100 dark:border-slate-700 mx-4" />
-                <div className="p-4 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
-                      Llevar control de costos y ganancias
-                    </p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      Agrega costo a productos y ganancia a reportes
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={usaCostos}
-                    onClick={handleToggleUsaCostos}
-                    className={`relative inline-flex w-11 h-6 rounded-full transition-colors flex-shrink-0 ${
-                      usaCostos ? 'bg-emerald-600' : 'bg-gray-200 dark:bg-slate-600'
-                    }`}
-                  >
-                    <span
-                      className={`inline-block w-5 h-5 m-0.5 bg-white rounded-full shadow-sm transition-transform ${
-                        usaCostos ? 'translate-x-5' : 'translate-x-0'
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                <div className="border-t border-gray-100 dark:border-slate-700 mx-4" />
-                <div className="p-4 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
-                      Control de inventario
-                    </p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      Descuenta existencias al vender y avisa stock bajo
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={usaStock}
-                    onClick={handleToggleUsaStock}
-                    className={`relative inline-flex w-11 h-6 rounded-full transition-colors flex-shrink-0 ${
-                      usaStock ? 'bg-emerald-600' : 'bg-gray-200 dark:bg-slate-600'
-                    }`}
-                  >
-                    <span
-                      className={`inline-block w-5 h-5 m-0.5 bg-white rounded-full shadow-sm transition-transform ${
-                        usaStock ? 'translate-x-5' : 'translate-x-0'
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                <div className="border-t border-gray-100 dark:border-slate-700 mx-4" />
-                <div className="p-4">
-                  <button
-                    onClick={() => { setShowPerfil(false); router.push('/usuarios'); }}
-                    className="w-full py-3 rounded-xl font-semibold text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-slate-700 flex items-center justify-center gap-2"
-                  >
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                        d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-4.13a4 4 0 100-8 4 4 0 000 8zm6 4a4 4 0 10-8 0 4 4 0 008 0z" />
-                    </svg>
-                    Usuarios
-                  </button>
-                </div>
-              </>
-            )}
-
-            <div className="border-t border-gray-100 dark:border-slate-700 mx-4" />
-
-            {/* Logout */}
-            <div className="p-4 pb-8">
-              <button
-                onClick={() => { setShowPerfil(false); signOut(); }}
-                className="w-full py-3 rounded-xl font-semibold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20"
-              >
-                Cerrar sesión
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Confirmar activación de control de inventario */}
-      {showConfirmStock && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setShowConfirmStock(false)} />
-          <div className="relative bg-white dark:bg-slate-800 rounded-2xl w-full max-w-sm shadow-xl p-5">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Activar control de inventario</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
-              El control de inventario solo funciona si registras la mercancía que entra.
-              Si no lo haces, las existencias dejarán de ser confiables en pocas semanas.
-              ¿Activar?
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowConfirmStock(false)}
-                className="flex-1 py-3 rounded-xl bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 font-semibold"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={confirmarActivarStock}
-                className="flex-1 py-3 rounded-xl bg-emerald-600 text-white font-bold"
-              >
-                Sí, activar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {showConfirmVaciar && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
