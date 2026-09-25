@@ -240,7 +240,7 @@ export default function PerfilPage() {
           </svg>
         </button>
         <h1 className="flex-1 min-w-0 text-base font-bold text-texto truncate">Perfil</h1>
-        <ThemeToggle />
+        <ThemeToggle variant="neutro" />
       </header>
 
       <div className="p-4 space-y-5">

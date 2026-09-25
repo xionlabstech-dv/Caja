@@ -2,13 +2,27 @@
 
 import { useApp } from './Providers';
 
-export default function ThemeToggle() {
+interface ThemeToggleProps {
+  // 'verde': header emerald-600 de siempre (default — no rompe las pantallas
+  // que todavía no se migraron al header neutro). 'neutro': header
+  // bg-superficie-barra de /datos-negocio, /perfil, /usuarios — un ícono
+  // blanco fijo ahí desaparece en modo claro (--superficie-barra es casi
+  // blanco), así que necesita colores de token en vez del blanco fijo. No
+  // se puede compartir un solo color entre los dos: contra emerald-600,
+  // texto-3/texto no dan el contraste mínimo (~1.3:1, hace falta 3:1).
+  variant?: 'verde' | 'neutro';
+}
+
+export default function ThemeToggle({ variant = 'verde' }: ThemeToggleProps) {
   const { theme, toggleTheme } = useApp();
+  const colores = variant === 'neutro'
+    ? 'text-texto-3 hover:text-texto hover:bg-tarjeta-hundida'
+    : 'text-white/80 hover:text-white hover:bg-white/10';
   return (
     <button
       onClick={toggleTheme}
       aria-label={theme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
-      className="p-2 rounded-xl text-white/80 hover:text-white hover:bg-white/10 transition-colors"
+      className={`p-2 rounded-xl transition-colors ${colores}`}
     >
       {theme === 'dark' ? (
         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

@@ -279,7 +279,7 @@ export default function DatosNegocioPage() {
               Editar
             </button>
           )}
-          <ThemeToggle />
+          <ThemeToggle variant="neutro" />
         </div>
       </header>
 
