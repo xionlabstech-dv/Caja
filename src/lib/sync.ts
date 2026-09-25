@@ -275,6 +275,7 @@ export async function createClienteFiadoSupabase(
         creado_por_nombre: cliente.creado_por_nombre ?? null,
       })
       .select()
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS))
       .single();
 
     if (error) throw error;
@@ -329,7 +330,7 @@ export async function sincronizarCierre(cierre: CierreCaja, negocioId: string): 
       creado_en: cierre.creado_en,
       usuario_id: cierre.usuario_id ?? null,
       usuario_nombre: cierre.usuario_nombre ?? null,
-    });
+    }).abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
     if (error) {
       // Mismo id ya insertado en un intento previo (retry de la cola offline):
       // el cierre ya está sincronizado, no es un fallo real.
@@ -355,7 +356,7 @@ export async function sincronizarVenta(venta: Venta, negocioId: string): Promise
       vendida_en: venta.fecha,
       usuario_id: venta.usuario_id ?? null,
       usuario_nombre: venta.usuario_nombre ?? null,
-    });
+    }).abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
 
     if (ventaError && (ventaError as { code?: string }).code !== '23505') {
       throw ventaError;
@@ -380,7 +381,10 @@ export async function sincronizarVenta(venta: Venta, negocioId: string): Promise
     });
 
     if (itemsPayload.length > 0) {
-      const { error: itemsError } = await supabase.from('venta_items').insert(itemsPayload);
+      const { error: itemsError } = await supabase
+        .from('venta_items')
+        .insert(itemsPayload)
+        .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
       if (itemsError && (itemsError as { code?: string }).code !== '23505') {
         throw itemsError;
       }
@@ -400,7 +404,10 @@ export async function sincronizarVenta(venta: Venta, negocioId: string): Promise
     }));
 
     if (pagosPayload.length > 0) {
-      const { error: pagosError } = await supabase.from('venta_pagos').insert(pagosPayload);
+      const { error: pagosError } = await supabase
+        .from('venta_pagos')
+        .insert(pagosPayload)
+        .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
       if (pagosError && (pagosError as { code?: string }).code !== '23505') {
         throw pagosError;
       }
@@ -419,7 +426,8 @@ export async function actualizarCierreIdVentas(ventaIds: string[], cierreId: str
       .from('ventas')
       .update({ cierre_id: cierreId })
       .in('id', ventaIds)
-      .select('id');
+      .select('id')
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
     if (error) throw error;
     // Update masivo: RLS puede bloquear algunas filas del lote y dejar pasar
     // otras sin lanzar error — se compara cuántas se pidieron contra cuántas
@@ -887,7 +895,7 @@ export async function sincronizarPresupuesto(presupuesto: Presupuesto, negocioId
       creado_por: presupuesto.creado_por ?? null,
       creado_por_nombre: presupuesto.creado_por_nombre ?? null,
       creado_en: presupuesto.creado_en,
-    });
+    }).abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
     if (error && (error as { code?: string }).code !== '23505') throw error;
 
     const itemsPayload = (presupuesto.items ?? []).map(item => ({
@@ -902,7 +910,10 @@ export async function sincronizarPresupuesto(presupuesto: Presupuesto, negocioId
     }));
 
     if (itemsPayload.length > 0) {
-      const { error: itemsError } = await supabase.from('presupuesto_items').insert(itemsPayload);
+      const { error: itemsError } = await supabase
+        .from('presupuesto_items')
+        .insert(itemsPayload)
+        .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
       if (itemsError && (itemsError as { code?: string }).code !== '23505') throw itemsError;
     }
 
@@ -990,7 +1001,12 @@ export async function actualizarPresupuestoSupabase(
   cambios: Partial<Pick<Presupuesto, 'estado' | 'convertido_en' | 'venta_id' | 'anulado_en' | 'motivo_anulacion'>>
 ): Promise<boolean> {
   try {
-    const { data, error } = await supabase.from('presupuestos').update(cambios).eq('id', id).select('id');
+    const { data, error } = await supabase
+      .from('presupuestos')
+      .update(cambios)
+      .eq('id', id)
+      .select('id')
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
     if (error) throw error;
     return !!data && data.length > 0;
   } catch {
