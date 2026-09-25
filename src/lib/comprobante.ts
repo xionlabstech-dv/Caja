@@ -1,4 +1,4 @@
-import { Venta, MetodoPago, Presupuesto, DatosNegocio } from '@/types';
+import { Venta, VentaItem, PagoVenta, MetodoPago, Presupuesto, PresupuestoItem, DatosNegocio } from '@/types';
 import { formatBS, formatUSD } from './precio';
 
 // Documentos de venta y de presupuesto — NUNCA fiscales (ver la leyenda que
@@ -7,6 +7,13 @@ import { formatBS, formatUSD } from './precio';
 // instalada y esta es una PWA que corre en teléfonos de gama baja con mala
 // señal — una imagen pesa menos, no agrega dependencias al bundle, y además
 // se previsualiza mejor dentro del chat de WhatsApp que un PDF.
+//
+// Cinco formatos posibles (los mismos identificadores que usa la columna en
+// Supabase, negocios.formato_comprobante/formato_presupuesto — no hace falta
+// traducir a otro vocabulario porque acá nunca se compara contra el string
+// "media" que usa el prop de la referencia de Diseño):
+//   Comprobante de venta: ticket | carta | media_carta
+//   Presupuesto:                  carta | media_carta
 
 const METODO_LABELS: Record<MetodoPago, string> = {
   efectivo_bs: 'Efectivo Bs',
@@ -17,25 +24,36 @@ const METODO_LABELS: Record<MetodoPago, string> = {
   fiado: 'Fiado',
 };
 
-const ANCHO = 560;
-const PAD = 24;
+const LEYENDA_FISCAL = 'Este documento no tiene validez fiscal';
+
 const ESCALA = 2;
+const VERDE_MARCA = '#04875A';
+const COLOR_TINTA = '#111827';
+const COLOR_TEXTO = '#111827';
+const COLOR_TEXTO_SUAVE = '#374151';
+const COLOR_TEXTO_APOYO = '#6b7280';
+const COLOR_DIVISOR = '#e5e7eb';
+const COLOR_ROJO = '#dc2626';
+const COLOR_NARANJA = '#c2410c';
+const COLOR_NARANJA_BG = '#fff7ed';
 
-// Columnas de la tabla de items — Descripción / Cantidad / Precio unitario
-// / Total — compartidas por comprobante de venta y presupuesto. Los bordes
-// derechos de cada columna (el texto crece hacia la izquierda desde ahí).
-const COL_CANT_X = ANCHO - PAD - 180;
-const COL_PRECIO_X = ANCHO - PAD - 90;
-const COL_TOTAL_X = ANCHO - PAD;
-const COL_DESC_ANCHO_MAX = COL_CANT_X - PAD - 10;
+// --- Utilidades compartidas por los cinco formatos ---
 
-function trazarLinea(ctx: CanvasRenderingContext2D, ancho: number, y: number) {
-  ctx.strokeStyle = '#e5e7eb';
-  ctx.lineWidth = 1;
+function trazarLinea(
+  ctx: CanvasRenderingContext2D,
+  x1: number,
+  x2: number,
+  y: number,
+  opciones: { color?: string; grosor?: number; guiones?: number[] } = {},
+) {
+  ctx.strokeStyle = opciones.color ?? COLOR_DIVISOR;
+  ctx.lineWidth = opciones.grosor ?? 1;
+  ctx.setLineDash(opciones.guiones ?? []);
   ctx.beginPath();
-  ctx.moveTo(PAD, y);
-  ctx.lineTo(ancho - PAD, y);
+  ctx.moveTo(x1, y);
+  ctx.lineTo(x2, y);
   ctx.stroke();
+  ctx.setLineDash([]);
 }
 
 function truncar(ctx: CanvasRenderingContext2D, texto: string, anchoMax: number): string {
@@ -47,54 +65,174 @@ function truncar(ctx: CanvasRenderingContext2D, texto: string, anchoMax: number)
   return corto + '…';
 }
 
-// Encabezado compartido por los dos documentos: negocio + título + leyenda
-// de no validez fiscal. Devuelve el y donde sigue el resto del contenido.
-function dibujarEncabezado(ctx: CanvasRenderingContext2D, ancho: number, negocioNombre: string, titulo: string): number {
-  const centroX = ancho / 2;
-  let y = 32;
+// Envuelve texto en varias líneas por ancho disponible (a diferencia de
+// truncar, acá no se pierde contenido) — usada por la nota al pie del
+// presupuesto en carta, que junta tasa + resumen + aclaración en una sola
+// oración que puede no caber en una línea.
+function envolverTexto(ctx: CanvasRenderingContext2D, texto: string, anchoMax: number): string[] {
+  const palabras = texto.split(' ');
+  const lineas: string[] = [];
+  let actual = '';
+  for (const palabra of palabras) {
+    const candidata = actual ? `${actual} ${palabra}` : palabra;
+    if (ctx.measureText(candidata).width > anchoMax && actual) {
+      lineas.push(actual);
+      actual = palabra;
+    } else {
+      actual = candidata;
+    }
+  }
+  if (actual) lineas.push(actual);
+  return lineas;
+}
 
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, ancho, 8000);
+// Debajo del nombre del negocio, los datos de contacto que estén cargados —
+// nunca los cuatro fijos: el que falte simplemente no ocupa una línea, no
+// hay "No especificado" ni renglones en blanco. Mismo contrato en los 5
+// formatos; lo que cambia es cómo se presentan (ver dibujarDatosNegocio*).
+function lineasDatosNegocio(datos?: DatosNegocio): string[] {
+  if (!datos) return [];
+  const lineas: string[] = [];
+  if (datos.direccion?.trim()) lineas.push(datos.direccion.trim());
+  if (datos.telefono?.trim()) lineas.push(datos.telefono.trim());
+  if (datos.correo?.trim()) lineas.push(datos.correo.trim());
+  if (datos.rif?.trim()) lineas.push(`RIF ${datos.rif.trim()}`);
+  return lineas;
+}
+
+// "N productos · M unidades[ + peso]" — productos cuenta líneas distintas
+// (items.length), unidades suma cantidad solo de los items que NO son por
+// peso, y "+ peso" se agrega como sufijo literal (nunca mezclado en el
+// número) en cuanto haya al menos un item por peso.
+function resumenProductosUnidades(items: { cantidad: number; gramos?: number }[]): string {
+  const unidades = items
+    .filter(i => i.gramos === undefined)
+    .reduce((s, i) => s + i.cantidad, 0);
+  const conPeso = items.some(i => i.gramos !== undefined);
+  const productosTxto = `${items.length} producto${items.length === 1 ? '' : 's'}`;
+  const unidadesTxto = `${unidades} unidad${unidades === 1 ? '' : 'es'}`;
+  return `${productosTxto} · ${unidadesTxto}${conPeso ? ' + peso' : ''}`;
+}
+
+// La leyenda de no-validez-fiscal va SIEMPRE en un recuadro con borde de
+// tinta (nunca gris, nunca texto suelto) para que sobreviva una impresión en
+// blanco y negro. `textoDerecha` es el dato secundario que la acompaña en
+// carta/media (número de documento o el resumen de productos); en ticket va
+// sola y centrada.
+function dibujarLeyendaFiscal(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  anchoBox: number,
+  y: number,
+  opciones: { tamano: number; textoDerecha?: string; tamanoDerecha?: number; centrado?: boolean; padding?: number },
+): number {
+  const padding = opciones.padding ?? 10;
+  const alto = opciones.tamano + padding * 2;
+
+  ctx.strokeStyle = COLOR_TINTA;
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(x, y, anchoBox, alto);
+
+  ctx.textBaseline = 'middle';
+  ctx.font = `bold ${opciones.tamano}px sans-serif`;
+  ctx.fillStyle = COLOR_TINTA;
+  if (opciones.centrado) {
+    ctx.textAlign = 'center';
+    ctx.fillText(LEYENDA_FISCAL, x + anchoBox / 2, y + alto / 2);
+  } else {
+    ctx.textAlign = 'left';
+    ctx.fillText(LEYENDA_FISCAL, x + 14, y + alto / 2);
+    if (opciones.textoDerecha) {
+      ctx.textAlign = 'right';
+      ctx.font = `${opciones.tamanoDerecha ?? opciones.tamano - 2}px sans-serif`;
+      ctx.fillStyle = COLOR_TEXTO_SUAVE;
+      ctx.fillText(opciones.textoDerecha, x + anchoBox - 14, y + alto / 2);
+    }
+  }
   ctx.textBaseline = 'alphabetic';
+  return y + alto;
+}
 
-  ctx.fillStyle = '#111827';
-  ctx.font = 'bold 20px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText(negocioNombre || 'Negocio', centroX, y);
-  y += 30;
+// Columnas de la tabla de items — DESCRIPCIÓN / CANT. / P. UNIT. / TOTAL —
+// un único set de anchos por tamaño de página física (carta y media carta
+// comparten el mismo ancho de 816px, así que comparten también estas
+// columnas), reutilizado por comprobante y presupuesto: mismos encabezados
+// para los dos documentos, sin parámetro de tipo de documento.
+interface ColumnasTabla { cantX: number; precioX: number; totalX: number; descAnchoMax: number; }
 
-  ctx.font = 'bold 16px sans-serif';
-  ctx.fillText(titulo, centroX, y);
-  y += 20;
+function columnasTabla(
+  ancho: number, padX: number, anchoCant: number, anchoPrecio: number, anchoTotal: number, gap: number,
+): ColumnasTabla {
+  const totalX = ancho - padX;
+  const precioX = totalX - anchoTotal - gap;
+  const cantX = precioX - anchoPrecio - gap;
+  const descAnchoMax = cantX - gap - anchoCant - padX;
+  return { cantX, precioX, totalX, descAnchoMax };
+}
 
-  ctx.font = 'italic 11px sans-serif';
-  ctx.fillStyle = '#6b7280';
-  ctx.fillText('Este documento no tiene validez fiscal', centroX, y);
-  y += 20;
+const columnasCarta = (ancho: number, padX: number) => columnasTabla(ancho, padX, 90, 120, 130, 16);
+const columnasMedia = (ancho: number, padX: number) => columnasTabla(ancho, padX, 72, 100, 110, 14);
 
-  return y;
+function dibujarEncabezadoTabla(ctx: CanvasRenderingContext2D, padX: number, y: number, cols: ColumnasTabla, tamano: number) {
+  ctx.font = `bold ${tamano}px sans-serif`;
+  ctx.fillStyle = COLOR_TEXTO_SUAVE;
+  ctx.textAlign = 'left';
+  ctx.fillText('DESCRIPCIÓN', padX, y);
+  ctx.textAlign = 'right';
+  ctx.fillText('CANT.', cols.cantX, y);
+  ctx.fillText('P. UNIT.', cols.precioX, y);
+  ctx.fillText('TOTAL', cols.totalX, y);
+}
+
+// --- Filas de pago: la fila con doble moneda para efectivo_usd dentro de un
+// pago mixto (nueva) y la nota naranja de fiado (igual que hoy) ---
+
+interface FilaPago { metodo: string; monto: string; nota?: string; color: string; colorNota: string; }
+
+function construirFilasPago(pagos: PagoVenta[]): FilaPago[] {
+  const mixto = pagos.length > 1;
+  return pagos.map(p => {
+    if (mixto && p.metodo === 'efectivo_usd') {
+      return {
+        metodo: METODO_LABELS[p.metodo],
+        monto: formatUSD(p.monto_usd),
+        nota: `= ${formatBS(p.monto_bs)}`,
+        color: COLOR_TEXTO,
+        colorNota: COLOR_TEXTO_APOYO,
+      };
+    }
+    const esFiado = p.metodo === 'fiado';
+    return {
+      metodo: METODO_LABELS[p.metodo],
+      monto: formatBS(p.monto_bs),
+      nota: esFiado ? 'Pendiente de pago' : undefined,
+      color: esFiado ? COLOR_NARANJA : COLOR_TEXTO,
+      colorNota: COLOR_NARANJA,
+    };
+  });
 }
 
 // Genera el PNG final en dos pasadas: la primera mide el alto real
 // dibujando sobre un canvas provisional bien alto (dibujar es una función
 // pura del contenido, así que el resultado es idéntico), la segunda dibuja
 // sobre un canvas ya del tamaño exacto, escalado ×2 para que se vea nítido
-// aunque lo abran con zoom en WhatsApp.
-async function generarPNG(dibujar: (ctx: CanvasRenderingContext2D, ancho: number) => number): Promise<Blob> {
+// aunque lo abran con zoom en WhatsApp. El ancho varía por formato; el alto
+// siempre es dinámico (nunca una página física de tamaño fijo).
+async function generarPNG(ancho: number, dibujar: (ctx: CanvasRenderingContext2D, ancho: number) => number): Promise<Blob> {
   const medidor = document.createElement('canvas');
-  medidor.width = ANCHO;
+  medidor.width = ancho;
   medidor.height = 8000;
   const ctxMedidor = medidor.getContext('2d');
   if (!ctxMedidor) throw new Error('No se pudo generar el documento');
-  const altoFinal = dibujar(ctxMedidor, ANCHO);
+  const altoFinal = dibujar(ctxMedidor, ancho);
 
   const canvas = document.createElement('canvas');
-  canvas.width = ANCHO * ESCALA;
+  canvas.width = ancho * ESCALA;
   canvas.height = Math.ceil(altoFinal) * ESCALA;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('No se pudo generar el documento');
   ctx.scale(ESCALA, ESCALA);
-  dibujar(ctx, ANCHO);
+  dibujar(ctx, ancho);
 
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(b => (b ? resolve(b) : reject(new Error('No se pudo generar el documento'))), 'image/png');
@@ -151,6 +289,72 @@ async function compartirArchivo(blob: Blob, nombreArchivo: string, titulo: strin
   return 'descargado';
 }
 
+function fmtFechaHora(iso: string): string {
+  return new Date(iso).toLocaleString('es-VE', {
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+}
+
+function fmtFechaSolo(iso: string): string {
+  return new Date(iso).toLocaleDateString('es-VE', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+// fecha_vencimiento es un date puro ('YYYY-MM-DD'): parsearlo con `new
+// Date(iso)` a secas lo interpreta en UTC y puede mostrar el día anterior
+// según la zona horaria — se arma la fecha local a mano para evitarlo.
+function fmtFechaCorta(iso: string): string {
+  const [anio, mes, dia] = iso.split('-').map(Number);
+  return new Date(anio, mes - 1, dia).toLocaleDateString('es-VE', {
+    day: '2-digit', month: 'short', year: 'numeric',
+  });
+}
+
+function dibujarBarraMarca(ctx: CanvasRenderingContext2D, ancho: number, alto: number) {
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, ancho, 8000);
+  ctx.fillStyle = VERDE_MARCA;
+  ctx.fillRect(0, 0, ancho, alto);
+}
+
+// --- Encabezado de dos columnas (carta y media carta) ---
+// Estructura aprobada: datos del negocio a la izquierda, título + número +
+// fecha a la derecha — reemplaza el encabezado centrado de una sola columna
+// que hoy comparten los cinco formatos. El ticket conserva ese encabezado
+// centrado (más cercano al de hoy), así que no pasa por esta función.
+
+interface LineaEncabezado { texto: string; font: string; color: string; salto: number; }
+
+function dibujarEncabezadoDosColumnas(
+  ctx: CanvasRenderingContext2D,
+  ancho: number,
+  padX: number,
+  y: number,
+  izquierda: LineaEncabezado[],
+  derecha: LineaEncabezado[],
+): number {
+  const anchoIzqMax = ancho * 0.55 - padX;
+
+  let yIzq = y;
+  ctx.textAlign = 'left';
+  for (const linea of izquierda) {
+    ctx.font = linea.font;
+    ctx.fillStyle = linea.color;
+    ctx.fillText(truncar(ctx, linea.texto, anchoIzqMax), padX, yIzq);
+    yIzq += linea.salto;
+  }
+
+  let yDer = y;
+  ctx.textAlign = 'right';
+  for (const linea of derecha) {
+    ctx.font = linea.font;
+    ctx.fillStyle = linea.color;
+    ctx.fillText(linea.texto, ancho - padX, yDer);
+    yDer += linea.salto;
+  }
+
+  return Math.max(yIzq, yDer);
+}
+
 // --- Comprobante de venta ---
 
 export interface DatosComprobante {
@@ -162,141 +366,408 @@ export interface DatosComprobante {
   numero: number;
 }
 
-function dibujarComprobante(ctx: CanvasRenderingContext2D, ancho: number, datos: DatosComprobante): number {
+function itemsCantidadPrecio(item: VentaItem): { cantidadTexto: string; precioTexto: string } {
+  const esPeso = item.gramos !== undefined;
+  return {
+    cantidadTexto: esPeso ? `${item.gramos}g` : `${item.cantidad}`,
+    precioTexto: esPeso ? `${formatBS(item.precioUnitarioBs)}/kg` : formatBS(item.precioUnitarioBs),
+  };
+}
+
+// --- Ticket (80mm térmico, 302px) — layout centrado de una sola columna ---
+
+function dibujarComprobanteTicket(ctx: CanvasRenderingContext2D, datos: DatosComprobante): number {
   const { negocioNombre, datosNegocio, venta, numero } = datos;
+  const ancho = 302;
+  const padX = 16;
   const centroX = ancho / 2;
-  let y = dibujarEncabezado(ctx, ancho, datosNegocio?.nombreComercial || negocioNombre, 'Comprobante de venta');
+  dibujarBarraMarca(ctx, ancho, 3);
+  ctx.textBaseline = 'alphabetic';
+
+  let y = 3 + 22;
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 16px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO;
+  ctx.fillText(datosNegocio?.nombreComercial || negocioNombre || 'Negocio', centroX, y);
+  y += 18;
+
+  // Datos de contacto — a diferencia del nombre (centrado, como hoy), van
+  // alineados a la izquierda por instrucción explícita del brief; el
+  // mockup de Diseño los centra igual que el nombre, pero acá se privilegió
+  // la instrucción escrita, tal como pide la regla no-negociable del brief.
+  ctx.textAlign = 'left';
+  ctx.font = '11px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO_SUAVE;
+  for (const linea of lineasDatosNegocio(datosNegocio)) {
+    ctx.fillText(truncar(ctx, linea, ancho - padX * 2), padX, y);
+    y += 14;
+  }
+  y += 4;
 
   if (venta.anulada) {
-    y += 6;
-    ctx.fillStyle = '#dc2626';
-    ctx.fillRect(PAD, y - 15, ancho - PAD * 2, 26);
+    ctx.fillStyle = COLOR_ROJO;
+    ctx.fillRect(padX, y, ancho - padX * 2, 24);
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 13px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('VENTA ANULADA', centroX, y + 3);
-    y += 30;
-
+    ctx.fillText('VENTA ANULADA', centroX, y + 16);
+    y += 24 + 6;
     if (venta.motivo_anulacion) {
-      // Discreto a propósito — el banner de arriba ya dice lo importante
-      // (que se anuló); esto es el detalle para quien quiera leerlo.
       ctx.font = 'italic 10px sans-serif';
-      ctx.fillStyle = '#6b7280';
-      ctx.textAlign = 'center';
-      const motivoLinea = truncar(ctx, `Motivo: ${venta.motivo_anulacion}`, ancho - PAD * 2);
-      ctx.fillText(motivoLinea, centroX, y);
+      ctx.fillStyle = COLOR_TEXTO_SUAVE;
+      ctx.fillText(truncar(ctx, `Motivo: ${venta.motivo_anulacion}`, ancho - padX * 2), centroX, y);
       y += 16;
+    }
+    y += 4;
+  }
+
+  trazarLinea(ctx, padX, ancho - padX, y, { color: '#AEB7B3', guiones: [3, 3] });
+  y += 20;
+
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 12px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO;
+  ctx.fillText('COMPROBANTE DE VENTA', centroX, y);
+  y += 18;
+
+  ctx.font = '500 11px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO_SUAVE;
+  ctx.textAlign = 'left';
+  ctx.fillText(`Venta #${numero}`, padX, y);
+  ctx.textAlign = 'right';
+  ctx.fillText(fmtFechaHora(venta.fecha), ancho - padX, y);
+  y += 18;
+
+  trazarLinea(ctx, padX, ancho - padX, y, { color: '#AEB7B3', guiones: [3, 3] });
+  y += 18;
+
+  for (const item of venta.items) {
+    const { cantidadTexto, precioTexto } = itemsCantidadPrecio(item);
+    ctx.font = '600 11.5px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO;
+    ctx.textAlign = 'left';
+    ctx.fillText(truncar(ctx, item.nombre, ancho - padX * 2), padX, y);
+    y += 14;
+    ctx.font = '11px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO_SUAVE;
+    ctx.fillText(`${cantidadTexto} × ${precioTexto}`, padX, y);
+    ctx.textAlign = 'right';
+    ctx.font = '600 12px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO;
+    ctx.fillText(formatBS(item.subtotal_bs), ancho - padX, y);
+    y += 16;
+  }
+
+  trazarLinea(ctx, padX, ancho - padX, y, { color: '#AEB7B3', guiones: [3, 3] });
+  y += 16;
+
+  ctx.font = '11px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO_SUAVE;
+  ctx.textAlign = 'left';
+  ctx.fillText(resumenProductosUnidades(venta.items), padX, y);
+  ctx.textAlign = 'right';
+  ctx.fillText(`Subtotal ${formatBS(venta.total_bs)}`, ancho - padX, y);
+  y += 18;
+
+  ctx.font = 'bold 10px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO_SUAVE;
+  ctx.textAlign = 'left';
+  ctx.fillText('PAGO', padX, y);
+  y += 16;
+
+  for (const fila of construirFilasPago(venta.pagos)) {
+    ctx.font = '500 11.5px sans-serif';
+    ctx.fillStyle = fila.color;
+    ctx.textAlign = 'left';
+    ctx.fillText(fila.metodo, padX, y);
+    ctx.textAlign = 'right';
+    ctx.fillText(fila.monto, ancho - padX, y);
+    y += 14;
+    if (fila.nota) {
+      ctx.font = '10.5px sans-serif';
+      ctx.fillStyle = fila.colorNota;
+      ctx.textAlign = 'right';
+      ctx.fillText(fila.nota, ancho - padX, y);
+      y += 14;
     }
   }
 
-  y += 8;
-  trazarLinea(ctx, ancho, y);
-  y += 22;
-
-  ctx.textAlign = 'left';
-  ctx.fillStyle = '#374151';
-  ctx.font = '12px sans-serif';
-  const fecha = new Date(venta.fecha).toLocaleString('es-VE', {
-    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
-  });
-  ctx.fillText(fecha, PAD, y);
-  ctx.textAlign = 'right';
-  ctx.fillText(`Venta #${numero}`, ancho - PAD, y);
+  trazarLinea(ctx, padX, ancho - padX, y, { color: '#AEB7B3', guiones: [3, 3] });
   y += 20;
 
   ctx.textAlign = 'left';
-  ctx.fillStyle = '#6b7280';
-  ctx.font = '11px sans-serif';
-  ctx.fillText(`Atendió: ${venta.usuario_nombre || '—'}`, PAD, y);
+  ctx.font = 'bold 13px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO;
+  ctx.fillText('TOTAL', padX, y);
+  ctx.textAlign = 'right';
+  ctx.font = 'bold 20px sans-serif';
+  ctx.fillText(formatBS(venta.total_bs), ancho - padX, y);
   y += 18;
 
-  trazarLinea(ctx, ancho, y);
+  ctx.font = '11px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO_SUAVE;
+  ctx.textAlign = 'right';
+  const tasaTxt = venta.tasa_usada.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  ctx.fillText(`Ref. ${formatUSD(venta.total_usd)} · tasa ${tasaTxt}`, ancho - padX, y);
   y += 20;
 
-  ctx.font = 'bold 10px sans-serif';
-  ctx.fillStyle = '#9ca3af';
-  ctx.textAlign = 'left';
-  ctx.fillText('DESCRIPCIÓN', PAD, y);
-  ctx.textAlign = 'right';
-  ctx.fillText('CANT.', COL_CANT_X, y);
-  ctx.fillText('P. UNIT.', COL_PRECIO_X, y);
-  ctx.fillText('TOTAL', COL_TOTAL_X, y);
-  y += 12;
-  trazarLinea(ctx, ancho, y);
-  y += 20;
+  trazarLinea(ctx, padX, ancho - padX, y, { color: '#AEB7B3', guiones: [3, 3] });
+  y += 14;
+
+  y = dibujarLeyendaFiscal(ctx, padX, ancho - padX * 2, y, { tamano: 11, centrado: true });
+  y += 14;
+
+  return y;
+}
+
+// --- Carta (816×1056, dos columnas) ---
+
+function dibujarComprobanteCarta(ctx: CanvasRenderingContext2D, datos: DatosComprobante): number {
+  const { negocioNombre, datosNegocio, venta, numero } = datos;
+  const ancho = 816;
+  const padX = 60;
+  dibujarBarraMarca(ctx, ancho, 4);
+  ctx.textBaseline = 'alphabetic';
+
+  const nombre = datosNegocio?.nombreComercial || negocioNombre || 'Negocio';
+  const izquierda: LineaEncabezado[] = [
+    { texto: nombre, font: 'bold 24px sans-serif', color: COLOR_TEXTO, salto: 26 },
+    ...lineasDatosNegocio(datosNegocio).map(t => ({ texto: t, font: '13px sans-serif', color: COLOR_TEXTO_SUAVE, salto: 18 })),
+  ];
+  const derecha: LineaEncabezado[] = [
+    { texto: 'COMPROBANTE DE VENTA', font: 'bold 13px sans-serif', color: COLOR_TEXTO, salto: 22 },
+    { texto: `Venta #${numero}`, font: 'bold 22px sans-serif', color: COLOR_TEXTO, salto: 26 },
+    { texto: fmtFechaHora(venta.fecha), font: '13px sans-serif', color: COLOR_TEXTO_SUAVE, salto: 18 },
+  ];
+  let y = dibujarEncabezadoDosColumnas(ctx, ancho, padX, 56, izquierda, derecha) + 24;
+
+  if (venta.anulada) {
+    ctx.fillStyle = COLOR_ROJO;
+    ctx.fillRect(padX, y, ancho - padX * 2, 30);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 15px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('VENTA ANULADA', padX + 16, y + 20);
+    y += 30 + 8;
+    if (venta.motivo_anulacion) {
+      ctx.font = 'italic 13px sans-serif';
+      ctx.fillStyle = COLOR_TEXTO_SUAVE;
+      ctx.fillText(truncar(ctx, `Motivo: ${venta.motivo_anulacion}`, ancho - padX * 2), padX, y);
+      y += 20;
+    }
+    y += 6;
+  }
+
+  const cols = columnasCarta(ancho, padX);
+  dibujarEncabezadoTabla(ctx, padX, y, cols, 11);
+  y += 10;
+  trazarLinea(ctx, padX, ancho - padX, y, { color: COLOR_TINTA, grosor: 1.5 });
+  y += 24;
 
   for (const item of venta.items) {
-    const esPeso = item.gramos !== undefined;
-    const cantidadTexto = esPeso ? `${item.gramos}g` : `${item.cantidad}`;
-    const precioTexto = esPeso ? `${formatBS(item.precioUnitarioBs)}/kg` : formatBS(item.precioUnitarioBs);
-
-    ctx.font = '12px sans-serif';
-    ctx.fillStyle = '#111827';
+    const { cantidadTexto, precioTexto } = itemsCantidadPrecio(item);
+    ctx.font = '500 14px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO;
     ctx.textAlign = 'left';
-    ctx.fillText(truncar(ctx, item.nombre, COL_DESC_ANCHO_MAX), PAD, y);
+    ctx.fillText(truncar(ctx, item.nombre, cols.descAnchoMax), padX, y);
     ctx.textAlign = 'right';
-    ctx.fillStyle = '#374151';
-    ctx.fillText(cantidadTexto, COL_CANT_X, y);
-    ctx.fillText(precioTexto, COL_PRECIO_X, y);
-    ctx.fillStyle = '#111827';
-    ctx.fillText(formatBS(item.subtotal_bs), COL_TOTAL_X, y);
+    ctx.font = '14px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO_SUAVE;
+    ctx.fillText(cantidadTexto, cols.cantX, y);
+    ctx.fillText(precioTexto, cols.precioX, y);
+    ctx.font = '600 14px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO;
+    ctx.fillText(formatBS(item.subtotal_bs), cols.totalX, y);
+    y += 14;
+    trazarLinea(ctx, padX, ancho - padX, y, { color: COLOR_DIVISOR });
     y += 20;
   }
 
-  trazarLinea(ctx, ancho, y);
-  y += 28;
-
-  ctx.textAlign = 'center';
-  ctx.font = 'bold 22px sans-serif';
-  ctx.fillStyle = '#111827';
-  ctx.fillText(formatBS(venta.total_bs), centroX, y);
-  y += 22;
-
   ctx.font = '13px sans-serif';
-  ctx.fillStyle = '#6b7280';
-  ctx.fillText(formatUSD(venta.total_usd), centroX, y);
-  y += 20;
+  ctx.fillStyle = COLOR_TEXTO_SUAVE;
+  ctx.textAlign = 'left';
+  ctx.fillText(resumenProductosUnidades(venta.items), padX, y);
+  ctx.textAlign = 'right';
+  const tasaTxt = venta.tasa_usada.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  ctx.fillText(`Tasa del día: Bs ${tasaTxt} por 1 USD`, ancho - padX, y);
+  y += 32;
 
-  ctx.font = '11px sans-serif';
-  ctx.fillText(
-    `Tasa: Bs ${venta.tasa_usada.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} por $`,
-    centroX, y
-  );
-  y += 26;
+  const anchoTotales = 300;
+  const xTotalesInicio = ancho - padX - anchoTotales;
+  const xPagoFin = xTotalesInicio - 40;
 
-  trazarLinea(ctx, ancho, y);
+  const yPagosInicio = y;
+  ctx.font = 'bold 11px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO_SUAVE;
+  ctx.textAlign = 'left';
+  ctx.fillText('PAGO', padX, y);
   y += 22;
 
-  ctx.textAlign = 'left';
-  ctx.font = 'bold 12px sans-serif';
-  ctx.fillStyle = '#374151';
-  ctx.fillText('Forma de pago', PAD, y);
-  y += 20;
-
-  for (const pago of venta.pagos) {
-    const esFiado = pago.metodo === 'fiado';
-    ctx.font = '12px sans-serif';
-    ctx.fillStyle = esFiado ? '#c2410c' : '#111827';
+  for (const fila of construirFilasPago(venta.pagos)) {
+    ctx.font = '500 14px sans-serif';
+    ctx.fillStyle = fila.color;
     ctx.textAlign = 'left';
-    ctx.fillText(METODO_LABELS[pago.metodo], PAD, y);
+    ctx.fillText(fila.metodo, padX, y);
     ctx.textAlign = 'right';
-    ctx.fillText(formatBS(pago.monto_bs), ancho - PAD, y);
-    y += 16;
-    if (esFiado) {
-      ctx.font = 'italic 10px sans-serif';
-      ctx.fillStyle = '#c2410c';
-      ctx.textAlign = 'left';
-      ctx.fillText('Pendiente de pago', PAD, y);
-      y += 16;
+    ctx.font = '600 14px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO;
+    const anchoMonto = ctx.measureText(fila.monto).width;
+    ctx.fillText(fila.monto, xPagoFin, y);
+    if (fila.nota) {
+      ctx.font = '12px sans-serif';
+      ctx.fillStyle = fila.colorNota;
+      ctx.fillText(fila.nota, xPagoFin - anchoMonto - 10, y);
     }
+    y += 12;
+    trazarLinea(ctx, padX, xPagoFin, y, { color: '#C9D0CD', guiones: [2, 2] });
+    y += 20;
   }
 
-  y += 12;
+  const yTotales = yPagosInicio + 14;
+  ctx.textAlign = 'right';
+  ctx.font = 'bold 12px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO;
+  ctx.fillText('TOTAL', ancho - padX, yTotales);
+  ctx.font = 'bold 34px sans-serif';
+  ctx.fillText(formatBS(venta.total_bs), ancho - padX, yTotales + 34);
+  ctx.font = '13px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO_SUAVE;
+  ctx.fillText(`Ref. ${formatUSD(venta.total_usd)}`, ancho - padX, yTotales + 54);
+  trazarLinea(ctx, xTotalesInicio, ancho - padX, yTotales - 18, { color: COLOR_TINTA, grosor: 2 });
+
+  y = Math.max(y, yTotales + 66) + 24;
+
+  y = dibujarLeyendaFiscal(ctx, padX, ancho - padX * 2, y, {
+    tamano: 14, textoDerecha: `Venta #${numero} · ${fmtFechaHora(venta.fecha)}`, tamanoDerecha: 12,
+  });
+  y += 30;
+
+  return y;
+}
+
+// --- Media carta (816×528, mitad de una carta) ---
+
+function dibujarComprobanteMediaCarta(ctx: CanvasRenderingContext2D, datos: DatosComprobante): number {
+  const { negocioNombre, datosNegocio, venta, numero } = datos;
+  const ancho = 816;
+  const padX = 40;
+  dibujarBarraMarca(ctx, ancho, 4);
+  ctx.textBaseline = 'alphabetic';
+
+  const nombre = datosNegocio?.nombreComercial || negocioNombre || 'Negocio';
+  const datosLinea = lineasDatosNegocio(datosNegocio).join(' · ');
+  const izquierda: LineaEncabezado[] = [
+    { texto: nombre, font: 'bold 18px sans-serif', color: COLOR_TEXTO, salto: 20 },
+    ...(datosLinea ? [{ texto: datosLinea, font: '11.5px sans-serif', color: COLOR_TEXTO_SUAVE, salto: 16 }] : []),
+  ];
+  const derecha: LineaEncabezado[] = [
+    { texto: 'COMPROBANTE DE VENTA', font: 'bold 11px sans-serif', color: COLOR_TEXTO, salto: 16 },
+    { texto: `Venta #${numero}`, font: 'bold 17px sans-serif', color: COLOR_TEXTO, salto: 19 },
+    { texto: fmtFechaHora(venta.fecha), font: '11.5px sans-serif', color: COLOR_TEXTO_SUAVE, salto: 15 },
+  ];
+  let y = dibujarEncabezadoDosColumnas(ctx, ancho, padX, 26 + 4, izquierda, derecha) + 12;
+
+  if (venta.anulada) {
+    ctx.fillStyle = COLOR_ROJO;
+    ctx.font = 'bold 12px sans-serif';
+    const anchoBadge = ctx.measureText('VENTA ANULADA').width + 24;
+    ctx.fillRect(padX, y, anchoBadge, 20);
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'left';
+    ctx.fillText('VENTA ANULADA', padX + 12, y + 14);
+    if (venta.motivo_anulacion) {
+      ctx.font = 'italic 11.5px sans-serif';
+      ctx.fillStyle = COLOR_TEXTO_SUAVE;
+      ctx.fillText(truncar(ctx, `Motivo: ${venta.motivo_anulacion}`, ancho - padX * 2 - anchoBadge - 12), padX + anchoBadge + 12, y + 14);
+    }
+    y += 20 + 12;
+  }
+
+  const cols = columnasMedia(ancho, padX);
+  dibujarEncabezadoTabla(ctx, padX, y, cols, 10);
+  y += 8;
+  trazarLinea(ctx, padX, ancho - padX, y, { color: COLOR_TINTA, grosor: 1.5 });
+  y += 18;
+
+  for (const item of venta.items) {
+    const { cantidadTexto, precioTexto } = itemsCantidadPrecio(item);
+    ctx.font = '500 12px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO;
+    ctx.textAlign = 'left';
+    ctx.fillText(truncar(ctx, item.nombre, cols.descAnchoMax), padX, y);
+    ctx.textAlign = 'right';
+    ctx.font = '12px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO_SUAVE;
+    ctx.fillText(cantidadTexto, cols.cantX, y);
+    ctx.fillText(precioTexto, cols.precioX, y);
+    ctx.font = '600 12px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO;
+    ctx.fillText(formatBS(item.subtotal_bs), cols.totalX, y);
+    y += 10;
+    trazarLinea(ctx, padX, ancho - padX, y, { color: COLOR_DIVISOR });
+    y += 16;
+  }
+  y += 4;
+
+  const anchoTotales = 240;
+  const xTotalesInicio = ancho - padX - anchoTotales;
+  const xPagoFin = xTotalesInicio - 32;
+
+  const yPagosInicio = y;
+  ctx.font = 'bold 10px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO_SUAVE;
+  ctx.textAlign = 'left';
+  ctx.fillText('PAGO', padX, y);
+  y += 18;
+
+  for (const fila of construirFilasPago(venta.pagos)) {
+    ctx.font = '500 12px sans-serif';
+    ctx.fillStyle = fila.color;
+    ctx.textAlign = 'left';
+    ctx.fillText(fila.metodo, padX, y);
+    ctx.textAlign = 'right';
+    ctx.font = '600 12px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO;
+    const anchoMonto = ctx.measureText(fila.monto).width;
+    ctx.fillText(fila.monto, xPagoFin, y);
+    if (fila.nota) {
+      ctx.font = '11px sans-serif';
+      ctx.fillStyle = fila.colorNota;
+      ctx.fillText(fila.nota, xPagoFin - anchoMonto - 8, y);
+    }
+    y += 18;
+  }
+
+  const yTotales = yPagosInicio + 12;
+  ctx.textAlign = 'right';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO;
+  ctx.fillText('TOTAL', ancho - padX, yTotales);
+  ctx.font = 'bold 26px sans-serif';
+  ctx.fillText(formatBS(venta.total_bs), ancho - padX, yTotales + 26);
+  ctx.font = '11.5px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO_SUAVE;
+  const tasaTxt = venta.tasa_usada.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  ctx.fillText(`Ref. ${formatUSD(venta.total_usd)} · tasa ${tasaTxt}`, ancho - padX, yTotales + 44);
+  trazarLinea(ctx, xTotalesInicio, ancho - padX, yTotales - 14, { color: COLOR_TINTA, grosor: 2 });
+
+  y = Math.max(y, yTotales + 54) + 18;
+
+  y = dibujarLeyendaFiscal(ctx, padX, ancho - padX * 2, y, {
+    tamano: 12, textoDerecha: resumenProductosUnidades(venta.items), tamanoDerecha: 11, padding: 8,
+  });
+  y += 18;
+
   return y;
 }
 
 export async function generarComprobantePNG(datos: DatosComprobante): Promise<{ blob: Blob; nombreArchivo: string }> {
-  const blob = await generarPNG((ctx, ancho) => dibujarComprobante(ctx, ancho, datos));
+  const formato = datos.datosNegocio?.formatoComprobante ?? 'ticket';
+  const dibujar = formato === 'carta' ? dibujarComprobanteCarta
+    : formato === 'media_carta' ? dibujarComprobanteMediaCarta
+    : dibujarComprobanteTicket;
+  const ancho = formato === 'ticket' ? 302 : 816;
+  const blob = await generarPNG(ancho, ctx => dibujar(ctx, datos));
   // Nunca "factura" en el nombre del archivo — regla del proyecto.
   return { blob, nombreArchivo: `comprobante-venta-${datos.numero}.png` };
 }
@@ -319,160 +790,264 @@ export interface DatosPresupuesto {
   numero: number;
 }
 
-function fmtFechaCorta(iso: string): string {
-  // fecha_vencimiento es un date puro ('YYYY-MM-DD'): parsearlo con `new
-  // Date(iso)` a secas lo interpreta en UTC y puede mostrar el día anterior
-  // según la zona horaria — se arma la fecha local a mano para evitarlo.
-  const [anio, mes, dia] = iso.split('-').map(Number);
-  return new Date(anio, mes - 1, dia).toLocaleDateString('es-VE', {
-    day: '2-digit', month: 'short', year: 'numeric',
-  });
+function itemPresupuestoCantidadPrecioMonto(item: PresupuestoItem): { cantidadTexto: string; precioTexto: string; subtotalBs: number } {
+  const esPeso = item.gramos !== undefined;
+  const subtotalBs = esPeso
+    ? item.precioUnitarioBs * ((item.gramos ?? 0) / 1000)
+    : item.precioUnitarioBs * item.cantidad;
+  return {
+    cantidadTexto: esPeso ? `${item.gramos}g` : `${item.cantidad}`,
+    precioTexto: esPeso ? `${formatBS(item.precioUnitarioBs)}/kg` : formatBS(item.precioUnitarioBs),
+    subtotalBs,
+  };
 }
 
-// Debajo del nombre del negocio, los datos de contacto que estén cargados
-// — nunca los cuatro fijos: el que falte simplemente no ocupa una línea,
-// no hay "No especificado" ni renglones en blanco.
-function dibujarDatosNegocio(ctx: CanvasRenderingContext2D, ancho: number, y: number, datos?: DatosNegocio): number {
-  if (!datos) return y;
-  const lineas: string[] = [];
-  if (datos.direccion?.trim()) lineas.push(datos.direccion.trim());
-  if (datos.telefono?.trim()) lineas.push(datos.telefono.trim());
-  if (datos.correo?.trim()) lineas.push(datos.correo.trim());
-  if (datos.rif?.trim()) lineas.push(`RIF: ${datos.rif.trim()}`);
-  if (lineas.length === 0) return y;
-
-  ctx.textAlign = 'center';
-  ctx.font = '10px sans-serif';
-  ctx.fillStyle = '#6b7280';
-  for (const linea of lineas) {
-    ctx.fillText(linea, ancho / 2, y);
-    y += 13;
-  }
-  return y + 4;
+// Recuadro "Válido hasta el ..." — sin cambios de estilo respecto a hoy
+// (fondo/tinta ámbar, sin borde: no es la leyenda fiscal, no aplica la
+// regla del borde de tinta), solo reubicado dentro del layout de dos
+// columnas de carta/media.
+function dibujarRecuadroVigencia(ctx: CanvasRenderingContext2D, x: number, y: number, ancho: number, alto: number, texto1: string, texto2: string, tam1: number, tam2: number) {
+  ctx.fillStyle = COLOR_NARANJA_BG;
+  ctx.fillRect(x, y, ancho, alto);
+  ctx.textAlign = 'left';
+  ctx.fillStyle = COLOR_NARANJA;
+  ctx.font = `bold ${tam1}px sans-serif`;
+  ctx.fillText(texto1, x + 14, y + tam1 + 8);
+  ctx.font = `${tam2}px sans-serif`;
+  ctx.fillText(texto2, x + 14, y + tam1 + tam2 + 14);
 }
 
-function dibujarPresupuesto(ctx: CanvasRenderingContext2D, ancho: number, datos: DatosPresupuesto): number {
+function dibujarPresupuestoCarta(ctx: CanvasRenderingContext2D, datos: DatosPresupuesto): number {
   const { negocioNombre, datosNegocio, presupuesto, numero } = datos;
-  const centroX = ancho / 2;
-  let y = dibujarEncabezado(ctx, ancho, datosNegocio?.nombreComercial || negocioNombre, 'Presupuesto');
-  y = dibujarDatosNegocio(ctx, ancho, y, datosNegocio);
+  const ancho = 816;
+  const padX = 60;
+  dibujarBarraMarca(ctx, ancho, 4);
+  ctx.textBaseline = 'alphabetic';
 
-  // La fecha de vencimiento es lo que le avisa al cliente que el precio en
-  // bolívares no es eterno — se destaca en un recuadro, no como una línea
-  // más de texto.
-  y += 6;
-  ctx.fillStyle = '#fff7ed';
-  ctx.fillRect(PAD, y - 15, ancho - PAD * 2, 26);
-  ctx.fillStyle = '#c2410c';
-  ctx.font = 'bold 13px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText(`Válido hasta el ${fmtFechaCorta(presupuesto.fecha_vencimiento)}`, centroX, y + 3);
-  y += 30;
+  const nombre = datosNegocio?.nombreComercial || negocioNombre || 'Negocio';
+  const izquierda: LineaEncabezado[] = [
+    { texto: nombre, font: 'bold 24px sans-serif', color: COLOR_TEXTO, salto: 26 },
+    ...lineasDatosNegocio(datosNegocio).map(t => ({ texto: t, font: '13px sans-serif', color: COLOR_TEXTO_SUAVE, salto: 18 })),
+  ];
+  const derecha: LineaEncabezado[] = [
+    { texto: 'PRESUPUESTO', font: 'bold 13px sans-serif', color: COLOR_TEXTO, salto: 22 },
+    { texto: `Presupuesto #${numero}`, font: 'bold 22px sans-serif', color: COLOR_TEXTO, salto: 26 },
+    { texto: `Emitido el ${fmtFechaSolo(presupuesto.creado_en)}`, font: '13px sans-serif', color: COLOR_TEXTO_SUAVE, salto: 18 },
+  ];
+  let y = dibujarEncabezadoDosColumnas(ctx, ancho, padX, 56, izquierda, derecha) + 24;
 
-  y += 8;
-  trazarLinea(ctx, ancho, y);
-  y += 22;
-
+  const anchoVigencia = 300;
+  const xVigencia = ancho - padX - anchoVigencia;
+  const altoFila = 62;
+  trazarLinea(ctx, padX, ancho - padX, y, { color: COLOR_DIVISOR });
+  const yTextos = y + 24;
   ctx.textAlign = 'left';
-  ctx.fillStyle = '#374151';
-  ctx.font = '12px sans-serif';
-  const fechaCreacion = new Date(presupuesto.creado_en).toLocaleDateString('es-VE', {
-    day: '2-digit', month: 'short', year: 'numeric',
-  });
-  ctx.fillText(fechaCreacion, PAD, y);
-  ctx.textAlign = 'right';
-  ctx.fillText(`Presupuesto #${numero}`, ancho - PAD, y);
-  y += 20;
-
-  // Etiqueta delante del nombre — sin esto el dato quedaba pelado, sin
-  // decir qué es.
+  ctx.font = '14px sans-serif';
   if (presupuesto.cliente_nombre) {
-    ctx.textAlign = 'left';
-    ctx.fillStyle = '#374151';
-    ctx.font = '12px sans-serif';
-    const clienteLinea = truncar(ctx, `Cliente: ${presupuesto.cliente_nombre}`, ancho - PAD * 2);
-    ctx.fillText(clienteLinea, PAD, y);
-    y += 20;
+    ctx.fillStyle = COLOR_TEXTO_SUAVE;
+    ctx.fillText('Cliente:', padX, yTextos);
+    ctx.font = '600 14px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO;
+    ctx.fillText(truncar(ctx, presupuesto.cliente_nombre, xVigencia - padX - 90), padX + 82, yTextos);
   }
+  ctx.font = '14px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO_SUAVE;
+  ctx.fillText('Atendió:', padX, yTextos + 22);
+  ctx.font = '600 14px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO;
+  ctx.fillText(presupuesto.creado_por_nombre || '—', padX + 82, yTextos + 22);
 
-  ctx.textAlign = 'left';
-  ctx.fillStyle = '#6b7280';
-  ctx.font = '11px sans-serif';
-  ctx.fillText(`Atendió: ${presupuesto.creado_por_nombre || '—'}`, PAD, y);
-  y += 18;
-
-  trazarLinea(ctx, ancho, y);
-  y += 20;
-
-  ctx.font = 'bold 10px sans-serif';
-  ctx.fillStyle = '#9ca3af';
-  ctx.textAlign = 'left';
-  ctx.fillText('DESCRIPCIÓN', PAD, y);
-  ctx.textAlign = 'right';
-  ctx.fillText('CANT.', COL_CANT_X, y);
-  ctx.fillText('P. UNIT.', COL_PRECIO_X, y);
-  ctx.fillText('TOTAL', COL_TOTAL_X, y);
-  y += 12;
-  trazarLinea(ctx, ancho, y);
-  y += 20;
-
-  for (const item of presupuesto.items ?? []) {
-    const esPeso = item.gramos !== undefined;
-    const subtotalBs = esPeso
-      ? item.precioUnitarioBs * ((item.gramos ?? 0) / 1000)
-      : item.precioUnitarioBs * item.cantidad;
-    const cantidadTexto = esPeso ? `${item.gramos}g` : `${item.cantidad}`;
-    const precioTexto = esPeso ? `${formatBS(item.precioUnitarioBs)}/kg` : formatBS(item.precioUnitarioBs);
-
-    ctx.font = '12px sans-serif';
-    ctx.fillStyle = '#111827';
-    ctx.textAlign = 'left';
-    ctx.fillText(truncar(ctx, item.nombre, COL_DESC_ANCHO_MAX), PAD, y);
-    ctx.textAlign = 'right';
-    ctx.fillStyle = '#374151';
-    ctx.fillText(cantidadTexto, COL_CANT_X, y);
-    ctx.fillText(precioTexto, COL_PRECIO_X, y);
-    ctx.fillStyle = '#111827';
-    ctx.fillText(formatBS(subtotalBs), COL_TOTAL_X, y);
-    y += 20;
-  }
-
-  trazarLinea(ctx, ancho, y);
+  dibujarRecuadroVigencia(
+    ctx, xVigencia, y, anchoVigencia, altoFila,
+    `Válido hasta el ${fmtFechaCorta(presupuesto.fecha_vencimiento)}`,
+    'Los precios en bolívares pueden cambiar después de esa fecha.',
+    17, 12,
+  );
+  y += altoFila;
+  trazarLinea(ctx, padX, ancho - padX, y, { color: COLOR_DIVISOR });
   y += 28;
+
+  const cols = columnasCarta(ancho, padX);
+  dibujarEncabezadoTabla(ctx, padX, y, cols, 11);
+  y += 10;
+  trazarLinea(ctx, padX, ancho - padX, y, { color: COLOR_TINTA, grosor: 1.5 });
+  y += 24;
+
+  const items = presupuesto.items ?? [];
+  for (const item of items) {
+    const { cantidadTexto, precioTexto, subtotalBs } = itemPresupuestoCantidadPrecioMonto(item);
+    ctx.font = '500 14px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO;
+    ctx.textAlign = 'left';
+    ctx.fillText(truncar(ctx, item.nombre, cols.descAnchoMax), padX, y);
+    ctx.textAlign = 'right';
+    ctx.font = '14px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO_SUAVE;
+    ctx.fillText(cantidadTexto, cols.cantX, y);
+    ctx.fillText(precioTexto, cols.precioX, y);
+    ctx.font = '600 14px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO;
+    ctx.fillText(formatBS(subtotalBs), cols.totalX, y);
+    y += 14;
+    trazarLinea(ctx, padX, ancho - padX, y, { color: COLOR_DIVISOR });
+    y += 20;
+  }
+
+  const tasaTxt = presupuesto.tasa_al_crear.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const yPie = y;
+  ctx.font = '13px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO_SUAVE;
+  ctx.textAlign = 'left';
+  const notaPie = `Tasa del día: Bs ${tasaTxt} por 1 USD. ${resumenProductosUnidades(items)}. Bs estimado — se recalcula el día del pago.`;
+  const anchoNotaPie = ancho - padX * 2 - 300 - 40;
+  const notaPieLineas = envolverTexto(ctx, notaPie, anchoNotaPie);
+  let yNota = yPie;
+  for (const linea of notaPieLineas) {
+    ctx.fillText(linea, padX, yNota);
+    yNota += 18;
+  }
 
   // Al revés que en el comprobante de venta: acá el dólar es lo único que
   // se sostiene hasta que esto se convierta en venta, así que es el número
   // grande. El bolívar es apenas una proyección a la tasa de hoy — texto
-  // secundario, con su propia aclaración de por qué puede cambiar.
-  ctx.textAlign = 'center';
-  ctx.font = 'bold 22px sans-serif';
-  ctx.fillStyle = '#111827';
-  ctx.fillText(formatUSD(presupuesto.total_usd), centroX, y);
-  y += 22;
-
+  // secundario. (Punto ya resuelto con Juan — no es un desvío del mockup
+  // de Diseño, que sí lo muestra al revés.)
+  ctx.textAlign = 'right';
+  ctx.font = 'bold 12px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO;
+  ctx.fillText('TOTAL', ancho - padX, yPie);
+  ctx.font = 'bold 34px sans-serif';
+  ctx.fillText(formatUSD(presupuesto.total_usd), ancho - padX, yPie + 34);
   ctx.font = '13px sans-serif';
-  ctx.fillStyle = '#6b7280';
-  ctx.fillText(formatBS(presupuesto.total_bs_estimado), centroX, y);
-  y += 16;
+  ctx.fillStyle = COLOR_TEXTO_SUAVE;
+  ctx.fillText(`≈ ${formatBS(presupuesto.total_bs_estimado)}`, ancho - padX, yPie + 54);
+  trazarLinea(ctx, ancho - padX - 300, ancho - padX, yPie - 18, { color: COLOR_TINTA, grosor: 2 });
 
-  ctx.font = 'italic 10px sans-serif';
-  ctx.fillStyle = '#9ca3af';
-  ctx.fillText('Bs estimado a la tasa de hoy — se recalcula el día del pago', centroX, y);
+  y = Math.max(yNota, yPie + 66) + 24;
+
+  y = dibujarLeyendaFiscal(ctx, padX, ancho - padX * 2, y, {
+    tamano: 14, textoDerecha: `Presupuesto #${numero} · ${fmtFechaSolo(presupuesto.creado_en)}`, tamanoDerecha: 12,
+  });
+  y += 30;
+
+  return y;
+}
+
+function dibujarPresupuestoMediaCarta(ctx: CanvasRenderingContext2D, datos: DatosPresupuesto): number {
+  const { negocioNombre, datosNegocio, presupuesto, numero } = datos;
+  const ancho = 816;
+  const padX = 40;
+  dibujarBarraMarca(ctx, ancho, 4);
+  ctx.textBaseline = 'alphabetic';
+
+  const nombre = datosNegocio?.nombreComercial || negocioNombre || 'Negocio';
+  const datosLinea = lineasDatosNegocio(datosNegocio).join(' · ');
+  const izquierda: LineaEncabezado[] = [
+    { texto: nombre, font: 'bold 18px sans-serif', color: COLOR_TEXTO, salto: 20 },
+    ...(datosLinea ? [{ texto: datosLinea, font: '11.5px sans-serif', color: COLOR_TEXTO_SUAVE, salto: 16 }] : []),
+  ];
+  // A diferencia de carta, media carta no repite la etiqueta "PRESUPUESTO"
+  // encima del número — mismo criterio que la referencia de Diseño, que
+  // acá comprime el encabezado a dos líneas en vez de tres.
+  const derecha: LineaEncabezado[] = [
+    { texto: `Presupuesto #${numero}`, font: 'bold 17px sans-serif', color: COLOR_TEXTO, salto: 19 },
+    { texto: `Emitido el ${fmtFechaSolo(presupuesto.creado_en)}`, font: '11.5px sans-serif', color: COLOR_TEXTO_SUAVE, salto: 15 },
+  ];
+  let y = dibujarEncabezadoDosColumnas(ctx, ancho, padX, 26 + 4, izquierda, derecha) + 14;
+
+  const anchoVigencia = 220;
+  const xVigencia = ancho - padX - anchoVigencia;
+  const altoFila = 42;
+  ctx.textAlign = 'left';
+  ctx.font = '12px sans-serif';
+  let xCursor = padX;
+  if (presupuesto.cliente_nombre) {
+    ctx.fillStyle = COLOR_TEXTO_SUAVE;
+    ctx.fillText('Cliente: ', xCursor, y + altoFila / 2 + 4);
+    xCursor += ctx.measureText('Cliente: ').width;
+    ctx.font = '600 12px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO;
+    const clienteTxt = truncar(ctx, presupuesto.cliente_nombre, xVigencia - xCursor - 100);
+    ctx.fillText(clienteTxt, xCursor, y + altoFila / 2 + 4);
+    xCursor += ctx.measureText(clienteTxt).width + 24;
+    ctx.font = '12px sans-serif';
+  }
+  ctx.fillStyle = COLOR_TEXTO_SUAVE;
+  ctx.fillText('Atendió: ', xCursor, y + altoFila / 2 + 4);
+  xCursor += ctx.measureText('Atendió: ').width;
+  ctx.font = '600 12px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO;
+  ctx.fillText(presupuesto.creado_por_nombre || '—', xCursor, y + altoFila / 2 + 4);
+
+  dibujarRecuadroVigencia(
+    ctx, xVigencia, y, anchoVigencia, altoFila,
+    `Válido hasta el ${fmtFechaCorta(presupuesto.fecha_vencimiento)}`,
+    'Los precios en Bs pueden cambiar después',
+    13.5, 10.5,
+  );
+  y += altoFila + 14;
+
+  const cols = columnasMedia(ancho, padX);
+  dibujarEncabezadoTabla(ctx, padX, y, cols, 10);
+  y += 8;
+  trazarLinea(ctx, padX, ancho - padX, y, { color: COLOR_TINTA, grosor: 1.5 });
   y += 18;
 
+  const items = presupuesto.items ?? [];
+  for (const item of items) {
+    const { cantidadTexto, precioTexto, subtotalBs } = itemPresupuestoCantidadPrecioMonto(item);
+    ctx.font = '500 12px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO;
+    ctx.textAlign = 'left';
+    ctx.fillText(truncar(ctx, item.nombre, cols.descAnchoMax), padX, y);
+    ctx.textAlign = 'right';
+    ctx.font = '12px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO_SUAVE;
+    ctx.fillText(cantidadTexto, cols.cantX, y);
+    ctx.fillText(precioTexto, cols.precioX, y);
+    ctx.font = '600 12px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO;
+    ctx.fillText(formatBS(subtotalBs), cols.totalX, y);
+    y += 10;
+    trazarLinea(ctx, padX, ancho - padX, y, { color: COLOR_DIVISOR });
+    y += 16;
+  }
+  y += 6;
+
+  const anchoTotales = 240;
+  const xTotalesInicio = ancho - padX - anchoTotales;
+  const yFilaFinal = y;
+
+  const tasaTxt = presupuesto.tasa_al_crear.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   ctx.font = '11px sans-serif';
-  ctx.fillStyle = '#6b7280';
-  ctx.fillText(
-    `Tasa: Bs ${presupuesto.tasa_al_crear.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} por $`,
-    centroX, y
-  );
+  ctx.fillStyle = COLOR_TEXTO_SUAVE;
+  ctx.textAlign = 'left';
+  ctx.fillText(`Tasa del día: Bs ${tasaTxt} por 1 USD`, padX, y);
   y += 20;
+  y = dibujarLeyendaFiscal(ctx, padX, xTotalesInicio - 24 - padX, y, {
+    tamano: 11.5, centrado: false, padding: 6,
+  });
+
+  ctx.textAlign = 'right';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO;
+  ctx.fillText('TOTAL', ancho - padX, yFilaFinal);
+  ctx.font = 'bold 26px sans-serif';
+  ctx.fillText(formatUSD(presupuesto.total_usd), ancho - padX, yFilaFinal + 26);
+  ctx.font = '11.5px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO_SUAVE;
+  ctx.fillText(`≈ ${formatBS(presupuesto.total_bs_estimado)}`, ancho - padX, yFilaFinal + 44);
+  trazarLinea(ctx, xTotalesInicio, ancho - padX, yFilaFinal - 14, { color: COLOR_TINTA, grosor: 2 });
+
+  y = Math.max(y, yFilaFinal + 54) + 12;
 
   return y;
 }
 
 export async function generarPresupuestoPNG(datos: DatosPresupuesto): Promise<{ blob: Blob; nombreArchivo: string }> {
-  const blob = await generarPNG((ctx, ancho) => dibujarPresupuesto(ctx, ancho, datos));
+  const formato = datos.datosNegocio?.formatoPresupuesto ?? 'media_carta';
+  const dibujar = formato === 'carta' ? dibujarPresupuestoCarta : dibujarPresupuestoMediaCarta;
+  const blob = await generarPNG(816, ctx => dibujar(ctx, datos));
   return { blob, nombreArchivo: `presupuesto-${datos.numero}.png` };
 }
 
