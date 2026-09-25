@@ -290,6 +290,39 @@ export async function updateDatosNegocio(datos: DatosNegocio, negocioId: string)
   return { ok: true };
 }
 
+// Cierre de cuenta del negocio: dos funciones SECURITY DEFINER en Supabase
+// que validan admin server-side (vía auth.uid(), sin mandar negocio_id) y
+// no tienen equivalente offline — a diferencia de todo lo demás en este
+// archivo, esto no se encola, se pide con conexión real o no se pide.
+// Mismo criterio de error que crearUsuario/eliminarUsuario en usuarios.ts:
+// un mensaje del servidor si lo hay, o uno genérico de conexión si no hubo
+// respuesta.
+type ResultadoAccionNegocio = { ok: true } | { ok: false; mensaje: string };
+
+export async function solicitarEliminacionNegocio(confirmarNombre: string): Promise<ResultadoAccionNegocio> {
+  try {
+    const { error } = await supabase
+      .rpc('solicitar_eliminacion_negocio', { p_confirmar_nombre: confirmarNombre })
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
+    if (error) return { ok: false, mensaje: error.message };
+    return { ok: true };
+  } catch {
+    return { ok: false, mensaje: 'No se pudo conectar. Verifica tu conexión.' };
+  }
+}
+
+export async function cancelarEliminacionNegocio(): Promise<ResultadoAccionNegocio> {
+  try {
+    const { error } = await supabase
+      .rpc('cancelar_eliminacion_negocio')
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
+    if (error) return { ok: false, mensaje: error.message };
+    return { ok: true };
+  } catch {
+    return { ok: false, mensaje: 'No se pudo conectar. Verifica tu conexión.' };
+  }
+}
+
 // El Producto armado ya no se devuelve — inventario/page.tsx nunca lo usaba,
 // solo miraba si el resultado era null. 23505 con el mismo id (retry de la
 // cola offline) sigue siendo éxito, no un fallo.
