@@ -3,7 +3,7 @@
 import { createContext, useContext, useState, useEffect, Dispatch, SetStateAction, ReactNode } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
-import { syncFromSupabase, getConfiguracion } from '@/lib/sync';
+import { syncFromSupabase, getConfiguracion, TIMEOUT_RPC_MS } from '@/lib/sync';
 import {
   getCachedNegocioId,
   setCachedNegocioId,
@@ -178,6 +178,7 @@ async function fetchPerfil(uid: string): Promise<PerfilResuelto | 'desactivado' 
       .from('perfiles')
       .select('negocio_id, rol, nombre, activo')
       .eq('id', uid)
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS))
       .single();
 
     if (!perfil?.negocio_id) return null;
@@ -187,6 +188,7 @@ async function fetchPerfil(uid: string): Promise<PerfilResuelto | 'desactivado' 
       .from('negocios')
       .select('nombre, usa_costos, usa_stock, estado, fecha_proximo_pago, limite_usuarios, nombre_comercial, direccion, telefono, correo, rif')
       .eq('id', perfil.negocio_id)
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS))
       .single();
 
     if (!negocio) return null;
