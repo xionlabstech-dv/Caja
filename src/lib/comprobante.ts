@@ -411,8 +411,10 @@ function dibujarComprobanteTicket(ctx: CanvasRenderingContext2D, datos: DatosCom
     ctx.font = 'bold 13px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('VENTA ANULADA', centroX, y + 16);
-    y += 24 + 6;
+    y += 24 + 10;
     if (venta.motivo_anulacion) {
+      trazarLinea(ctx, padX, ancho - padX, y, { color: '#AEB7B3', guiones: [3, 3] });
+      y += 14;
       ctx.font = 'italic 10px sans-serif';
       ctx.fillStyle = COLOR_TEXTO_SUAVE;
       ctx.fillText(truncar(ctx, `Motivo: ${venta.motivo_anulacion}`, ancho - padX * 2), centroX, y);
