@@ -45,6 +45,10 @@ import {
   Fingerprint,
   CreditCard,
   X,
+  MapPin,
+  Phone,
+  Mail,
+  Info,
   type LucideIcon,
 } from 'lucide-react';
 import type { MetodoPago } from '@/types';
@@ -78,10 +82,18 @@ export const ICONOS = {
   registrarMovimiento: PackageOpen,
   cerrarSesion: LogOut,
   cerrar: X, // no es un concepto de negocio del brief: cierre de hoja/modal/toast
+  info: Info,
 
   // Conexión
   enLinea: Wifi,
   sinConexion: WifiOff,
+
+  // Campos de "Datos del negocio" (Brief: rediseño de esta pantalla)
+  campoNombreComercial: House,
+  campoDireccion: MapPin,
+  campoTelefono: Phone,
+  campoCorreo: Mail,
+  campoRif: FileText,
 
   // Métodos de pago
   metodoEfectivoBs: Banknote,
