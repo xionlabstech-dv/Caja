@@ -49,6 +49,9 @@ import {
   Phone,
   Mail,
   Info,
+  Lock,
+  ChevronRight,
+  RotateCw,
   type LucideIcon,
 } from 'lucide-react';
 import type { MetodoPago } from '@/types';
@@ -94,6 +97,11 @@ export const ICONOS = {
   campoTelefono: Phone,
   campoCorreo: Mail,
   campoRif: FileText,
+
+  // Pantalla "Perfil" (rediseño)
+  candado: Lock,
+  flechaDerecha: ChevronRight,
+  cancelarSolicitud: RotateCw,
 
   // Métodos de pago
   metodoEfectivoBs: Banknote,
