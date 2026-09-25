@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { TIMEOUT_RPC_MS } from './sync';
 import { Rol } from '@/types';
 
 export interface UsuarioNegocio {
@@ -11,7 +12,9 @@ export interface UsuarioNegocio {
 
 export async function listarUsuarios(): Promise<UsuarioNegocio[] | null> {
   try {
-    const { data, error } = await supabase.rpc('listar_usuarios_negocio');
+    const { data, error } = await supabase
+      .rpc('listar_usuarios_negocio')
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
     if (error) throw error;
     return (data ?? []) as UsuarioNegocio[];
   } catch {
@@ -35,7 +38,10 @@ type ResultadoFuncion = { ok: true } | { ok: false; error: string };
 // Edge Function de este módulo.
 async function invocarFuncion<T extends object>(nombre: string, body: T, mensajeDefecto: string): Promise<ResultadoFuncion> {
   try {
-    const { data, error } = await supabase.functions.invoke(nombre, { body: body as unknown as Record<string, unknown> });
+    const { data, error } = await supabase.functions.invoke(nombre, {
+      body: body as unknown as Record<string, unknown>,
+      timeout: TIMEOUT_RPC_MS,
+    });
     if (error) {
       let mensaje = mensajeDefecto;
       const context = (error as { context?: Response }).context;
@@ -72,7 +78,12 @@ export async function eliminarUsuario(usuarioId: string): Promise<ResultadoFunci
 // original con usa_costos).
 export async function cambiarRol(id: string, rol: Rol): Promise<boolean> {
   try {
-    const { data, error } = await supabase.from('perfiles').update({ rol }).eq('id', id).select('id');
+    const { data, error } = await supabase
+      .from('perfiles')
+      .update({ rol })
+      .eq('id', id)
+      .select('id')
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
     if (error) throw error;
     return !!data && data.length > 0;
   } catch {
@@ -82,7 +93,12 @@ export async function cambiarRol(id: string, rol: Rol): Promise<boolean> {
 
 export async function cambiarActivo(id: string, activo: boolean): Promise<boolean> {
   try {
-    const { data, error } = await supabase.from('perfiles').update({ activo }).eq('id', id).select('id');
+    const { data, error } = await supabase
+      .from('perfiles')
+      .update({ activo })
+      .eq('id', id)
+      .select('id')
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
     if (error) throw error;
     return !!data && data.length > 0;
   } catch {

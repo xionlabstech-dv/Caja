@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { TIMEOUT_RPC_MS } from './sync';
 
 export interface TotalesPeriodo {
   total_bs: number;
@@ -70,7 +71,7 @@ export async function fetchTotales(negocioId: string, desde: Date, hasta: Date):
       p_negocio_id: negocioId,
       p_desde: desde.toISOString(),
       p_hasta: hasta.toISOString(),
-    }).single();
+    }).abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS)).single();
     if (error) throw error;
     return data as TotalesPeriodo;
   } catch {
@@ -84,7 +85,7 @@ export async function fetchPorMetodo(negocioId: string, desde: Date, hasta: Date
       p_negocio_id: negocioId,
       p_desde: desde.toISOString(),
       p_hasta: hasta.toISOString(),
-    });
+    }).abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
     if (error) throw error;
     return (data ?? []) as DesglosePorMetodo[];
   } catch {
@@ -106,7 +107,7 @@ export async function fetchTopProductos(
       p_hasta: hasta.toISOString(),
       p_limite: limite,
       p_orden: orden,
-    });
+    }).abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
     if (error) throw error;
     return (data ?? []) as TopProducto[];
   } catch {
@@ -120,7 +121,7 @@ export async function fetchPorDiaSemana(negocioId: string, desde: Date, hasta: D
       p_negocio_id: negocioId,
       p_desde: desde.toISOString(),
       p_hasta: hasta.toISOString(),
-    });
+    }).abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
     if (error) throw error;
     return (data ?? []) as VentasPorDiaSemana[];
   } catch {
@@ -130,7 +131,9 @@ export async function fetchPorDiaSemana(negocioId: string, desde: Date, hasta: D
 
 export async function fetchStockBajo(negocioId: string): Promise<StockBajoProducto[] | null> {
   try {
-    const { data, error } = await supabase.rpc('reportes_stock_bajo', { p_negocio_id: negocioId });
+    const { data, error } = await supabase
+      .rpc('reportes_stock_bajo', { p_negocio_id: negocioId })
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
     if (error) throw error;
     return (data ?? []) as StockBajoProducto[];
   } catch {
@@ -144,7 +147,7 @@ export async function fetchMermas(negocioId: string, desde: Date, hasta: Date): 
       p_negocio_id: negocioId,
       p_desde: desde.toISOString(),
       p_hasta: hasta.toISOString(),
-    });
+    }).abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
     if (error) throw error;
     return (data ?? []) as MermaPorMotivo[];
   } catch {

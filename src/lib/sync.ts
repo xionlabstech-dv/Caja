@@ -32,8 +32,27 @@ import {
 // siempre — un teléfono conectado a un WiFi sin salida real a internet
 // "cree" que tiene señal, pero fetch() nunca vuelve por sí solo. Se usa con
 // .abortSignal(), el mecanismo nativo que ya trae @supabase/supabase-js 2.x
-// (vía postgrest-js) — no hace falta un Promise.race a mano.
-const TIMEOUT_RPC_MS = 10000;
+// (vía postgrest-js) — no hace falta un Promise.race a mano. Exportada
+// porque usuarios.ts y reportes.ts la reusan — una sola fuente del valor.
+export const TIMEOUT_RPC_MS = 10000;
+
+// Candado genérico para llamadas que no pasan por postgrest-js (ej.
+// supabase.auth.*) y por lo tanto no tienen .abortSignal() nativo — mismo
+// patrón que el candado de procesarColaUnaPasada() en outbox.ts:
+// Promise.race contra un timeout, con catch sobre la promesa perdedora
+// (que sigue viva en segundo plano si gana el candado) para evitar un
+// unhandledrejection si rechaza tarde. Usado por LoginScreen.tsx y
+// cambiarPassword() en page.tsx.
+export async function conCandado<T>(promesa: Promise<T>, ms: number = TIMEOUT_RPC_MS): Promise<T | 'candado'> {
+  promesa.catch(() => {});
+  let timeoutId!: ReturnType<typeof setTimeout>;
+  const candado = new Promise<'candado'>(resolve => {
+    timeoutId = setTimeout(() => resolve('candado'), ms);
+  });
+  const resultado = await Promise.race([promesa, candado]);
+  clearTimeout(timeoutId);
+  return resultado;
+}
 
 export async function syncFromSupabase(negocioId: string): Promise<Configuracion | null> {
   try {

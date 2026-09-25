@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { conCandado } from '@/lib/sync';
 
 interface LoginScreenProps {
   // Mensaje a mostrar de entrada (ej. "tu usuario fue desactivado") — viene
@@ -42,9 +43,17 @@ export default function LoginScreen({ mensajeInicial, onMensajeVisto }: LoginScr
     let email = u.toLowerCase();
     if (!email.includes('@')) email += '@caja.app';
 
-    const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
+    // Candado: si el teléfono cree tener señal pero no llega a internet de
+    // verdad, signInWithPassword() puede quedarse esperando sin límite.
+    const resultado = await conCandado(supabase.auth.signInWithPassword({ email, password }));
 
-    if (authError) {
+    if (resultado === 'candado') {
+      setError('No se pudo confirmar, verifica tu conexión e intenta de nuevo');
+      setLoading(false);
+      return;
+    }
+
+    if (resultado.error) {
       if (!navigator.onLine) {
         setError('Sin conexión — necesitas internet para iniciar sesión por primera vez');
       } else {
