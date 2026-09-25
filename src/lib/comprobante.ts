@@ -218,13 +218,13 @@ function construirFilasPago(pagos: PagoVenta[]): FilaPago[] {
 // sobre un canvas ya del tamaño exacto, escalado ×2 para que se vea nítido
 // aunque lo abran con zoom en WhatsApp. El ancho varía por formato; el alto
 // siempre es dinámico (nunca una página física de tamaño fijo).
-async function generarPNG(ancho: number, dibujar: (ctx: CanvasRenderingContext2D, ancho: number) => number): Promise<Blob> {
+async function generarPNG(ancho: number, dibujar: (ctx: CanvasRenderingContext2D, ancho: number) => number, altoMinimo = 0): Promise<Blob> {
   const medidor = document.createElement('canvas');
   medidor.width = ancho;
   medidor.height = 8000;
   const ctxMedidor = medidor.getContext('2d');
   if (!ctxMedidor) throw new Error('No se pudo generar el documento');
-  const altoFinal = dibujar(ctxMedidor, ancho);
+  const altoFinal = Math.max(dibujar(ctxMedidor, ancho), altoMinimo);
 
   const canvas = document.createElement('canvas');
   canvas.width = ancho * ESCALA;
@@ -767,7 +767,8 @@ export async function generarComprobantePNG(datos: DatosComprobante): Promise<{ 
     : formato === 'media_carta' ? dibujarComprobanteMediaCarta
     : dibujarComprobanteTicket;
   const ancho = formato === 'ticket' ? 302 : 816;
-  const blob = await generarPNG(ancho, ctx => dibujar(ctx, datos));
+  const altoMinimo = formato === 'carta' ? 1056 : formato === 'media_carta' ? 528 : 0;
+  const blob = await generarPNG(ancho, ctx => dibujar(ctx, datos), altoMinimo);
   // Nunca "factura" en el nombre del archivo — regla del proyecto.
   return { blob, nombreArchivo: `comprobante-venta-${datos.numero}.png` };
 }
@@ -1047,7 +1048,7 @@ function dibujarPresupuestoMediaCarta(ctx: CanvasRenderingContext2D, datos: Dato
 export async function generarPresupuestoPNG(datos: DatosPresupuesto): Promise<{ blob: Blob; nombreArchivo: string }> {
   const formato = datos.datosNegocio?.formatoPresupuesto ?? 'media_carta';
   const dibujar = formato === 'carta' ? dibujarPresupuestoCarta : dibujarPresupuestoMediaCarta;
-  const blob = await generarPNG(816, ctx => dibujar(ctx, datos));
+  const blob = await generarPNG(816, ctx => dibujar(ctx, datos), formato === 'carta' ? 1056 : 528);
   return { blob, nombreArchivo: `presupuesto-${datos.numero}.png` };
 }
 
