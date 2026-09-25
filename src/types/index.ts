@@ -332,6 +332,8 @@ export interface DatosNegocio {
   telefono?: string;
   correo?: string;
   rif?: string;
+  formatoComprobante?: 'ticket' | 'carta' | 'media_carta';
+  formatoPresupuesto?: 'carta' | 'media_carta';
 }
 
 export type TipoPendiente =

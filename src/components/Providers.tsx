@@ -186,7 +186,7 @@ async function fetchPerfil(uid: string): Promise<PerfilResuelto | 'desactivado' 
 
     const { data: negocio } = await supabase
       .from('negocios')
-      .select('nombre, usa_costos, usa_stock, estado, fecha_proximo_pago, limite_usuarios, nombre_comercial, direccion, telefono, correo, rif')
+      .select('nombre, usa_costos, usa_stock, estado, fecha_proximo_pago, limite_usuarios, nombre_comercial, direccion, telefono, correo, rif, formato_comprobante, formato_presupuesto')
       .eq('id', perfil.negocio_id)
       .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS))
       .single();
@@ -214,6 +214,8 @@ async function fetchPerfil(uid: string): Promise<PerfilResuelto | 'desactivado' 
         telefono: negocio.telefono ?? undefined,
         correo: negocio.correo ?? undefined,
         rif: negocio.rif ?? undefined,
+        formatoComprobante: (negocio.formato_comprobante as DatosNegocio['formatoComprobante']) ?? undefined,
+        formatoPresupuesto: (negocio.formato_presupuesto as DatosNegocio['formatoPresupuesto']) ?? undefined,
       },
     };
   } catch {
