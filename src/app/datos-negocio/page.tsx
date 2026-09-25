@@ -81,9 +81,15 @@ export default function DatosNegocioPage() {
       return;
     }
 
-    const ok = await updateDatosNegocio(nuevo, negocioId);
+    const resultado = await updateDatosNegocio(nuevo, negocioId);
     setGuardando(false);
-    if (!ok) {
+    if (!resultado.ok) {
+      if (resultado.permanente === false) {
+        await encolarActualizarDatosNegocio(nuevo, negocioId);
+        setEditando(false);
+        showToast('Guardado localmente — se sincronizará cuando haya conexión');
+        return;
+      }
       await setCachedDatosNegocio(anterior);
       setDatosNegocio(anterior);
       showToast('No se pudo guardar el cambio. Intenta de nuevo.');

@@ -195,8 +195,15 @@ export default function CajaPage() {
     // verdad (ver comentario en sync.ts) — si no, no hubo guardado real
     // (ej. RLS lo bloqueó en silencio) y no hay que dejar el switch
     // mostrando un estado que nunca se persistió.
-    const ok = await updateUsaCostos(nuevo, negocioId);
-    if (!ok) {
+    const resultado = await updateUsaCostos(nuevo, negocioId);
+    if (!resultado.ok) {
+      if (resultado.permanente === false) {
+        // No hubo respuesta real (sin señal, timeout) — no es un rechazo
+        // del servidor, no hay que revertir: se encola igual que offline.
+        await encolarActualizarUsaCostos(nuevo, negocioId);
+        showToast('Guardado localmente — se sincronizará cuando haya conexión');
+        return;
+      }
       await setCachedUsaCostos(anterior);
       setUsaCostos(anterior);
       showToast('No se pudo guardar el cambio. Intenta de nuevo.');
@@ -234,8 +241,13 @@ export default function CajaPage() {
       return;
     }
 
-    const ok = await updateUsaStock(nuevo, negocioId);
-    if (!ok) {
+    const resultado = await updateUsaStock(nuevo, negocioId);
+    if (!resultado.ok) {
+      if (resultado.permanente === false) {
+        await encolarActualizarUsaStock(nuevo, negocioId);
+        showToast('Guardado localmente — se sincronizará cuando haya conexión');
+        return;
+      }
       await setCachedUsaStock(anterior);
       setUsaStock(anterior);
       showToast('No se pudo guardar el cambio. Intenta de nuevo.');
