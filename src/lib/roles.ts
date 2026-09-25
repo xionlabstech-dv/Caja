@@ -17,9 +17,9 @@ export const LIMITE_USUARIOS_POR_NEGOCIO = 3;
 const RUTAS_ADMIN = [
   '/', '/resumen', '/fiado', '/mas',
   '/reportes', '/tasa', '/inventario', '/usuarios', '/movimientos',
-  '/presupuestos', '/presupuestos/nuevo', '/datos-negocio',
+  '/presupuestos', '/presupuestos/nuevo', '/datos-negocio', '/perfil',
 ];
-const RUTAS_CAJERO = ['/', '/resumen', '/fiado', '/mas', '/presupuestos', '/presupuestos/nuevo'];
+const RUTAS_CAJERO = ['/', '/resumen', '/fiado', '/mas', '/presupuestos', '/presupuestos/nuevo', '/perfil'];
 
 // Con un negocio 'restringido', vender y cerrar caja (Caja, Resumen) y
 // fijar la tasa siguen andando — el resto de las pantallas de admin, no.
