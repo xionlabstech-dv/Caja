@@ -55,6 +55,16 @@ export default function TasaPage() {
     const resultado = await updateTasa(nueva, negocioId!);
     setGuardando(false);
     if (!resultado.ok) {
+      if (resultado.permanente === false) {
+        // No hubo respuesta real (sin señal, timeout) — no es un rechazo
+        // del servidor (ni siquiera llegó a validarse contra el piso), no
+        // hay que revertir: se encola igual que si hubiera estado offline.
+        await encolarActualizarTasa(nueva, negocioId!);
+        setInput('');
+        setMensaje('Guardada localmente — se sincronizará cuando haya conexión');
+        setTimeout(() => setMensaje(''), 3000);
+        return;
+      }
       if (configAnterior) await saveConfiguracion(configAnterior);
       else await deleteConfiguracion();
       setTasa(tasaAnterior);

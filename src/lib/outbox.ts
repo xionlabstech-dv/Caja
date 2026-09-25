@@ -31,6 +31,7 @@ import {
   sincronizarPresupuesto,
   actualizarPresupuestoSupabase,
   updateDatosNegocio,
+  ResultadoEscritura,
 } from './sync';
 import {
   OperacionPendiente,
@@ -202,26 +203,42 @@ export async function encolarActualizarPresupuesto(presupuestoId: string, negoci
   await encolar('actualizar_presupuesto', payload, `presupuesto-estado-${presupuestoId}`);
 }
 
+// Mismo criterio que ya usan 'aplicar_movimiento_stock'/'aplicar_movimiento_fiado'
+// más abajo: ok → resuelto, sale de la cola; permanente → el servidor ya
+// respondió que no (RLS, permiso, o el propio dato es inválido) y reintentar
+// no lo va a cambiar, así que también sale de la cola pero avisando; ni ok
+// ni permanente → fallo transitorio (nunca hubo respuesta real), se
+// reintenta con el backoff de siempre.
+function resolverResultadoEscritura(resultado: ResultadoEscritura, mensajeFallo: string): boolean {
+  if (resultado.ok) return true;
+  if (resultado.permanente) {
+    notificarFalloPermanente(`${mensajeFallo}: ${resultado.mensaje ?? 'el servidor lo rechazó'}`);
+    return true;
+  }
+  return false;
+}
+
 async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
   switch (op.tipo) {
     case 'crear_producto': {
       const { producto, negocioId } = op.payload as PayloadCrearProducto;
       const resultado = await createProductoSupabase(producto, negocioId);
-      // 'duplicate' en un reintento de cola = mismo id ya insertado antes → resuelto.
-      return resultado !== null;
+      return resolverResultadoEscritura(resultado, 'No se pudo guardar un producto nuevo');
     }
     case 'editar_producto': {
       const { id, datos } = op.payload as PayloadEditarProducto;
       const resultado = await updateProductoSupabase(id, datos);
-      return resultado !== false;
+      return resolverResultadoEscritura(resultado, 'No se pudo guardar la edición de un producto');
     }
     case 'eliminar_producto': {
       const { id } = op.payload as PayloadEliminarProducto;
-      return await softDeleteProducto(id);
+      const resultado = await softDeleteProducto(id);
+      return resolverResultadoEscritura(resultado, 'No se pudo eliminar un producto');
     }
     case 'actualizar_tasa': {
       const { tasa, negocioId } = op.payload as PayloadActualizarTasa;
-      return (await updateTasa(tasa, negocioId)).ok;
+      const resultado = await updateTasa(tasa, negocioId);
+      return resolverResultadoEscritura(resultado, 'No se pudo actualizar la tasa');
     }
     case 'cerrar_caja': {
       const { cierre, negocioId } = op.payload as PayloadCerrarCaja;
@@ -244,15 +261,18 @@ async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
     }
     case 'actualizar_usa_costos': {
       const { usaCostos, negocioId } = op.payload as PayloadActualizarUsaCostos;
-      return await updateUsaCostos(usaCostos, negocioId);
+      const resultado = await updateUsaCostos(usaCostos, negocioId);
+      return resolverResultadoEscritura(resultado, 'No se pudo guardar el cambio de control de costos');
     }
     case 'actualizar_usa_stock': {
       const { usaStock, negocioId } = op.payload as PayloadActualizarUsaStock;
-      return await updateUsaStock(usaStock, negocioId);
+      const resultado = await updateUsaStock(usaStock, negocioId);
+      return resolverResultadoEscritura(resultado, 'No se pudo guardar el cambio de control de inventario');
     }
     case 'actualizar_datos_negocio': {
       const { datos, negocioId } = op.payload as PayloadActualizarDatosNegocio;
-      return await updateDatosNegocio(datos, negocioId);
+      const resultado = await updateDatosNegocio(datos, negocioId);
+      return resolverResultadoEscritura(resultado, 'No se pudo guardar los datos del negocio');
     }
     case 'aplicar_movimiento_stock': {
       const { movimientoId } = op.payload as PayloadAplicarMovimientoStock;

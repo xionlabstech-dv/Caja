@@ -411,7 +411,17 @@ export default function InventarioPage() {
 
       const resultado = await updateProductoSupabase(editando.id, datos);
       setGuardando(false);
-      if (resultado === false) {
+      if (!resultado.ok) {
+        if (resultado.permanente === false) {
+          // No hubo respuesta real (sin señal, timeout) — no es un rechazo
+          // del servidor, no hay que revertir: se encola igual que si
+          // hubiera estado offline desde el principio.
+          await encolarEditarProducto(editando.id, datos);
+          await cargar();
+          setShowModal(false);
+          showToast('Guardado localmente — se sincronizará cuando haya conexión');
+          return;
+        }
         await saveProducto(original);
         await cargar();
         setError('No se pudo guardar el producto. Intenta de nuevo.');
@@ -435,7 +445,14 @@ export default function InventarioPage() {
 
       const resultado = await createProductoSupabase(nuevo, negocioId!);
       setGuardando(false);
-      if (resultado === null) {
+      if (!resultado.ok) {
+        if (resultado.permanente === false) {
+          await encolarCrearProducto(nuevo, negocioId!);
+          await cargar();
+          setShowModal(false);
+          showToast('Guardado localmente — se sincronizará cuando haya conexión');
+          return;
+        }
         await deleteProductoDB(nuevo.id);
         await cargar();
         setError('No se pudo guardar el producto. Intenta de nuevo.');
@@ -473,8 +490,14 @@ export default function InventarioPage() {
       return;
     }
 
-    const ok = await softDeleteProducto(p.id);
-    if (!ok) {
+    const resultado = await softDeleteProducto(p.id);
+    if (!resultado.ok) {
+      if (resultado.permanente === false) {
+        await encolarEliminarProducto(p.id);
+        await cargar();
+        showToast('Eliminado localmente — se sincronizará cuando haya conexión');
+        return;
+      }
       // No se borró de verdad (ej. RLS lo bloqueó en silencio) — restaurar
       // en vez de dejarlo desaparecido de la lista sin haberse eliminado.
       await saveProducto(p);

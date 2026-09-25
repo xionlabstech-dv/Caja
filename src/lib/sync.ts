@@ -121,75 +121,120 @@ export async function syncFromSupabase(negocioId: string): Promise<Configuracion
 // negocios). Todo UPDATE de este archivo pide sus filas de vuelta y trata
 // data vacía como fallo, nunca como éxito.
 
-export interface ResultadoUpdateTasa {
+// Shape compartido para las escrituras de este archivo que son un UPDATE (o
+// INSERT) directo, no una RPC — updateTasa, updateUsaCostos, updateUsaStock,
+// updateDatosNegocio, createProductoSupabase, updateProductoSupabase y
+// softDeleteProducto. Mismo criterio permanente/transitorio que ya usan
+// aplicarMovimientoStockRemoto/aplicarMovimientoFiadoRemoto: status 0 (nunca
+// hubo respuesta real — sin señal, timeout, DNS caído) siempre transitorio;
+// un UPDATE que no tocó ninguna fila (RLS/permiso) o cualquier otro error
+// del servidor, permanente — reintentar no lo va a cambiar.
+export interface ResultadoEscritura {
   ok: boolean;
+  // Solo relevante cuando ok es false.
+  permanente?: boolean;
   mensaje?: string;
 }
 
-// Devuelve el mensaje del error (no solo un boolean) porque ahora puede
-// fallar por una razón que el usuario necesita ver tal cual: el trigger
-// trg_validar_piso_tasa_oficial en Supabase rechaza el UPDATE si la tasa
-// manual queda por debajo de la tasa oficial del día (la que carga el
-// endpoint automático /api/actualizar-tasa) — ver comentario de esa regla
-// en la pantalla de Tasa.
-export async function updateTasa(tasa: number, negocioId: string): Promise<ResultadoUpdateTasa> {
+// El mensaje del error se conserva tal cual porque ahora puede traer algo
+// que el usuario necesita ver: el trigger trg_validar_piso_tasa_oficial en
+// Supabase rechaza el UPDATE si la tasa manual queda por debajo de la tasa
+// oficial del día (la que carga el endpoint automático
+// /api/actualizar-tasa) — ver comentario de esa regla en la pantalla de
+// Tasa. Ese caso ya es un error real (permanente: true) con su propio
+// mensaje, esta función no le cambia nada de esa lógica.
+export async function updateTasa(tasa: number, negocioId: string): Promise<ResultadoEscritura> {
+  const now = new Date().toISOString();
+  let data: unknown[] | null;
+  let error: { message?: string } | null;
+  let status: number;
   try {
-    const now = new Date().toISOString();
-    const { data, error } = await supabase
+    ({ data, error, status } = await supabase
       .from('configuracion')
       .update({ tasa, tasa_actualizada_en: now })
       .eq('negocio_id', negocioId)
-      .select('negocio_id');
-
-    if (error) throw error;
-    if (!data || data.length === 0) return { ok: false };
-
-    await saveConfiguracion({ id: 1, tasa, tasa_actualizada_en: now });
-    return { ok: true };
+      .select('negocio_id')
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS)));
   } catch (err) {
-    return { ok: false, mensaje: (err as { message?: string }).message };
+    return { ok: false, mensaje: (err as { message?: string }).message, permanente: false };
   }
+
+  if (error) {
+    if (status === 0) return { ok: false, mensaje: error.message, permanente: false };
+    return { ok: false, mensaje: error.message, permanente: true };
+  }
+  if (!data || data.length === 0) {
+    return { ok: false, permanente: true, mensaje: 'No se pudo guardar la tasa' };
+  }
+
+  await saveConfiguracion({ id: 1, tasa, tasa_actualizada_en: now });
+  return { ok: true };
 }
 
-export async function updateUsaCostos(usaCostos: boolean, negocioId: string): Promise<boolean> {
+export async function updateUsaCostos(usaCostos: boolean, negocioId: string): Promise<ResultadoEscritura> {
+  let data: unknown[] | null;
+  let error: { message?: string } | null;
+  let status: number;
   try {
-    const { data, error } = await supabase
+    ({ data, error, status } = await supabase
       .from('negocios')
       .update({ usa_costos: usaCostos })
       .eq('id', negocioId)
-      .select('id');
-    if (error) throw error;
-    if (!data || data.length === 0) return false;
-    await setCachedUsaCostos(usaCostos);
-    return true;
-  } catch {
-    return false;
+      .select('id')
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS)));
+  } catch (err) {
+    return { ok: false, mensaje: (err as { message?: string }).message, permanente: false };
   }
+
+  if (error) {
+    if (status === 0) return { ok: false, mensaje: error.message, permanente: false };
+    return { ok: false, mensaje: error.message, permanente: true };
+  }
+  if (!data || data.length === 0) {
+    return { ok: false, permanente: true, mensaje: 'No se pudo guardar el cambio' };
+  }
+
+  await setCachedUsaCostos(usaCostos);
+  return { ok: true };
 }
 
-export async function updateUsaStock(usaStock: boolean, negocioId: string): Promise<boolean> {
+export async function updateUsaStock(usaStock: boolean, negocioId: string): Promise<ResultadoEscritura> {
+  let data: unknown[] | null;
+  let error: { message?: string } | null;
+  let status: number;
   try {
-    const { data, error } = await supabase
+    ({ data, error, status } = await supabase
       .from('negocios')
       .update({ usa_stock: usaStock })
       .eq('id', negocioId)
-      .select('id');
-    if (error) throw error;
-    if (!data || data.length === 0) return false;
-    await setCachedUsaStock(usaStock);
-    return true;
-  } catch {
-    return false;
+      .select('id')
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS)));
+  } catch (err) {
+    return { ok: false, mensaje: (err as { message?: string }).message, permanente: false };
   }
+
+  if (error) {
+    if (status === 0) return { ok: false, mensaje: error.message, permanente: false };
+    return { ok: false, mensaje: error.message, permanente: true };
+  }
+  if (!data || data.length === 0) {
+    return { ok: false, permanente: true, mensaje: 'No se pudo guardar el cambio' };
+  }
+
+  await setCachedUsaStock(usaStock);
+  return { ok: true };
 }
 
 // Mismo patrón exacto que updateUsaCostos/updateUsaStock: un update directo
 // a negocios, sin RPC. Los cuatro campos son opcionales — un valor vacío se
 // manda como null en vez de una cadena vacía, para que "borrar el teléfono"
 // funcione igual que "nunca lo cargó".
-export async function updateDatosNegocio(datos: DatosNegocio, negocioId: string): Promise<boolean> {
+export async function updateDatosNegocio(datos: DatosNegocio, negocioId: string): Promise<ResultadoEscritura> {
+  let data: unknown[] | null;
+  let error: { message?: string } | null;
+  let status: number;
   try {
-    const { data, error } = await supabase
+    ({ data, error, status } = await supabase
       .from('negocios')
       .update({
         nombre_comercial: datos.nombreComercial || null,
@@ -199,63 +244,103 @@ export async function updateDatosNegocio(datos: DatosNegocio, negocioId: string)
         rif: datos.rif || null,
       })
       .eq('id', negocioId)
-      .select('id');
-    if (error) throw error;
-    if (!data || data.length === 0) return false;
-    await setCachedDatosNegocio(datos);
-    return true;
-  } catch {
-    return false;
+      .select('id')
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS)));
+  } catch (err) {
+    return { ok: false, mensaje: (err as { message?: string }).message, permanente: false };
   }
+
+  if (error) {
+    if (status === 0) return { ok: false, mensaje: error.message, permanente: false };
+    return { ok: false, mensaje: error.message, permanente: true };
+  }
+  if (!data || data.length === 0) {
+    return { ok: false, permanente: true, mensaje: 'No se pudo guardar el cambio' };
+  }
+
+  await setCachedDatosNegocio(datos);
+  return { ok: true };
 }
 
+// El Producto armado ya no se devuelve — inventario/page.tsx nunca lo usaba,
+// solo miraba si el resultado era null. 23505 con el mismo id (retry de la
+// cola offline) sigue siendo éxito, no un fallo.
 export async function createProductoSupabase(
   producto: Producto,
   negocioId: string
-): Promise<Producto | 'duplicate' | null> {
+): Promise<ResultadoEscritura> {
+  let error: { message?: string; code?: string } | null;
+  let status: number;
   try {
-    const { data, error } = await supabase
+    ({ error, status } = await supabase
       .from('productos')
       .insert({ ...producto, negocio_id: negocioId })
-      .select()
-      .single();
-
-    if (error) throw error;
-    return data as Producto;
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS)));
   } catch (err) {
-    const code = (err as { code?: string }).code;
-    // 23505 con el mismo id (retry de la cola offline) = ya sincronizado, no error real
-    if (code === '23505') return 'duplicate';
-    return null;
+    return { ok: false, mensaje: (err as { message?: string }).message, permanente: false };
   }
+
+  if (error) {
+    if (error.code === '23505') return { ok: true };
+    if (status === 0) return { ok: false, mensaje: error.message, permanente: false };
+    return { ok: false, mensaje: error.message, permanente: true };
+  }
+  return { ok: true };
 }
 
 export async function updateProductoSupabase(
   id: string,
   producto: Partial<Producto>
-): Promise<boolean | 'duplicate'> {
+): Promise<ResultadoEscritura> {
+  let data: unknown[] | null;
+  let error: { message?: string; code?: string } | null;
+  let status: number;
   try {
-    const { data, error } = await supabase.from('productos').update(producto).eq('id', id).select('id');
-    if (error) throw error;
-    return !!data && data.length > 0;
+    ({ data, error, status } = await supabase
+      .from('productos')
+      .update(producto)
+      .eq('id', id)
+      .select('id')
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS)));
   } catch (err) {
-    if ((err as { code?: string }).code === '23505') return 'duplicate';
-    return false;
+    return { ok: false, mensaje: (err as { message?: string }).message, permanente: false };
   }
+
+  if (error) {
+    // 23505 con el mismo id (retry de la cola offline) = ya sincronizado, no error real
+    if (error.code === '23505') return { ok: true };
+    if (status === 0) return { ok: false, mensaje: error.message, permanente: false };
+    return { ok: false, mensaje: error.message, permanente: true };
+  }
+  if (!data || data.length === 0) {
+    return { ok: false, permanente: true, mensaje: 'No se pudo guardar el producto' };
+  }
+  return { ok: true };
 }
 
-export async function softDeleteProducto(id: string): Promise<boolean> {
+export async function softDeleteProducto(id: string): Promise<ResultadoEscritura> {
+  let data: unknown[] | null;
+  let error: { message?: string } | null;
+  let status: number;
   try {
-    const { data, error } = await supabase
+    ({ data, error, status } = await supabase
       .from('productos')
       .update({ activo: false })
       .eq('id', id)
-      .select('id');
-    if (error) throw error;
-    return !!data && data.length > 0;
-  } catch {
-    return false;
+      .select('id')
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS)));
+  } catch (err) {
+    return { ok: false, mensaje: (err as { message?: string }).message, permanente: false };
   }
+
+  if (error) {
+    if (status === 0) return { ok: false, mensaje: error.message, permanente: false };
+    return { ok: false, mensaje: error.message, permanente: true };
+  }
+  if (!data || data.length === 0) {
+    return { ok: false, permanente: true, mensaje: 'No se pudo eliminar el producto' };
+  }
+  return { ok: true };
 }
 
 // Nunca se manda saldo_usd: el trigger en Supabase lo fuerza a nacer en 0
