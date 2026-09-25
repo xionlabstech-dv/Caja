@@ -898,7 +898,7 @@ function dibujarPresupuestoCarta(ctx: CanvasRenderingContext2D, datos: DatosPres
   ctx.font = '13px sans-serif';
   ctx.fillStyle = COLOR_TEXTO_SUAVE;
   ctx.textAlign = 'left';
-  const notaPie = `Tasa del día: Bs ${tasaTxt} por 1 USD. ${resumenProductosUnidades(items)}. Bs estimado — se recalcula el día del pago.`;
+  const notaPie = `Tasa del día: Bs ${tasaTxt} por 1 USD. ${resumenProductosUnidades(items)}.`;
   const anchoNotaPie = ancho - padX * 2 - 300 - 40;
   const notaPieLineas = envolverTexto(ctx, notaPie, anchoNotaPie);
   let yNota = yPie;
