@@ -3,13 +3,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useApp } from '@/components/Providers';
 import { useGuardarRuta } from '@/lib/useGuardarRuta';
-import { listarUsuarios, crearUsuario, cambiarRol, cambiarActivo, eliminarUsuario, UsuarioNegocio } from '@/lib/usuarios';
+import { listarUsuarios, crearUsuario, cambiarRol, cambiarActivo, eliminarUsuario, usernameDe, UsuarioNegocio } from '@/lib/usuarios';
 import { Rol } from '@/types';
 import ThemeToggle from '@/components/ThemeToggle';
-
-function usernameDe(email: string): string {
-  return email.split('@')[0];
-}
 
 const FORM_VACIO = { usuario: '', password: '', nombre: '', rol: 'cajero' as Rol };
 

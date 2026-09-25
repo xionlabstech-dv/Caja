@@ -2,6 +2,14 @@ import { supabase } from './supabase';
 import { TIMEOUT_RPC_MS } from './sync';
 import { Rol } from '@/types';
 
+// La parte de antes de la @ — no hay columna "username" separada, el
+// usuario siempre fue el correo con el sufijo fijo (ver LoginScreen). Vive
+// acá (no en cada pantalla) porque tanto Usuarios como Perfil necesitan
+// mostrarlo.
+export function usernameDe(email: string): string {
+  return email.split('@')[0];
+}
+
 export interface UsuarioNegocio {
   id: string;
   nombre: string | null;
