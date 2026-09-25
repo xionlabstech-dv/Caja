@@ -63,6 +63,19 @@ function backoffMs(intentos: number): number {
   return Math.min(2 ** intentos * 1000, 60000);
 }
 
+// Red de seguridad por ENCIMA de TIMEOUT_RPC_MS (10s, en sync.ts): cuando
+// una función ya tiene su propio timeout interno, ese tiene que ganar
+// siempre — es el único que sabe distinguir "no hubo respuesta" (transitorio)
+// de "el servidor rechazó" (permanente). Este candado de cola solo actúa
+// cuando no hay timeout interno (la mayoría de las operaciones de esta cola
+// todavía no lo tienen) o cuando algo se colgó más allá de su propio límite.
+//
+// 25s y no 10s: aplicar_movimiento_fiado, en su peor caso legítimo, encadena
+// aplicarMovimientoFiadoRemoto (hasta 10s) más, si el fallo es permanente,
+// un getSaldoFiadoRemoto que hoy no tiene timeout propio — un candado de 10s
+// podría cortar una operación que en realidad iba bien.
+const TIMEOUT_OPERACION_MS = 25000;
+
 // Aviso de un cambio que el servidor rechazó de forma DEFINITIVA (no un
 // problema de red) — se saca de la cola en vez de reintentar para siempre,
 // pero eso no puede pasar en silencio: quien esté usando la app necesita
@@ -339,8 +352,40 @@ async function procesarColaUnaPasada(): Promise<number> {
       if (transcurrido < espera) continue;
     }
 
-    const ok = await procesarOperacion(op);
-    if (ok) {
+    const promesaOperacion = procesarOperacion(op);
+    // Promise.race no cancela a la perdedora: si gana el candado, esta
+    // sigue viva en segundo plano. Sin este catch, un rechazo tardío (ya
+    // sin nadie esperándola acá) dispararía un unhandledrejection.
+    promesaOperacion.catch(() => {});
+
+    let timeoutId: ReturnType<typeof setTimeout>;
+    const promesaCandado = new Promise<'candado'>(resolve => {
+      timeoutId = setTimeout(() => resolve('candado'), TIMEOUT_OPERACION_MS);
+    });
+
+    const resultado = await Promise.race([promesaOperacion, promesaCandado]);
+
+    if (resultado === 'candado') {
+      // Nunca supimos si esto iba a terminar en éxito o en rechazo del
+      // servidor — se trata como fallo transitorio (se re-encola), nunca
+      // como éxito (perdería el dato) ni como rechazo definitivo: el
+      // candado no es un "no" del servidor, es que no hubo respuesta a
+      // tiempo, así que no se llama a notificarFalloPermanente.
+      await encolarPendiente({
+        ...op,
+        intentos: op.intentos + 1,
+        ultimoIntento: new Date().toISOString(),
+      });
+      // Si una operación agotó los 25s del candado, la red está
+      // prácticamente muerta — seguir con las demás de esta pasada solo
+      // gasta batería. No traba nada: la operación vencida queda salteada
+      // por su propio backoff en la próxima pasada, y las demás sí se
+      // procesan ahí (mismo criterio que el break de arriba por !onLine).
+      break;
+    }
+
+    clearTimeout(timeoutId!);
+    if (resultado) {
       await eliminarPendiente(op.id);
       procesados++;
     } else {
