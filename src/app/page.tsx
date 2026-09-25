@@ -30,7 +30,7 @@ import {
   encolarActualizarPresupuesto,
   onFalloPermanente,
 } from '@/lib/outbox';
-import { updateUsaCostos, updateUsaStock } from '@/lib/sync';
+import { updateUsaCostos, updateUsaStock, conCandado } from '@/lib/sync';
 import { precioBS, precioUSD, costoUSD, formatBS, formatUSD } from '@/lib/precio';
 import { pareceCodigoBarra } from '@/lib/barcode';
 import { compartirComprobante } from '@/lib/comprobante';
@@ -275,18 +275,33 @@ export default function CajaPage() {
       return;
     }
     setPassCargando(true);
-    const { error: signInError } = await supabase.auth.signInWithPassword({
+
+    // Candado: si el teléfono cree tener señal pero no llega a internet de
+    // verdad, no hay forma de distinguir "no hubo respuesta" de "la
+    // contraseña está mal" sin esto — antes las dos caían en el mismo
+    // mensaje de "Contraseña actual incorrecta".
+    const resultadoSignIn = await conCandado(supabase.auth.signInWithPassword({
       email: user?.email ?? '',
       password: passActual,
-    });
-    if (signInError) {
+    }));
+    if (resultadoSignIn === 'candado') {
+      setPassError('No se pudo confirmar, verifica tu conexión e intenta de nuevo');
+      setPassCargando(false);
+      return;
+    }
+    if (resultadoSignIn.error) {
       setPassError('Contraseña actual incorrecta');
       setPassCargando(false);
       return;
     }
-    const { error: updateError } = await supabase.auth.updateUser({ password: passNueva });
+
+    const resultadoUpdate = await conCandado(supabase.auth.updateUser({ password: passNueva }));
     setPassCargando(false);
-    if (updateError) {
+    if (resultadoUpdate === 'candado') {
+      setPassError('No se pudo confirmar, verifica tu conexión e intenta de nuevo');
+      return;
+    }
+    if (resultadoUpdate.error) {
       setPassError('Error al actualizar la contraseña');
       return;
     }
