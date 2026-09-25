@@ -147,7 +147,7 @@ export default function UsuariosPage() {
             {usuarios ? `${activos.length} de ${limiteUsuarios} usuarios` : 'Gestión de acceso'}
           </p>
         </div>
-        <ThemeToggle />
+        <ThemeToggle variant="neutro" />
       </header>
 
       <div className="p-4 space-y-4">
