@@ -257,15 +257,15 @@ export default function DatosNegocioPage() {
 
   return (
     <div>
-      <header className="bg-white dark:bg-[#151B18] border-b border-[#E4E7E6] dark:border-[#2A332E] px-4 pt-3.5 pb-3 flex items-center gap-2.5">
-        <button onClick={() => router.back()} className="p-1 -ml-1 flex-shrink-0 text-[#5C6663] dark:text-[#A3ADA8]" aria-label="Volver">
+      <header className="bg-superficie-barra border-b border-borde-divisor px-4 pt-3.5 pb-3 flex items-center gap-2.5">
+        <button onClick={() => router.back()} className="p-1 -ml-1 flex-shrink-0 text-texto-3" aria-label="Volver">
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
         </button>
         <div className="flex-1 min-w-0">
-          <h1 className="text-base font-bold text-[#111614] dark:text-[#F1F4F2] truncate">Datos del negocio</h1>
-          <p className="text-[11px] font-medium text-[#5C6663] dark:text-[#A3ADA8] truncate">
+          <h1 className="text-base font-bold text-texto truncate">Datos del negocio</h1>
+          <p className="text-[11px] font-medium text-texto-3 truncate">
             {bloqueado ? 'Bloqueada · toca Editar para cambiar' : 'Editando · nada se guarda hasta confirmar'}
           </p>
         </div>
@@ -273,7 +273,7 @@ export default function DatosNegocioPage() {
           {bloqueado && (
             <button
               onClick={() => setEditando(true)}
-              className="min-h-[40px] px-3.5 rounded-xl border border-[#E4E7E6] dark:border-[#2A332E] bg-[#F0F2F1] dark:bg-[#1E2622] text-[#111614] dark:text-[#F1F4F2] flex items-center gap-1.5 font-semibold text-sm"
+              className="min-h-[40px] px-3.5 rounded-xl border border-borde-divisor bg-tarjeta-hundida text-texto flex items-center gap-1.5 font-semibold text-sm"
             >
               <Icon nombre="editar" tamano={15} />
               Editar
