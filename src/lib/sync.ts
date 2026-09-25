@@ -245,23 +245,32 @@ export async function updateUsaStock(usaStock: boolean, negocioId: string): Prom
 }
 
 // Mismo patrón exacto que updateUsaCostos/updateUsaStock: un update directo
-// a negocios, sin RPC. Los cuatro campos son opcionales — un valor vacío se
-// manda como null en vez de una cadena vacía, para que "borrar el teléfono"
-// funcione igual que "nunca lo cargó".
+// a negocios, sin RPC. Los cinco campos de contacto son opcionales — un
+// valor vacío se manda como null en vez de una cadena vacía, para que
+// "borrar el teléfono" funcione igual que "nunca lo cargó". formato_
+// comprobante/formato_presupuesto son distintos: son NOT NULL con default
+// en la base ('ticket'/'media_carta'), así que nunca se manda null ahí —
+// solo se incluyen en el UPDATE cuando datos ya trae un valor real, para no
+// romper el guardado de los datos de contacto con un NOT NULL violation
+// cuando el negocio todavía no tocó el formato.
 export async function updateDatosNegocio(datos: DatosNegocio, negocioId: string): Promise<ResultadoEscritura> {
+  const actualizacion: Record<string, string | null> = {
+    nombre_comercial: datos.nombreComercial || null,
+    direccion: datos.direccion || null,
+    telefono: datos.telefono || null,
+    correo: datos.correo || null,
+    rif: datos.rif || null,
+  };
+  if (datos.formatoComprobante) actualizacion.formato_comprobante = datos.formatoComprobante;
+  if (datos.formatoPresupuesto) actualizacion.formato_presupuesto = datos.formatoPresupuesto;
+
   let data: unknown[] | null;
   let error: { message?: string } | null;
   let status: number;
   try {
     ({ data, error, status } = await supabase
       .from('negocios')
-      .update({
-        nombre_comercial: datos.nombreComercial || null,
-        direccion: datos.direccion || null,
-        telefono: datos.telefono || null,
-        correo: datos.correo || null,
-        rif: datos.rif || null,
-      })
+      .update(actualizacion)
       .eq('id', negocioId)
       .select('id')
       .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS)));
