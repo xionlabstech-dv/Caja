@@ -55,6 +55,8 @@ import {
   Calendar,
   ArrowUpDown,
   Check,
+  Share2,
+  Ban,
   type LucideIcon,
 } from 'lucide-react';
 import type { MetodoPago } from '@/types';
@@ -114,6 +116,10 @@ export const ICONOS = {
 
   // Pantalla "Fiado" (rediseño) — botón "Registrar abono"
   confirmar: Check,
+
+  // Pantalla "Resumen" (rediseño)
+  compartir: Share2,
+  anular: Ban,
 
   // Métodos de pago
   metodoEfectivoBs: Banknote,
