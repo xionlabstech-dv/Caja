@@ -1,12 +1,16 @@
 'use client';
 
-import { useState } from 'react';
-import { saveConfiguracion, deleteConfiguracion } from '@/lib/db';
+import { useState, useRef } from 'react';
+import { saveConfiguracion, deleteConfiguracion, getConfiguracion } from '@/lib/db';
 import { encolarActualizarTasa } from '@/lib/outbox';
 import { updateTasa } from '@/lib/sync';
 import { useApp } from '@/components/Providers';
 import { useGuardarRuta } from '@/lib/useGuardarRuta';
 import ThemeToggle from '@/components/ThemeToggle';
+import Button from '@/components/ui/Button';
+import Input from '@/components/ui/Input';
+import Icon from '@/components/ui/Icon';
+import { TAMANO_ICONO } from '@/components/ui/iconos';
 
 export default function TasaPage() {
   const permitida = useGuardarRuta();
@@ -15,8 +19,16 @@ export default function TasaPage() {
   const [guardando, setGuardando] = useState(false);
   const [mensaje, setMensaje] = useState('');
   const [error, setError] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
 
   if (!permitida) return null;
+
+  // Atajo de conveniencia desde el aviso de "chequeo automático fallido" —
+  // no toca nada de handleGuardar, solo lleva el foco al campo de abajo.
+  const enfocarFormulario = () => {
+    inputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    inputRef.current?.focus();
+  };
 
   const handleGuardar = async () => {
     const nueva = parseFloat(input.replace(',', '.'));
@@ -33,8 +45,12 @@ export default function TasaPage() {
     const now = new Date().toISOString();
 
     // Optimista: se aplica local de inmediato para que la UI responda al
-    // instante.
-    await saveConfiguracion({ id: 1, tasa: nueva, tasa_actualizada_en: now });
+    // instante. saveConfiguracion reemplaza el registro completo (put) — se
+    // lee lo que ya había en caché y se mezcla antes de guardar, si no un
+    // guardado manual borraría tasa_oficial/tasa_oficial_actualizada_en/
+    // tasa_actualizacion_fallida hasta el próximo sync completo.
+    const actual = await getConfiguracion();
+    await saveConfiguracion({ ...actual, id: 1, tasa: nueva, tasa_actualizada_en: now });
     setTasa(nueva);
 
     if (!isOnline) {
@@ -99,42 +115,68 @@ export default function TasaPage() {
 
   return (
     <div>
-      <header className="bg-emerald-600 text-white px-4 pt-4 pb-3 flex items-start justify-between">
-        <div>
-          <h1 className="text-xl font-bold">Tasa BCV</h1>
-          <p className="text-emerald-200 text-sm mt-0.5">Tipo de cambio Bs / $</p>
+      <header className="bg-superficie-barra border-b border-borde-divisor px-4 pt-3.5 pb-3 flex items-center gap-2.5">
+        <div className="flex-1 min-w-0">
+          <h1 className="text-base font-bold text-texto truncate">Tasa BCV</h1>
+          <p className="text-[11px] font-medium text-texto-3 truncate">Define los precios en Bs de todo el día</p>
         </div>
-        <ThemeToggle />
+        <ThemeToggle variant="neutro" />
       </header>
 
-      <div className="p-4 space-y-4">
+      <div className="px-4 py-3.5 flex flex-col gap-3.5">
         {/* Tasa actual */}
-        <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 text-center">
-          <p className="text-gray-500 text-sm mb-1">Tasa actual</p>
+        <div className="p-5 rounded-2xl bg-tinta">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-tinta-etiqueta">Bs por 1 USD</p>
+            {tasa > 0 && (
+              configuracion?.tasa_actualizacion_fallida ? (
+                <span className="flex-none h-6 px-2.5 inline-flex items-center rounded-full bg-aviso-fondo text-aviso text-[11px] font-bold whitespace-nowrap">
+                  Sin verificar
+                </span>
+              ) : (
+                <span className="flex-none h-6 px-2.5 inline-flex items-center rounded-full bg-marca-suave text-marca-suave-texto text-[11px] font-bold whitespace-nowrap">
+                  Verificada
+                </span>
+              )
+            )}
+          </div>
           {tasa > 0 ? (
             <>
-              <p className="text-4xl font-bold text-gray-900">
+              <p className="mt-1.5 text-4xl font-extrabold text-tinta-texto tracking-tight tabular-nums">
                 {tasa.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
-              <p className="text-gray-400 text-sm mt-1">Bs por 1 USD</p>
+              {fechaActualizada && (
+                <p className="mt-1 text-tinta-etiqueta">Actualizada: {fechaActualizada}</p>
+              )}
             </>
           ) : (
-            <p className="text-2xl text-gray-400 font-medium">No configurada</p>
-          )}
-          {fechaActualizada && (
-            <p className="text-gray-400 text-xs mt-3">Actualizada: {fechaActualizada}</p>
+            <p className="mt-1.5 text-2xl text-tinta-etiqueta font-medium">No configurada</p>
           )}
         </div>
 
-        {/* Ejemplo de conversión */}
+        {/* Aviso: el último chequeo automático contra el BCV falló */}
+        {configuracion?.tasa_actualizacion_fallida && (
+          <div className="p-3.5 rounded-[12px] bg-aviso-fondo border border-aviso-borde flex flex-col gap-2.5">
+            <p className="text-sm text-aviso">
+              El último chequeo automático contra la tasa oficial no se pudo completar. Puede que sigas con una
+              tasa desactualizada — revisa y ajusta si hace falta.
+            </p>
+            <Button variante="primario" compacto onClick={enfocarFormulario} className="self-start">
+              <Icon nombre="editar" tamano={TAMANO_ICONO.secundario} />
+              Ajustar a mano
+            </Button>
+          </div>
+        )}
+
+        {/* Conversión de referencia */}
         {tasa > 0 && (
-          <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-100">
-            <p className="text-emerald-700 text-sm font-medium mb-2">Conversión de referencia</p>
-            <div className="space-y-1 text-sm">
+          <div className="bg-tarjeta rounded-2xl border border-borde-tarjeta p-4">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-texto-3 mb-2">Con esta tasa</p>
+            <div className="divide-y divide-borde-divisor">
               {[1, 5, 10, 20, 50, 100].map(usd => (
-                <div key={usd} className="flex justify-between">
-                  <span className="text-gray-500">$ {usd}</span>
-                  <span className="font-semibold text-gray-800">
+                <div key={usd} className="flex items-center justify-between py-2 text-sm">
+                  <span className="text-texto-3">$ {usd}</span>
+                  <span className="font-semibold text-texto tabular-nums">
                     Bs {(usd * tasa).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 </div>
@@ -144,39 +186,36 @@ export default function TasaPage() {
         )}
 
         {/* Actualizar tasa */}
-        <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
-          <h2 className="font-semibold text-gray-700 mb-3">Actualizar tasa</h2>
+        <div className="bg-tarjeta rounded-2xl border border-borde-tarjeta p-4">
+          <h2 className="font-semibold text-texto mb-3">Actualizar tasa</h2>
 
           {!isOnline && (
-            <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-sm">
+            <div className="mb-3 p-3 rounded-[12px] bg-aviso-fondo border border-aviso-borde text-aviso text-sm">
               Sin conexión — se guarda en el dispositivo y se sincroniza al reconectar
             </div>
           )}
 
-          <div className="flex gap-2 w-full">
-            <input
-              type="number"
-              step="0.01"
-              value={input}
-              onChange={e => { setInput(e.target.value); setError(''); }}
-              onKeyDown={e => e.key === 'Enter' && handleGuardar()}
-              placeholder={tasa > 0 ? tasa.toFixed(2) : 'Ej: 55.80'}
-              className="flex-1 min-w-0 border border-gray-200 rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none focus:border-emerald-400"
-            />
-            <button
-              onClick={handleGuardar}
-              disabled={guardando || !input}
-              className="shrink-0 bg-emerald-600 text-white px-4 py-3 rounded-xl font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
-            >
+          <div className="flex gap-2 w-full items-start">
+            <div className="flex-1 min-w-0">
+              <Input
+                ref={inputRef}
+                id="tasa-input"
+                type="number"
+                step="0.01"
+                value={input}
+                onChange={e => { setInput(e.target.value); setError(''); }}
+                onKeyDown={e => e.key === 'Enter' && handleGuardar()}
+                placeholder={tasa > 0 ? tasa.toFixed(2) : 'Ej: 55.80'}
+              />
+            </div>
+            <Button variante="primario" onClick={handleGuardar} disabled={guardando || !input} className="flex-shrink-0">
               {guardando ? 'Guardando...' : 'Guardar'}
-            </button>
+            </Button>
           </div>
 
-          {error && (
-            <p className="mt-2 text-red-500 text-sm">{error}</p>
-          )}
+          {error && <p className="mt-2 text-negativo text-sm">{error}</p>}
           {mensaje && (
-            <div className="mt-2 flex items-center gap-2 text-emerald-600 text-sm font-medium">
+            <div className="mt-2 flex items-center gap-2 text-marca-suave-texto text-sm font-medium">
               <svg width="18" height="18" viewBox="0 0 20 20" fill="none" className="flex-shrink-0">
                 <circle cx="10" cy="10" r="9" stroke="currentColor" strokeWidth="2" />
                 <path
