@@ -510,8 +510,7 @@ function dibujarComprobanteTicket(ctx: CanvasRenderingContext2D, datos: DatosCom
   ctx.font = '11px sans-serif';
   ctx.fillStyle = COLOR_TEXTO_SUAVE;
   ctx.textAlign = 'right';
-  const tasaTxt = venta.tasa_usada.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  ctx.fillText(`Ref. ${formatUSD(venta.total_usd)} · tasa ${tasaTxt}`, ancho - padX, y);
+  ctx.fillText(`Ref. ${formatUSD(venta.total_usd)}`, ancho - padX, y);
   y += 20;
 
   trazarLinea(ctx, padX, ancho - padX, y, { color: '#AEB7B3', guiones: [3, 3] });
@@ -590,9 +589,6 @@ function dibujarComprobanteCarta(ctx: CanvasRenderingContext2D, datos: DatosComp
   ctx.fillStyle = COLOR_TEXTO_SUAVE;
   ctx.textAlign = 'left';
   ctx.fillText(resumenProductosUnidades(venta.items), padX, y);
-  ctx.textAlign = 'right';
-  const tasaTxt = venta.tasa_usada.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  ctx.fillText(`Tasa del día: Bs ${tasaTxt} por 1 USD`, ancho - padX, y);
   y += 32;
 
   const anchoTotales = 300;
@@ -750,8 +746,7 @@ function dibujarComprobanteMediaCarta(ctx: CanvasRenderingContext2D, datos: Dato
   ctx.fillText(formatBS(venta.total_bs), ancho - padX, yTotales + 26);
   ctx.font = '11.5px sans-serif';
   ctx.fillStyle = COLOR_TEXTO_SUAVE;
-  const tasaTxt = venta.tasa_usada.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  ctx.fillText(`Ref. ${formatUSD(venta.total_usd)} · tasa ${tasaTxt}`, ancho - padX, yTotales + 44);
+  ctx.fillText(`Ref. ${formatUSD(venta.total_usd)}`, ancho - padX, yTotales + 44);
   trazarLinea(ctx, xTotalesInicio, ancho - padX, yTotales - 14, { color: COLOR_TINTA, grosor: 2 });
 
   y = Math.max(y, yTotales + 54) + 18;
@@ -948,12 +943,11 @@ function dibujarPresupuestoCarta(ctx: CanvasRenderingContext2D, datos: DatosPres
     y += 20;
   }
 
-  const tasaTxt = presupuesto.tasa_al_crear.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const yPie = y;
   ctx.font = '13px sans-serif';
   ctx.fillStyle = COLOR_TEXTO_SUAVE;
   ctx.textAlign = 'left';
-  const notaPie = `Tasa del día: Bs ${tasaTxt} por 1 USD. ${resumenProductosUnidades(items)}.`;
+  const notaPie = `${resumenProductosUnidades(items)}.`;
   const anchoNotaPie = ancho - padX * 2 - 300 - 40;
   const notaPieLineas = envolverTexto(ctx, notaPie, anchoNotaPie);
   let yNota = yPie;
@@ -1088,11 +1082,6 @@ function dibujarPresupuestoMediaCarta(ctx: CanvasRenderingContext2D, datos: Dato
   const xTotalesInicio = ancho - padX - anchoTotales;
   const yFilaFinal = y;
 
-  const tasaTxt = presupuesto.tasa_al_crear.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  ctx.font = '11px sans-serif';
-  ctx.fillStyle = COLOR_TEXTO_SUAVE;
-  ctx.textAlign = 'left';
-  ctx.fillText(`Tasa del día: Bs ${tasaTxt} por 1 USD`, padX, y);
   y += 20;
   y = dibujarLeyendaFiscal(ctx, padX, xTotalesInicio - 24 - padX, y, {
     tamano: 11.5, centrado: false, padding: 6,
