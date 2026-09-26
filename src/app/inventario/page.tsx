@@ -14,12 +14,12 @@ import { useApp } from '@/components/Providers';
 import { useGuardarRuta } from '@/lib/useGuardarRuta';
 import Scanner from '@/components/Scanner';
 import ThemeToggle from '@/components/ThemeToggle';
-import StockBadge from '@/components/StockBadge';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import BottomSheet from '@/components/ui/BottomSheet';
 import ChipFiltro from '@/components/ui/ChipFiltro';
 import Icon from '@/components/ui/Icon';
+import { TAMANO_ICONO } from '@/components/ui/iconos';
 
 // Los 4 motivos de merma que se registran desde acá — un subconjunto fijo
 // de MotivoMovimiento. El resto (compra, devolución, conteo físico...)
@@ -96,7 +96,8 @@ export default function InventarioPage() {
   const [productos, setProductos] = useState<Producto[]>([]);
   const [cargandoProductos, setCargandoProductos] = useState(true);
   const [busqueda, setBusqueda] = useState('');
-  const [soloStockBajo, setSoloStockBajo] = useState(false);
+  const [chip, setChip] = useState<'todos' | 'bajo' | 'sin' | 'desactivados'>('todos');
+  const [orden, setOrden] = useState<'stock' | 'nombre'>('stock');
   const [showModal, setShowModal] = useState(false);
   const [editando, setEditando] = useState<Producto | null>(null);
   const [form, setForm] = useState(PRODUCTO_VACIO);
@@ -138,6 +139,9 @@ export default function InventarioPage() {
   const [showCalcCaja, setShowCalcCaja] = useState(false);
   const [unidadesCaja, setUnidadesCaja] = useState('');
   const [costoCaja, setCostoCaja] = useState('');
+  // "Costo y margen" — colapsado por defecto dentro del sheet de
+  // editar/nuevo producto (decisión #3 del brief de rediseño).
+  const [costosAbiertos, setCostosAbiertos] = useState(false);
 
   const cargar = async () => {
     const prods = await getProductos();
@@ -151,14 +155,34 @@ export default function InventarioPage() {
 
   if (!permitida) return null;
 
-  const filtrados = productos
-    .filter(p =>
-      busqueda
-        ? p.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
-          (p.codigo_barra && p.codigo_barra.includes(busqueda))
-        : true
-    )
-    .filter(p => (soloStockBajo ? p.controla_stock !== false && stockBajo(p.stock, p.stock_minimo) : true));
+  // Mismos 4 buckets del mockup (Inventario - movil): "bajo" y "sin" excluyen
+  // productos sin control de stock y, en el caso de "bajo", además exigen
+  // stock > 0 (si no, un producto en cero contaría dos veces). Todos los
+  // chips salvo "desactivados" excluyen siempre los desactivados.
+  const activos = productos.filter(p => p.activo);
+  const conControl = activos.filter(p => p.controla_stock !== false);
+  const bajos = conControl.filter(p => stockBajo(p.stock, p.stock_minimo) && (p.stock ?? 0) > 0);
+  const ceros = conControl.filter(p => p.stock != null && p.stock <= 0);
+  const desactivados = productos.filter(p => !p.activo);
+
+  const q = busqueda.trim().toLowerCase();
+  let filtrados = productos.filter(p => {
+    if (chip === 'desactivados') { if (p.activo) return false; }
+    else if (!p.activo) return false;
+    if (chip === 'bajo' && !(p.controla_stock !== false && stockBajo(p.stock, p.stock_minimo) && (p.stock ?? 0) > 0)) return false;
+    if (chip === 'sin' && !(p.controla_stock !== false && p.stock != null && p.stock <= 0)) return false;
+    if (q && !(p.nombre.toLowerCase().includes(q) || (p.codigo_barra ?? '').toLowerCase().includes(q))) return false;
+    return true;
+  });
+  // Por defecto lo más urgente arriba: existencia más baja primero, y los
+  // que no llevan control al final (no tienen nada que agotarse).
+  filtrados = filtrados.slice().sort((a, b) => {
+    if (orden === 'nombre') return a.nombre.localeCompare(b.nombre, 'es');
+    const aControla = a.controla_stock !== false;
+    const bControla = b.controla_stock !== false;
+    if (aControla !== bControla) return aControla ? -1 : 1;
+    return (a.stock ?? 0) - (b.stock ?? 0);
+  });
 
   const abrirNuevo = () => {
     setEditando(null);
@@ -167,6 +191,7 @@ export default function InventarioPage() {
     setShowCalcCaja(false);
     setUnidadesCaja('');
     setCostoCaja('');
+    setCostosAbiertos(false);
     setError('');
     setShowModal(true);
   };
@@ -202,6 +227,7 @@ export default function InventarioPage() {
     setShowCalcCaja(false);
     setUnidadesCaja('');
     setCostoCaja('');
+    setCostosAbiertos(false);
     setError('');
     setShowModal(true);
   };
@@ -509,6 +535,44 @@ export default function InventarioPage() {
     showToast('Producto eliminado');
   };
 
+  // Único cambio: activo → true. Mismo camino optimista que guardar(), pero
+  // sin pasar por su validación de formulario — reactivar no depende de que
+  // el resto de los campos esté completo.
+  const reactivar = async () => {
+    if (!editando) return;
+    const original = editando;
+    const actualizado = { ...editando, activo: true };
+    await saveProducto(actualizado);
+    setEditando(actualizado);
+    setForm(f => ({ ...f, activo: true }));
+
+    if (!isOnline) {
+      await encolarEditarProducto(editando.id, { activo: true });
+      await cargar();
+      setShowModal(false);
+      showToast('Guardado localmente — se sincronizará cuando haya conexión');
+      return;
+    }
+
+    const resultado = await updateProductoSupabase(editando.id, { activo: true });
+    if (!resultado.ok) {
+      if (resultado.permanente === false) {
+        await encolarEditarProducto(editando.id, { activo: true });
+        await cargar();
+        setShowModal(false);
+        showToast('Guardado localmente — se sincronizará cuando haya conexión');
+        return;
+      }
+      await saveProducto(original);
+      await cargar();
+      showToast('No se pudo reactivar el producto. Intenta de nuevo.');
+      return;
+    }
+    await cargar();
+    setShowModal(false);
+    showToast('Producto reactivado');
+  };
+
   // Gramos → kg, igual que agregarPorPeso() en Caja: precio * (g / 1000).
   const gramosMermaNum = parseFloat(gramosMerma);
   const cantidadMermaAplicada = editando?.por_peso
@@ -726,301 +790,518 @@ export default function InventarioPage() {
     cerrarCalcCaja();
   };
 
+  // Suma al precio de venta (no al costo) — misma fórmula que el mockup:
+  // valorUsd = Σ precioUSD(p) × stock, sobre activos que llevan control.
+  const valorInventarioUsd = conControl.reduce((s, p) => s + precioUSD(p, tasa) * (p.stock ?? 0), 0);
+
   return (
     <div>
-      <header className="bg-emerald-600 text-white px-4 pt-4 pb-3 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold">Inventario</h1>
-          <p className="text-emerald-200 text-sm">{productos.length} productos</p>
+      <header className="bg-superficie-barra border-b border-borde-divisor px-4 pt-3.5 pb-3 flex items-center gap-2">
+        <div className="flex-1 min-w-0">
+          <h1 className="text-base font-bold text-texto truncate">Inventario</h1>
+          <p className="text-[11px] font-medium text-texto-3 truncate">
+            {activos.length} productos · {bajos.length} por reponer
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          <ThemeToggle />
-          {usaStock && rol === 'admin' && (
-            <button
-              onClick={() => router.push('/movimientos')}
-              className="bg-white/20 text-white p-2.5 rounded-xl flex items-center justify-center"
-              aria-label="Movimientos de stock"
-            >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M8 7h12m0 0l-4-4m4 4l-4 4M16 17H4m0 0l4 4m-4-4l4-4" />
-              </svg>
-            </button>
-          )}
+        <ThemeToggle variant="neutro" />
+        {usaStock && rol === 'admin' && (
           <button
-            onClick={abrirNuevo}
-            className="bg-white text-emerald-700 px-4 py-2 rounded-xl font-semibold text-sm flex items-center gap-1.5"
+            onClick={() => router.push('/movimientos')}
+            className="flex-none w-11 h-11 flex items-center justify-center rounded-xl bg-tarjeta-hundida text-texto-2"
+            aria-label="Movimientos de stock"
           >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-          </svg>
-          Agregar
+            <Icon nombre="registrarMovimiento" tamano={TAMANO_ICONO.secundario} />
           </button>
-        </div>
+        )}
+        <button
+          onClick={abrirNuevo}
+          className="flex-none h-11 px-4 rounded-xl bg-marca text-texto-invertido font-semibold text-sm flex items-center gap-1.5 active:bg-marca-presion"
+        >
+          <Icon nombre="agregar" tamano={TAMANO_ICONO.secundario} />
+          Agregar
+        </button>
       </header>
 
-      <div className="px-4 py-3 bg-white border-b border-gray-100 flex gap-2">
-        <div className="flex-1 relative">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-          <input
-            type="text"
-            value={busqueda}
-            onChange={e => setBusqueda(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && pareceCodigoBarra(busqueda)) handleScanInventario(busqueda.trim());
-            }}
-            placeholder="Buscar por nombre o código..."
-            className="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-emerald-400"
-          />
-        </div>
-        <button
-          onClick={() => setShowScannerBuscar(true)}
-          className="bg-emerald-600 text-white p-2.5 rounded-xl flex items-center justify-center"
-          aria-label="Escanear código"
-        >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"
+      <div className="px-4 py-3 bg-superficie-barra border-b border-borde-divisor flex flex-col gap-2.5">
+        <div className="flex gap-2">
+          <div className="flex-1 relative">
+            <Icon
+              nombre="buscar"
+              tamano={TAMANO_ICONO.buscarYToggle}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-texto-3"
             />
-          </svg>
-        </button>
-      </div>
-
-      {usaStock && (
-        <div className="px-4 py-2 bg-white border-b border-gray-100">
+            <input
+              type="text"
+              value={busqueda}
+              onChange={e => setBusqueda(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && pareceCodigoBarra(busqueda)) handleScanInventario(busqueda.trim());
+              }}
+              placeholder="Buscar por nombre o código"
+              className="w-full pl-9 pr-4 h-11 rounded-xl bg-tarjeta border border-borde-campo text-sm text-texto placeholder:text-texto-4 outline-none focus:border-foco"
+            />
+          </div>
           <button
-            onClick={() => setSoloStockBajo(v => !v)}
-            className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${
-              soloStockBajo ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'
-            }`}
+            onClick={() => setShowScannerBuscar(true)}
+            className="flex-none w-11 h-11 rounded-xl bg-marca text-texto-invertido flex items-center justify-center active:bg-marca-presion"
+            aria-label="Escanear código"
           >
-            Stock bajo
+            <Icon nombre="escanearCodigoBarras" tamano={TAMANO_ICONO.buscarYToggle} />
           </button>
         </div>
-      )}
 
-      <div className="p-4 space-y-2">
+        <div className="flex gap-2 -mx-4 px-4 overflow-x-auto">
+          {[
+            { id: 'todos' as const, label: 'Todos', cuenta: activos.length },
+            { id: 'bajo' as const, label: 'Stock bajo', cuenta: bajos.length },
+            { id: 'sin' as const, label: 'Sin stock', cuenta: ceros.length },
+            { id: 'desactivados' as const, label: 'Desactivados', cuenta: desactivados.length },
+          ].map(c => {
+            const activo = chip === c.id;
+            return (
+              <button
+                key={c.id}
+                onClick={() => setChip(c.id)}
+                className={`flex-shrink-0 h-[34px] px-3.5 rounded-full text-sm font-semibold flex items-center gap-1.5 whitespace-nowrap transition-colors border ${
+                  activo ? 'bg-marca-suave text-marca-suave-texto border-marca' : 'bg-transparent text-texto-3 border-borde-campo'
+                }`}
+              >
+                {c.label}
+                <span className="tabular-nums opacity-70">{c.cuenta}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="px-4 py-3.5 flex flex-col gap-3.5">
+        {!cargandoProductos && usaStock && rol === 'admin' && (
+          <div className="flex flex-col gap-2.5">
+            <div className="p-5 rounded-2xl bg-tinta">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-tinta-etiqueta">
+                Valor del inventario
+              </p>
+              <p className="mt-1.5 text-4xl font-extrabold text-tinta-texto tracking-tight tabular-nums">
+                {formatUSD(valorInventarioUsd)}
+              </p>
+              <p className="mt-1 text-tinta-etiqueta tabular-nums">
+                {formatBS(valorInventarioUsd * tasa)} · al precio de venta
+              </p>
+            </div>
+            <div className="grid grid-cols-3 gap-2.5">
+              <div className="p-3 bg-tarjeta border border-borde-tarjeta rounded-2xl flex flex-col gap-1">
+                <p className="text-xl font-bold text-texto tabular-nums">{activos.length}</p>
+                <p className="text-[11px] font-semibold text-texto-2 leading-tight">Productos activos</p>
+              </div>
+              <div
+                className={`p-3 bg-tarjeta border rounded-2xl flex flex-col gap-1 ${
+                  bajos.length > 0 ? 'border-aviso-borde' : 'border-borde-tarjeta'
+                }`}
+              >
+                <p className={`text-xl font-bold tabular-nums ${bajos.length > 0 ? 'text-aviso' : 'text-texto-3'}`}>
+                  {bajos.length}
+                </p>
+                <p className="text-[11px] font-semibold text-texto-2 leading-tight">En stock bajo</p>
+              </div>
+              <div
+                className={`p-3 bg-tarjeta border rounded-2xl flex flex-col gap-1 ${
+                  ceros.length > 0 ? 'border-negativo-borde' : 'border-borde-tarjeta'
+                }`}
+              >
+                <p className={`text-xl font-bold tabular-nums ${ceros.length > 0 ? 'text-negativo' : 'text-texto-3'}`}>
+                  {ceros.length}
+                </p>
+                <p className="text-[11px] font-semibold text-texto-2 leading-tight">En cero</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[11px] font-bold uppercase tracking-wide text-texto-2">
+            {chip === 'desactivados' ? 'Productos desactivados' : 'Catálogo'}
+          </p>
+          <button
+            onClick={() => setOrden(o => (o === 'stock' ? 'nombre' : 'stock'))}
+            className="h-[34px] px-3 rounded-full border border-borde-campo bg-tarjeta text-texto-2 text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap"
+          >
+            <Icon nombre="ordenar" tamano={14} />
+            {orden === 'stock' ? 'Existencia' : 'Nombre'}
+          </button>
+        </div>
+
         {cargandoProductos ? (
-          <div className="text-center text-gray-400 py-16">
-            <svg className="w-8 h-8 mx-auto mb-3 text-emerald-400 animate-spin" fill="none" viewBox="0 0 24 24">
+          <div className="text-center text-texto-3 py-16">
+            <svg className="w-8 h-8 mx-auto mb-3 text-marca animate-spin" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
             </svg>
             <p className="text-sm">Cargando productos...</p>
           </div>
         ) : filtrados.length === 0 ? (
-          <div className="text-center text-gray-400 py-16">
-            <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10" />
-            </svg>
+          <div className="text-center text-texto-3 py-16">
+            <Icon nombre="inventario" tamano={48} className="mx-auto mb-3 text-texto-4" />
             <p className="font-medium">{busqueda ? `Sin resultados para "${busqueda}"` : 'Sin productos'}</p>
             {!busqueda && (
-              <button onClick={abrirNuevo} className="mt-3 text-emerald-600 font-semibold text-sm">
+              <button onClick={abrirNuevo} className="mt-3 text-marca font-semibold text-sm">
                 Agregar el primero
               </button>
             )}
           </div>
         ) : (
-          filtrados.map(p => {
-            const pbs = tasa > 0 ? precioBS(p, tasa) : null;
-            const pusd = tasa > 0 ? precioUSD(p, tasa) : null;
+          <div className="flex flex-col gap-2.5">
+            {filtrados.map(p => {
+              const pbs = tasa > 0 ? precioBS(p, tasa) : null;
+              const pusd = tasa > 0 ? precioUSD(p, tasa) : null;
+              const controla = p.controla_stock !== false;
+              const cero = controla && p.stock != null && p.stock <= 0;
+              const bajo = controla && !cero && stockBajo(p.stock, p.stock_minimo);
 
-            return (
-              <div key={p.id} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="font-semibold text-gray-900">{formatearNombre(p.nombre)}</p>
-                    {p.por_peso && (
-                      <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium flex-shrink-0">
-                        /kg
-                      </span>
-                    )}
-                  </div>
-                  {p.codigo_barra && (
-                    <p className="text-xs text-gray-400 font-mono">{p.codigo_barra}</p>
-                  )}
-                  {pbs !== null ? (
-                    <div className="mt-1">
-                      <p className="font-bold text-gray-900 text-lg">
-                        {formatBS(pbs)}
-                        {p.por_peso && <span className="text-sm font-normal text-gray-400"> / kg</span>}
+              let etiqueta: { texto: string; bg: string; tx: string } | null = null;
+              if (!p.activo) etiqueta = { texto: 'Desactivado', bg: 'bg-tarjeta-hundida', tx: 'text-texto-2' };
+              else if (!controla) etiqueta = { texto: 'Sin control', bg: 'bg-tarjeta-hundida', tx: 'text-texto-2' };
+              else if (cero) etiqueta = { texto: 'En cero', bg: 'bg-negativo-fondo', tx: 'text-negativo' };
+              else if (bajo) etiqueta = { texto: 'Stock bajo', bg: 'bg-aviso-fondo', tx: 'text-aviso' };
+
+              const umbral = p.stock_minimo ?? 0;
+              const pct =
+                !controla || p.stock == null
+                  ? 0
+                  : Math.max(cero ? 0 : 4, Math.min(100, (p.stock / Math.max(umbral * 3, 1)) * 100));
+              const barColor = cero ? 'bg-negativo' : bajo ? 'bg-aviso' : 'bg-marca';
+              const stockTexColor = cero ? 'text-negativo' : bajo ? 'text-aviso' : 'text-texto-3';
+              const stockTexto = !controla
+                ? 'No lleva control'
+                : p.stock == null
+                ? 'Sin inicializar'
+                : p.por_peso
+                ? `${fmtCantidad(p.stock)} kg`
+                : `${fmtCantidad(p.stock)} ${Math.round(p.stock) === 1 ? 'unidad' : 'unidades'}`;
+
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => abrirEditar(p)}
+                  style={{ opacity: p.activo ? 1 : 0.6 }}
+                  className={`text-left p-3 bg-tarjeta border rounded-2xl flex flex-col gap-2.5 transition-transform active:scale-[0.99] ${
+                    cero ? 'border-negativo-borde' : 'border-borde-tarjeta'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1 flex flex-col gap-1.5">
+                      <p className="font-semibold text-[15px] text-texto leading-tight text-pretty">
+                        {formatearNombre(p.nombre)}
+                        {p.por_peso && <span className="font-medium text-texto-2"> / kg</span>}
                       </p>
-                      <p className="text-xs text-gray-400">{pusd !== null ? formatUSD(pusd) : ''}{p.por_peso ? ' / kg' : ''}</p>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-xs font-medium text-texto-2 tabular-nums">
+                          {p.codigo_barra || 'Sin código'}
+                        </span>
+                        {etiqueta && (
+                          <span
+                            className={`h-5 px-1.5 inline-flex items-center rounded-full text-[11px] font-bold whitespace-nowrap ${etiqueta.bg} ${etiqueta.tx}`}
+                          >
+                            {etiqueta.texto}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  ) : (
-                    <p className="text-sm text-gray-400 mt-1">
-                      {p.precio} {p.moneda}{p.por_peso ? ' / kg' : ''}
-                    </p>
-                  )}
+                    <div className="text-right flex-shrink-0">
+                      <p className="font-bold text-lg text-texto tabular-nums whitespace-nowrap">
+                        {pbs !== null ? formatBS(pbs) : `${p.precio} ${p.moneda}`}
+                        {p.por_peso && <span className="text-sm font-normal text-texto-2"> / kg</span>}
+                      </p>
+                      {pbs !== null && (
+                        <p className="text-sm font-medium text-texto-2 tabular-nums whitespace-nowrap">
+                          {pusd !== null ? formatUSD(pusd) : ''}
+                        </p>
+                      )}
+                    </div>
+                  </div>
                   {usaStock && (
-                    <div className="mt-1">
-                      <StockBadge
-                        stock={p.stock}
-                        stockMinimo={p.stock_minimo}
-                        controlaStock={p.controla_stock}
-                        esPorPeso={p.por_peso}
-                        isOnline={isOnline}
-                        ultimaSincronizacion={ultimaSincronizacion}
-                      />
+                    <div className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1.5 items-center">
+                      <div className="h-1.5 rounded-full bg-tarjeta-hundida overflow-hidden">
+                        <div className={`h-1.5 rounded-full ${barColor}`} style={{ width: `${pct}%` }} />
+                      </div>
+                      <p className={`text-right text-sm font-bold tabular-nums whitespace-nowrap ${stockTexColor}`}>
+                        {stockTexto}
+                      </p>
                     </div>
                   )}
-                </div>
-                <div className="flex gap-2 flex-shrink-0">
-                  <button
-                    onClick={() => abrirEditar(p)}
-                    className="p-2 rounded-lg bg-gray-100 text-gray-600"
-                    aria-label="Editar"
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                        d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                      />
-                    </svg>
-                  </button>
-                  <button
-                    onClick={() => setConfirmDelete(p)}
-                    className="p-2 rounded-lg bg-red-50 text-red-500"
-                    aria-label="Eliminar"
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                      />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            );
-          })
+                </button>
+              );
+            })}
+          </div>
         )}
       </div>
 
-      {/* Add/Edit Modal */}
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-end">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setShowModal(false)} />
-          <div className="relative w-full max-w-lg mx-auto bg-white rounded-t-2xl max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between p-4 border-b border-gray-100">
-              <h2 className="text-lg font-bold">
-                {editando ? 'Editar producto' : 'Nuevo producto'}
-              </h2>
-              <button onClick={() => setShowModal(false)} className="p-1 text-gray-400">
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+      {/* Editar / Nuevo producto */}
+      <BottomSheet
+        abierto={showModal}
+        onCerrar={() => setShowModal(false)}
+        titulo={editando ? 'Editar producto' : 'Nuevo producto'}
+      >
+        <div className="space-y-5">
+          {!isOnline && (
+            <div className="p-3 rounded-[12px] bg-aviso-fondo border border-aviso-borde text-aviso text-sm">
+              Sin conexión — se guarda en el dispositivo y se sincroniza al reconectar
             </div>
+          )}
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {!isOnline && (
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-sm">
-                  Sin conexión — se guarda en el dispositivo y se sincroniza al reconectar
-                </div>
-              )}
+          <Input
+            label="Nombre"
+            type="text"
+            value={form.nombre}
+            onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))}
+            placeholder="Nombre del producto"
+            autoFocus
+          />
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Nombre <span className="text-red-400">*</span>
-                </label>
+          <div className="flex items-center justify-between py-1">
+            <div>
+              <p className="text-sm font-medium text-texto">Se vende por peso</p>
+              <p className="text-xs text-texto-3 mt-0.5">El precio será por kilo (kg)</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={form.por_peso}
+              onClick={() => setForm(f => ({ ...f, por_peso: !f.por_peso }))}
+              className={`relative inline-flex w-11 h-6 rounded-full transition-colors flex-shrink-0 ${
+                form.por_peso ? 'bg-marca' : 'bg-tarjeta-hundida'
+              }`}
+            >
+              <span
+                className={`inline-block w-5 h-5 m-0.5 bg-tarjeta rounded-full shadow-sm transition-transform ${
+                  form.por_peso ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2.5 items-end">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm text-texto-3">
+                {form.por_peso ? 'Precio por kilo' : 'Precio'} <span className="text-negativo">*</span>
+              </label>
+              <div className="flex items-center gap-2 h-[52px] px-3.5 rounded-[12px] bg-tarjeta border border-borde-campo focus-within:border-foco">
+                <span className="text-texto-3 font-medium">{form.moneda === 'USD' ? '$' : 'Bs'}</span>
                 <input
-                  type="text"
-                  value={form.nombre}
-                  onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-400"
-                  placeholder="Nombre del producto"
-                  autoFocus
+                  type="number"
+                  step="0.01"
+                  value={form.precio}
+                  onChange={e =>
+                    mostrarCosto ? handlePrecioChange(e.target.value) : setForm(f => ({ ...f, precio: e.target.value }))
+                  }
+                  className="flex-1 min-w-0 bg-transparent outline-none text-lg font-bold text-texto tabular-nums"
+                  placeholder="0.00"
                 />
               </div>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm text-texto-3">Moneda</label>
+              <div className="flex gap-1.5">
+                {(['USD', 'VES'] as const).map(m => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, moneda: m }))}
+                    className={`flex-1 h-[52px] rounded-[12px] font-bold text-sm ${
+                      form.moneda === m ? 'bg-marca text-texto-invertido' : 'bg-tarjeta-hundida text-texto-2'
+                    }`}
+                  >
+                    {m === 'USD' ? '$ USD' : 'Bs VES'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          {tasa > 0 && form.precio && parseFloat(form.precio) > 0 && (
+            <p className="text-sm text-texto-3 -mt-3">
+              {form.moneda === 'USD'
+                ? `Bs ${(parseFloat(form.precio) * tasa).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                : `$ ${(parseFloat(form.precio) / tasa).toFixed(2)}`}
+              {form.por_peso ? ' / kg' : ''}
+            </p>
+          )}
+          {costoMayorQuePrecio && (
+            <p className="text-sm text-negativo font-medium -mt-3">El costo es mayor que el precio de venta</p>
+          )}
 
-              {/* Toggle por peso */}
+          {usaStock && rol === 'admin' && (
+            <>
+              <div className="h-px bg-borde-divisor" />
+
               <div className="flex items-center justify-between py-1">
                 <div>
-                  <p className="text-sm font-medium text-gray-700">Se vende por peso</p>
-                  <p className="text-xs text-gray-400 mt-0.5">El precio será por kilo (kg)</p>
+                  <p className="text-sm font-medium text-texto">Llevar control de este producto</p>
+                  <p className="text-xs text-texto-3 mt-0.5">Apágalo para granel o servicios</p>
                 </div>
                 <button
                   type="button"
                   role="switch"
-                  aria-checked={form.por_peso}
-                  onClick={() => setForm(f => ({ ...f, por_peso: !f.por_peso }))}
+                  aria-checked={form.controla_stock}
+                  onClick={() => setForm(f => ({ ...f, controla_stock: !f.controla_stock }))}
                   className={`relative inline-flex w-11 h-6 rounded-full transition-colors flex-shrink-0 ${
-                    form.por_peso ? 'bg-emerald-600' : 'bg-gray-200'
+                    form.controla_stock ? 'bg-marca' : 'bg-tarjeta-hundida'
                   }`}
                 >
                   <span
-                    className={`inline-block w-5 h-5 m-0.5 bg-white rounded-full shadow-sm transition-transform ${
-                      form.por_peso ? 'translate-x-5' : 'translate-x-0'
+                    className={`inline-block w-5 h-5 m-0.5 bg-tarjeta rounded-full shadow-sm transition-transform ${
+                      form.controla_stock ? 'translate-x-5' : 'translate-x-0'
                     }`}
                   />
                 </button>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Código de barra
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={form.codigo_barra}
-                    onChange={e => setForm(f => ({ ...f, codigo_barra: e.target.value }))}
-                    className="flex-1 border border-gray-200 rounded-xl px-4 py-3 font-mono focus:outline-none focus:border-emerald-400"
+              {form.controla_stock && (
+                <>
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <label className="text-sm text-texto-3">
+                        Existencia actual {form.por_peso ? '(kilos)' : ''}
+                      </label>
+                      {existenciaBloqueada && (
+                        <span className="h-[22px] px-2 inline-flex items-center gap-1 rounded-full bg-informativo-fondo text-informativo text-[11px] font-bold whitespace-nowrap">
+                          <Icon nombre="candado" tamano={12} />
+                          Con movimientos
+                        </span>
+                      )}
+                    </div>
+                    <input
+                      type="number"
+                      step="0.001"
+                      value={form.stock}
+                      onChange={e => setForm(f => ({ ...f, stock: e.target.value }))}
+                      disabled={existenciaBloqueada}
+                      className={`h-[52px] px-3.5 rounded-[12px] border outline-none text-lg font-bold tabular-nums ${
+                        existenciaBloqueada
+                          ? 'bg-tarjeta-hundida border-borde-campo text-texto-3 cursor-not-allowed'
+                          : 'bg-tarjeta border-borde-campo text-texto focus:border-foco'
+                      }`}
+                      placeholder="Opcional"
+                    />
+                    {existenciaBloqueada ? (
+                      <div className="p-3 rounded-[12px] bg-informativo-fondo border border-informativo flex flex-col gap-2">
+                        <p className="text-sm text-informativo leading-relaxed text-pretty">
+                          Este producto ya tiene movimientos registrados. La existencia se calcula sola a partir de
+                          ellos: cambiarla a mano dejaría el inventario sin explicación de por qué cambió.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => router.push('/movimientos')}
+                          className="self-start h-11 px-3.5 flex items-center gap-2 rounded-[10px] border border-informativo bg-tarjeta text-informativo font-bold text-sm"
+                        >
+                          <Icon nombre="registrarMovimiento" tamano={16} />
+                          Movimientos → Ajuste por conteo
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-texto-2 leading-snug text-pretty">
+                        Sin movimientos todavía — puedes cargar la existencia inicial a mano.
+                      </p>
+                    )}
+                  </div>
+
+                  {editando && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={abrirMerma}
+                        className="w-full flex items-center gap-3 min-h-[56px] px-3.5 py-2.5 rounded-[12px] border border-borde-campo bg-tarjeta text-texto text-left"
+                      >
+                        <span className="flex-none w-9 h-9 rounded-[10px] bg-tarjeta-hundida text-texto-2 flex items-center justify-center">
+                          <Icon nombre="registrarMerma" tamano={18} />
+                        </span>
+                        <span className="flex-1 min-w-0 flex flex-col gap-0.5">
+                          <span className="font-semibold text-[15px]">Registrar merma</span>
+                          <span className="text-xs text-texto-3">Daño, vencido, pérdida o consumo propio</span>
+                        </span>
+                        <Icon nombre="flechaDerecha" tamano={16} className="flex-none text-texto-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={abrirRegistroMovimiento}
+                        className="w-full flex items-center gap-3 min-h-[56px] px-3.5 py-2.5 rounded-[12px] border border-borde-campo bg-tarjeta text-texto text-left"
+                      >
+                        <span className="flex-none w-9 h-9 rounded-[10px] bg-tarjeta-hundida text-texto-2 flex items-center justify-center">
+                          <Icon nombre="registrarMovimiento" tamano={18} />
+                        </span>
+                        <span className="flex-1 min-w-0 flex flex-col gap-0.5">
+                          <span className="font-semibold text-[15px]">Registrar movimiento</span>
+                          <span className="text-xs text-texto-3">Entrada, salida o ajuste por conteo</span>
+                        </span>
+                        <Icon nombre="flechaDerecha" tamano={16} className="flex-none text-texto-4" />
+                      </button>
+                    </>
+                  )}
+
+                  <Input
+                    label={`Alerta cuando quede menos de ${form.por_peso ? '(kilos)' : ''}`}
+                    type="number"
+                    step="0.001"
+                    value={form.stock_minimo}
+                    onChange={e => setForm(f => ({ ...f, stock_minimo: e.target.value }))}
                     placeholder="Opcional"
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowScanner(true)}
-                    className="flex-shrink-0 px-3 py-3 rounded-xl bg-gray-100 text-gray-600 flex items-center justify-center"
-                    aria-label="Escanear código de barra"
-                  >
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                        d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                        d="M7 8v8M12 8v8M17 8v8" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
+                </>
+              )}
+            </>
+          )}
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Moneda
-                </label>
-                <div className="flex gap-2">
-                  {(['USD', 'VES'] as const).map(m => (
-                    <button
-                      key={m}
-                      onClick={() => setForm(f => ({ ...f, moneda: m }))}
-                      className={`flex-1 py-3 rounded-xl font-semibold transition-colors ${
-                        form.moneda === m
-                          ? 'bg-emerald-600 text-white'
-                          : 'bg-gray-100 text-gray-700'
-                      }`}
-                    >
-                      {m === 'USD' ? '$ USD' : 'Bs VES'}
-                    </button>
-                  ))}
-                </div>
-              </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm text-texto-3">Código de barra</label>
+            <div className="flex gap-2">
+              <Input
+                type="text"
+                value={form.codigo_barra}
+                onChange={e => setForm(f => ({ ...f, codigo_barra: e.target.value }))}
+                className="font-mono"
+                placeholder="Opcional"
+              />
+              <button
+                type="button"
+                onClick={() => setShowScanner(true)}
+                className="flex-none w-[52px] h-[52px] rounded-[12px] border border-borde-campo bg-tarjeta-hundida text-texto-2 flex items-center justify-center"
+                aria-label="Escanear código de barra"
+              >
+                <Icon nombre="escanearCodigoBarras" tamano={20} />
+              </button>
+            </div>
+          </div>
 
-              {mostrarCosto ? (
-                <>
+          {mostrarCosto && (
+            <>
+              <div className="h-px bg-borde-divisor" />
+
+              <button
+                type="button"
+                onClick={() => setCostosAbiertos(v => !v)}
+                className="w-full flex items-center justify-between gap-2 min-h-11"
+              >
+                <span className="text-sm font-semibold text-texto-2">Costo y margen</span>
+                <span className="flex items-center gap-1.5 text-xs font-medium text-texto-3">
+                  {!costosAbiertos &&
+                    (form.margen.trim() && !isNaN(parseNum(form.margen)) ? `${form.margen} %` : 'Opcional')}
+                  <Icon
+                    nombre="flechaDerecha"
+                    tamano={16}
+                    className={`transition-transform ${costosAbiertos ? 'rotate-90' : ''}`}
+                  />
+                </span>
+              </button>
+
+              {costosAbiertos && (
+                <div className="flex flex-col gap-4 p-3 rounded-[12px] bg-tarjeta-hundida border border-borde-campo">
                   <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="block text-sm font-medium text-gray-700">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-sm text-texto-3">
                         {form.por_peso ? 'Costo por kilo' : 'Costo'} ({form.moneda})
                       </label>
                       <button
                         type="button"
                         onClick={() => (showCalcCaja ? cerrarCalcCaja() : setShowCalcCaja(true))}
-                        className="text-xs font-semibold text-emerald-600"
+                        className="text-xs font-bold text-marca"
                       >
                         {form.por_peso ? 'Calcular desde bulto' : 'Calcular desde caja'}
                       </button>
@@ -1030,13 +1311,13 @@ export default function InventarioPage() {
                       step="0.01"
                       value={form.costo}
                       onChange={e => handleCostoChange(e.target.value)}
-                      className="w-full border border-gray-200 rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none focus:border-emerald-400"
+                      className="w-full h-12 px-3 rounded-[10px] bg-tarjeta border border-borde-campo outline-none text-base font-semibold text-texto focus:border-foco"
                       placeholder="Opcional"
                     />
                     {showCalcCaja && (
-                      <div className="mt-2 p-3 bg-gray-50 border border-gray-200 rounded-xl space-y-2">
+                      <div className="mt-2 p-3 bg-tarjeta border border-borde-campo rounded-[12px] flex flex-col gap-2">
                         <div>
-                          <label className="block text-xs font-medium text-gray-500 mb-1">
+                          <label className="text-xs font-medium text-texto-3 mb-1 block">
                             {form.por_peso ? 'Kilos por bulto' : 'Unidades por caja'}
                           </label>
                           <input
@@ -1044,12 +1325,12 @@ export default function InventarioPage() {
                             inputMode="decimal"
                             value={unidadesCaja}
                             onChange={e => setUnidadesCaja(e.target.value)}
-                            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-400"
+                            className="w-full h-10 px-3 rounded-[8px] bg-tarjeta-hundida border border-borde-campo text-sm text-texto outline-none focus:border-foco"
                             placeholder={form.por_peso ? 'Ej: 20' : 'Ej: 24'}
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-medium text-gray-500 mb-1">
+                          <label className="text-xs font-medium text-texto-3 mb-1 block">
                             {form.por_peso ? 'Costo total del bulto' : 'Costo total de la caja'} ({form.moneda})
                           </label>
                           <input
@@ -1057,18 +1338,18 @@ export default function InventarioPage() {
                             inputMode="decimal"
                             value={costoCaja}
                             onChange={e => setCostoCaja(e.target.value)}
-                            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-400"
+                            className="w-full h-10 px-3 rounded-[8px] bg-tarjeta-hundida border border-borde-campo text-sm text-texto outline-none focus:border-foco"
                             placeholder="Ej: 18,00"
                           />
                         </div>
-                        <p className="text-sm text-gray-600">
+                        <p className="text-sm text-texto-2">
                           {form.por_peso ? 'Costo por kilo' : 'Costo por unidad'}: {costoUnitarioCaja ?? '—'}
                         </p>
                         <div className="flex gap-2">
                           <button
                             type="button"
                             onClick={cerrarCalcCaja}
-                            className="flex-1 py-2 rounded-lg text-xs font-semibold bg-gray-200 text-gray-600"
+                            className="flex-1 py-2 rounded-[8px] text-xs font-bold bg-tarjeta text-texto-2"
                           >
                             Cancelar
                           </button>
@@ -1076,7 +1357,7 @@ export default function InventarioPage() {
                             type="button"
                             disabled={costoUnitarioCaja === null}
                             onClick={usarCostoDeCaja}
-                            className="flex-1 py-2 rounded-lg text-xs font-semibold bg-emerald-600 text-white disabled:opacity-40"
+                            className="flex-1 py-2 rounded-[8px] text-xs font-bold bg-marca text-texto-invertido disabled:opacity-40"
                           >
                             Usar este costo
                           </button>
@@ -1086,15 +1367,13 @@ export default function InventarioPage() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Margen sobre costo (%)
-                    </label>
+                    <label className="text-sm text-texto-3 mb-1.5 block">Margen sobre costo (%)</label>
                     <input
                       type="text"
                       inputMode="decimal"
                       value={form.margen}
                       onChange={e => handleMargenChange(e.target.value)}
-                      className="w-full border border-gray-200 rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none focus:border-emerald-400"
+                      className="w-full h-12 px-3 rounded-[10px] bg-tarjeta border border-borde-campo outline-none text-base font-semibold text-texto focus:border-foco"
                       placeholder="Ej: 33,5"
                     />
                     <div className="flex gap-2 mt-2">
@@ -1103,7 +1382,7 @@ export default function InventarioPage() {
                           key={pct}
                           type="button"
                           onClick={() => aplicarMargenRapido(pct)}
-                          className="flex-1 py-1.5 rounded-lg text-xs font-semibold bg-gray-100 text-gray-600"
+                          className="flex-1 py-1.5 rounded-[8px] text-xs font-bold bg-tarjeta text-texto-2"
                         >
                           {pct}%
                         </button>
@@ -1112,7 +1391,7 @@ export default function InventarioPage() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="text-sm text-texto-3 mb-1.5 block">
                       Ganancia {form.por_peso ? 'por kilo' : ''} ({form.moneda})
                     </label>
                     <input
@@ -1120,171 +1399,47 @@ export default function InventarioPage() {
                       inputMode="decimal"
                       value={form.ganancia}
                       onChange={e => handleGananciaChange(e.target.value)}
-                      className="w-full border border-gray-200 rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none focus:border-emerald-400"
+                      className="w-full h-12 px-3 rounded-[10px] bg-tarjeta border border-borde-campo outline-none text-base font-semibold text-texto focus:border-foco"
                       placeholder="Ej: 1,50"
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      {form.por_peso ? 'Precio por kilo' : 'Precio'} ({form.moneda}) <span className="text-red-400">*</span>
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={form.precio}
-                      onChange={e => handlePrecioChange(e.target.value)}
-                      className="w-full border border-gray-200 rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none focus:border-emerald-400"
-                      placeholder="0.00"
-                    />
-                    {tasa > 0 && form.precio && parseFloat(form.precio) > 0 && (
-                      <p className="text-sm text-gray-400 mt-1">
-                        {form.moneda === 'USD'
-                          ? `Bs ${(parseFloat(form.precio) * tasa).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                          : `$ ${(parseFloat(form.precio) / tasa).toFixed(2)}`}
-                        {form.por_peso ? ' / kg' : ''}
-                      </p>
-                    )}
-                    {costoMayorQuePrecio && (
-                      <p className="text-sm text-red-500 font-medium mt-1">
-                        El costo es mayor que el precio de venta
-                      </p>
-                    )}
-                  </div>
-                </>
-              ) : (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    {form.por_peso ? 'Precio por kilo' : 'Precio'} ({form.moneda}) <span className="text-red-400">*</span>
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={form.precio}
-                    onChange={e => setForm(f => ({ ...f, precio: e.target.value }))}
-                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none focus:border-emerald-400"
-                    placeholder="0.00"
-                  />
-                  {tasa > 0 && form.precio && parseFloat(form.precio) > 0 && (
-                    <p className="text-sm text-gray-400 mt-1">
-                      {form.moneda === 'USD'
-                        ? `Bs ${(parseFloat(form.precio) * tasa).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                        : `$ ${(parseFloat(form.precio) / tasa).toFixed(2)}`}
-                      {form.por_peso ? ' / kg' : ''}
-                    </p>
-                  )}
+                  <p className="text-xs text-texto-2 leading-snug">
+                    Casi ningún negocio lleva costos — si lo dejas vacío no se guarda nada.
+                  </p>
                 </div>
               )}
+            </>
+          )}
 
-              {usaStock && rol === 'admin' && (
-                <div className="space-y-4 pt-1 border-t border-gray-100">
-                  <div className="flex items-center justify-between py-1 pt-3">
-                    <div>
-                      <p className="text-sm font-medium text-gray-700">Llevar control de este producto</p>
-                      <p className="text-xs text-gray-400 mt-0.5">Apágalo para granel o servicios</p>
-                    </div>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={form.controla_stock}
-                      onClick={() => setForm(f => ({ ...f, controla_stock: !f.controla_stock }))}
-                      className={`relative inline-flex w-11 h-6 rounded-full transition-colors flex-shrink-0 ${
-                        form.controla_stock ? 'bg-emerald-600' : 'bg-gray-200'
-                      }`}
-                    >
-                      <span
-                        className={`inline-block w-5 h-5 m-0.5 bg-white rounded-full shadow-sm transition-transform ${
-                          form.controla_stock ? 'translate-x-5' : 'translate-x-0'
-                        }`}
-                      />
-                    </button>
-                  </div>
+          {error && <p className="text-negativo text-sm">{error}</p>}
 
-                  {form.controla_stock && (
-                    <>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Existencia actual {form.por_peso ? '(kilos)' : ''}
-                        </label>
-                        <input
-                          type="number"
-                          step="0.001"
-                          value={form.stock}
-                          onChange={e => setForm(f => ({ ...f, stock: e.target.value }))}
-                          disabled={existenciaBloqueada}
-                          className={`w-full border rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none ${
-                            existenciaBloqueada
-                              ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed'
-                              : 'border-gray-200 focus:border-emerald-400'
-                          }`}
-                          placeholder="Opcional"
-                        />
-                        {existenciaBloqueada && (
-                          <p className="text-xs text-gray-400 mt-1">
-                            Para ajustar existencia, usa{' '}
-                            <button
-                              type="button"
-                              onClick={() => router.push('/movimientos')}
-                              className="text-emerald-600 font-medium underline"
-                            >
-                              Movimientos → Ajuste por conteo
-                            </button>
-                          </p>
-                        )}
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Alerta cuando quede menos de {form.por_peso ? '(kilos)' : ''}
-                        </label>
-                        <input
-                          type="number"
-                          step="0.001"
-                          value={form.stock_minimo}
-                          onChange={e => setForm(f => ({ ...f, stock_minimo: e.target.value }))}
-                          className="w-full border border-gray-200 rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none focus:border-emerald-400"
-                          placeholder="Opcional"
-                        />
-                      </div>
-                      {editando && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={abrirMerma}
-                            className="w-full flex items-center gap-3 py-3 px-3 rounded-xl bg-gray-100 text-gray-600"
-                          >
-                            <Icon nombre="registrarMerma" tamano={20} />
-                            <span className="font-medium text-sm">Registrar merma</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={abrirRegistroMovimiento}
-                            className="w-full flex items-center gap-3 py-3 px-3 rounded-xl bg-gray-100 text-gray-600"
-                          >
-                            <Icon nombre="registrarMovimiento" tamano={20} />
-                            <span className="font-medium text-sm">Registrar movimiento</span>
-                          </button>
-                        </>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
+          {editando && !editando.activo && (
+            <Button variante="secundario" onClick={reactivar} className="w-full">
+              Reactivar producto
+            </Button>
+          )}
 
-              {error && <p className="text-red-500 text-sm">{error}</p>}
-            </div>
-
-            <div className="p-4 border-t border-gray-100">
+          <div className="flex gap-2">
+            {editando && (
               <button
-                onClick={guardar}
-                disabled={guardando}
-                className="w-full bg-emerald-600 text-white py-4 rounded-xl text-lg font-bold disabled:opacity-40"
+                type="button"
+                onClick={() => {
+                  setShowModal(false);
+                  setConfirmDelete(editando);
+                }}
+                aria-label="Eliminar producto"
+                className="flex-none w-[52px] h-[52px] rounded-[14px] border border-negativo-borde bg-negativo-fondo text-negativo flex items-center justify-center"
               >
-                {guardando ? 'Guardando...' : editando ? 'Actualizar' : 'Agregar producto'}
+                <Icon nombre="eliminar" tamano={20} />
               </button>
-            </div>
+            )}
+            <Button variante="primario" disabled={guardando} onClick={guardar} className="flex-1">
+              {guardando ? 'Guardando...' : editando ? 'Actualizar' : 'Agregar producto'}
+            </Button>
           </div>
         </div>
-      )}
+      </BottomSheet>
 
       {/* Registrar merma — atajo desde el sheet de editar producto, solo admin */}
       <BottomSheet abierto={showMerma} onCerrar={() => setShowMerma(false)} titulo="Registrar merma">
@@ -1466,28 +1621,23 @@ export default function InventarioPage() {
         )}
       </BottomSheet>
 
-      {/* Confirm delete */}
+      {/* Confirmar eliminación */}
       {confirmDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setConfirmDelete(null)} />
-          <div className="relative bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
-            <h3 className="text-lg font-bold mb-2">Eliminar producto</h3>
-            <p className="text-gray-500 mb-5">
-              ¿Eliminar <strong>{confirmDelete.nombre}</strong>? Esta acción no se puede deshacer.
+          <div className="absolute inset-0 bg-overlay" onClick={() => setConfirmDelete(null)} />
+          <div className="relative bg-tarjeta rounded-2xl p-6 w-full max-w-sm shadow-xl">
+            <h3 className="text-lg font-bold text-texto mb-2">Eliminar producto</h3>
+            <p className="text-texto-3 mb-5">
+              ¿Eliminar <strong className="text-texto">{confirmDelete.nombre}</strong>? Esta acción no se puede
+              deshacer.
             </p>
             <div className="flex gap-3">
-              <button
-                onClick={() => setConfirmDelete(null)}
-                className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-700 font-semibold"
-              >
+              <Button variante="secundario" onClick={() => setConfirmDelete(null)} className="flex-1">
                 Cancelar
-              </button>
-              <button
-                onClick={() => eliminar(confirmDelete)}
-                className="flex-1 py-3 rounded-xl bg-red-500 text-white font-semibold"
-              >
+              </Button>
+              <Button variante="destructivo" onClick={() => eliminar(confirmDelete)} className="flex-1">
                 Eliminar
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -1495,7 +1645,7 @@ export default function InventarioPage() {
 
       {/* Toast */}
       {toast && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-5 py-2.5 rounded-xl text-sm font-medium z-50 shadow-lg whitespace-nowrap">
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-toast-fondo text-toast-texto px-5 py-2.5 rounded-xl text-sm font-medium z-50 shadow-lg whitespace-nowrap">
           {toast}
         </div>
       )}
@@ -1508,7 +1658,7 @@ export default function InventarioPage() {
         />
       )}
 
-      {/* Barcode scanner — renders on top of all modals (last in DOM) */}
+      {/* Barcode scanner — renders on top de todos los modales (último en el DOM) */}
       {showScanner && (
         <Scanner
           onDetect={code => {
