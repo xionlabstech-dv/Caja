@@ -8,7 +8,7 @@ import { getProductos, saveProducto, deleteProductoDB, saveMovimiento, actualiza
 import { encolarCrearProducto, encolarEditarProducto, encolarEliminarProducto, encolarAplicarMovimientoStock } from '@/lib/outbox';
 import { createProductoSupabase, updateProductoSupabase, softDeleteProducto, aplicarMovimientoStockRemoto } from '@/lib/sync';
 import { precioBS, precioUSD, formatBS, formatUSD } from '@/lib/precio';
-import { stockBajo } from '@/lib/stock';
+import { stockBajo, debeOcultarStock } from '@/lib/stock';
 import { pareceCodigoBarra } from '@/lib/barcode';
 import { useApp } from '@/components/Providers';
 import { useGuardarRuta } from '@/lib/useGuardarRuta';
@@ -748,14 +748,15 @@ export default function InventarioPage() {
 
   // No usa handleCostoChange: ese recalcula margen/precio a partir de
   // campoActivo, y si el activo era "precio" terminaría mezclando el precio
-  // VIEJO con el costo nuevo recién calculado — un % de margen que nadie
-  // decidió. Acá el margen se limpia a propósito: que el comerciante decida
-  // uno fresco (a mano o con los atajos) a partir del costo real que acaba
-  // de cargar.
+  // VIEJO con el costo nuevo recién calculado. Acá se limpian los 3 campos
+  // derivados (margen, ganancia, precio) a propósito: que el comerciante
+  // decida un margen y precio frescos (a mano o con los atajos) a partir
+  // del costo real que acaba de cargar, sin arrastrar nada calculado contra
+  // el costo anterior.
   const usarCostoDeCaja = () => {
     if (costoUnitarioCaja === null) return;
     setCampoActivo('margen');
-    setForm(f => ({ ...f, costo: costoUnitarioCaja, margen: '' }));
+    setForm(f => ({ ...f, costo: costoUnitarioCaja, margen: '', ganancia: '', precio: '' }));
     cerrarCalcCaja();
   };
 
@@ -939,8 +940,22 @@ export default function InventarioPage() {
                   ? 0
                   : Math.max(cero ? 0 : 4, Math.min(100, (p.stock / Math.max(umbral * 3, 1)) * 100));
               const barColor = cero ? 'bg-negativo' : bajo ? 'bg-aviso' : 'bg-marca';
-              const stockTexColor = cero ? 'text-negativo' : bajo ? 'text-aviso' : 'text-texto-3';
-              const stockTexto = !controla
+              // Mismo criterio que StockBadge (versión anterior de esta
+              // pantalla): con stock bajo/en cero y la sincronización posible-
+              // mente vieja (offline o hace más de HORAS_LIMITE_CONFIANZA), no
+              // se muestra el número — otro dispositivo pudo haber agotado el
+              // producto y el cajero no debe confiar en un dato desactualizado.
+              const ocultarStock = controla && debeOcultarStock(p.stock, p.stock_minimo, isOnline, ultimaSincronizacion);
+              const stockTexColor = ocultarStock
+                ? 'text-aviso'
+                : cero
+                ? 'text-negativo'
+                : bajo
+                ? 'text-aviso'
+                : 'text-texto-3';
+              const stockTexto = ocultarStock
+                ? 'Consultar'
+                : !controla
                 ? 'No lleva control'
                 : p.stock == null
                 ? 'Sin inicializar'
