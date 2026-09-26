@@ -331,10 +331,12 @@ export default function PresupuestosPage() {
         <ThemeToggle variant="neutro" />
       </header>
 
-      {/* pb-1 + overflow visible: mismo arreglo que Inventario/Fiado para
-          que la barra de scroll del navegador no pise los chips */}
+      {/* pb-2.5 + overflow visible: mismo arreglo que Inventario/Fiado para
+          que la barra de scroll del navegador no pise los chips — acá con
+          5 chips (no 3) el scroll horizontal siempre se activa en un
+          teléfono normal, así que hace falta más aire que el pb-1 de Fiado */}
       <div className="px-4 pt-3 pb-4 bg-superficie-barra border-b border-borde-divisor">
-        <div className="flex gap-2 -mx-4 px-4 pb-1 overflow-x-auto">
+        <div className="flex gap-2 -mx-4 px-4 pb-2.5 overflow-x-auto">
           {CHIPS.map(c => {
             const activo = chip === c.id;
             return (
