@@ -60,6 +60,30 @@ export interface MermaPorMotivo {
   valor_usd: number | null;
 }
 
+export interface AbonosFiadoPeriodo {
+  total_bs: number;
+  total_usd: number;
+  cantidad: number;
+}
+
+export interface VentaAnulada {
+  venta_id: string;
+  vendida_en: string;
+  total_bs: number;
+  total_usd: number;
+  motivo_anulacion: string | null;
+  anulada_por_nombre: string | null;
+  anulada_en: string | null;
+}
+
+// Mismo tipo para consumo propio y faltantes por conteo — las dos RPC
+// devuelven exactamente esta forma (cantidad agregada + su valor, null si no
+// aplica ganancia, mismo criterio que MermaPorMotivo).
+export interface PerdidaAgregada {
+  cantidad: number;
+  valor_usd: number | null;
+}
+
 // Todas las funciones agregan del lado de Supabase (funciones RPC en SQL) —
 // nunca traen las filas crudas al cliente para sumarlas en JS. Devuelven
 // null ante cualquier fallo (típicamente sin conexión); la página decide
@@ -150,6 +174,63 @@ export async function fetchMermas(negocioId: string, desde: Date, hasta: Date): 
     }).abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
     if (error) throw error;
     return (data ?? []) as MermaPorMotivo[];
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchAbonosFiado(negocioId: string, desde: Date, hasta: Date): Promise<AbonosFiadoPeriodo | null> {
+  try {
+    const { data, error } = await supabase.rpc('reportes_abonos_fiado', {
+      p_negocio_id: negocioId,
+      p_desde: desde.toISOString(),
+      p_hasta: hasta.toISOString(),
+    }).abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS)).single();
+    if (error) throw error;
+    return data as AbonosFiadoPeriodo;
+  } catch {
+    return null;
+  }
+}
+
+// Ya viene `order by vendida_en desc` del lado del servidor.
+export async function fetchAnulaciones(negocioId: string, desde: Date, hasta: Date): Promise<VentaAnulada[] | null> {
+  try {
+    const { data, error } = await supabase.rpc('reportes_anulaciones', {
+      p_negocio_id: negocioId,
+      p_desde: desde.toISOString(),
+      p_hasta: hasta.toISOString(),
+    }).abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
+    if (error) throw error;
+    return (data ?? []) as VentaAnulada[];
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchConsumoPropio(negocioId: string, desde: Date, hasta: Date): Promise<PerdidaAgregada | null> {
+  try {
+    const { data, error } = await supabase.rpc('reportes_consumo_propio', {
+      p_negocio_id: negocioId,
+      p_desde: desde.toISOString(),
+      p_hasta: hasta.toISOString(),
+    }).abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS)).single();
+    if (error) throw error;
+    return data as PerdidaAgregada;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchFaltantesConteo(negocioId: string, desde: Date, hasta: Date): Promise<PerdidaAgregada | null> {
+  try {
+    const { data, error } = await supabase.rpc('reportes_faltantes_conteo', {
+      p_negocio_id: negocioId,
+      p_desde: desde.toISOString(),
+      p_hasta: hasta.toISOString(),
+    }).abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS)).single();
+    if (error) throw error;
+    return data as PerdidaAgregada;
   } catch {
     return null;
   }
