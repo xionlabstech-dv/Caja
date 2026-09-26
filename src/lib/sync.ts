@@ -197,7 +197,11 @@ export async function updateTasa(tasa: number, negocioId: string): Promise<Resul
     return { ok: false, permanente: true, mensaje: 'No se pudo guardar la tasa' };
   }
 
-  await saveConfiguracion({ id: 1, tasa, tasa_actualizada_en: now });
+  // saveConfiguracion hace un put() que reemplaza el registro completo — leer
+  // primero y mezclar evita perder tasa_oficial/tasa_oficial_actualizada_en/
+  // tasa_actualizacion_fallida (que esta función nunca toca) del caché local.
+  const actual = await getConfigDB();
+  await saveConfiguracion({ ...actual, id: 1, tasa, tasa_actualizada_en: now });
   return { ok: true };
 }
 

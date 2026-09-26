@@ -34,6 +34,17 @@ export interface Configuracion {
   id: number;
   tasa: number;
   tasa_actualizada_en: string;
+  // Tasa oficial del BCV y cuándo se verificó por última vez — las escriben
+  // las funciones automáticas (fn_actualizar_tasa_automatica_todos, vía el
+  // cron de /api/actualizar-tasa), nunca el guardado manual. Nunca las
+  // toca handleGuardar()/updateTasa() directamente; solo se leen para
+  // decorar la pantalla de Tasa.
+  tasa_oficial?: number | null;
+  tasa_oficial_actualizada_en?: string | null;
+  // true si el último intento del chequeo automático contra el BCV falló —
+  // no dice desde cuándo, solo si el intento más reciente no se pudo
+  // completar. Ver src/app/tasa/page.tsx para el chip que la usa.
+  tasa_actualizacion_fallida?: boolean;
 }
 
 export interface VentaItem {
