@@ -54,6 +54,7 @@ import {
   RotateCw,
   Calendar,
   ArrowUpDown,
+  Check,
   type LucideIcon,
 } from 'lucide-react';
 import type { MetodoPago } from '@/types';
@@ -110,6 +111,9 @@ export const ICONOS = {
 
   // Pantalla "Inventario" (rediseño) — alternar orden del catálogo
   ordenar: ArrowUpDown,
+
+  // Pantalla "Fiado" (rediseño) — botón "Registrar abono"
+  confirmar: Check,
 
   // Métodos de pago
   metodoEfectivoBs: Banknote,
