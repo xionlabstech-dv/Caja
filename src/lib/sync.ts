@@ -1117,6 +1117,12 @@ export async function sincronizarPresupuesto(presupuesto: Presupuesto, negocioId
 // servidor. No usa mi_estado_negocio() (a diferencia de las RPC
 // reportes_*): crear/convertir/anular presupuestos es trabajo operativo
 // diario, igual que fiado, y sigue disponible en 'restringido'.
+//
+// convertido_en/anulado_en/motivo_anulacion (además de tasa_al_crear, que ya
+// estaba declarado pero la función no lo devolvía) hacen falta en el
+// cliente para el banner/recuadro del comprobante de presupuesto — sin
+// ellos, savePresupuestosResumen los borraba del caché local en el primer
+// sync después de anular/convertir (ver comentario de esa función en db.ts).
 export async function getPresupuestosRemoto(
   negocioId: string
 ): Promise<Omit<Presupuesto, 'items' | 'sincronizado'>[] | null> {
@@ -1135,7 +1141,10 @@ export async function getPresupuestosRemoto(
       total_bs_estimado: number;
       creado_por_nombre: string | null;
       creado_en: string;
+      convertido_en: string | null;
       venta_id: string | null;
+      anulado_en: string | null;
+      motivo_anulacion: string | null;
     }
     return ((data ?? []) as FilaPresupuesto[]).map(p => ({
       id: p.id,
@@ -1147,7 +1156,10 @@ export async function getPresupuestosRemoto(
       total_bs_estimado: p.total_bs_estimado,
       creado_por_nombre: p.creado_por_nombre ?? undefined,
       creado_en: p.creado_en,
+      convertido_en: p.convertido_en ?? undefined,
       venta_id: p.venta_id ?? undefined,
+      anulado_en: p.anulado_en ?? undefined,
+      motivo_anulacion: p.motivo_anulacion ?? undefined,
     }));
   } catch {
     return null;

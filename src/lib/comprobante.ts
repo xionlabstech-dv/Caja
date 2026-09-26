@@ -34,6 +34,7 @@ const COLOR_TEXTO_SUAVE = '#374151';
 const COLOR_TEXTO_APOYO = '#6b7280';
 const COLOR_DIVISOR = '#e5e7eb';
 const COLOR_ROJO = '#dc2626';
+const COLOR_ROJO_BG = '#fef2f2';
 const COLOR_NARANJA = '#c2410c';
 const COLOR_NARANJA_BG = '#fff7ed';
 
@@ -806,18 +807,53 @@ function itemPresupuestoCantidadPrecioMonto(item: PresupuestoItem): { cantidadTe
 }
 
 // Recuadro "Válido hasta el ..." — sin cambios de estilo respecto a hoy
-// (fondo/tinta ámbar, sin borde: no es la leyenda fiscal, no aplica la
-// regla del borde de tinta), solo reubicado dentro del layout de dos
-// columnas de carta/media.
-function dibujarRecuadroVigencia(ctx: CanvasRenderingContext2D, x: number, y: number, ancho: number, alto: number, texto1: string, texto2: string, tam1: number, tam2: number) {
-  ctx.fillStyle = COLOR_NARANJA_BG;
+// (fondo/tinta ámbar por defecto, sin borde: no es la leyenda fiscal, no
+// aplica la regla del borde de tinta), solo reubicado dentro del layout de
+// dos columnas de carta/media. colorFondo/colorTinta con default: las
+// llamadas de un presupuesto vigente quedan idénticas a hoy — ver
+// recuadroEstadoPresupuesto() para los otros dos estados.
+function dibujarRecuadroVigencia(
+  ctx: CanvasRenderingContext2D, x: number, y: number, ancho: number, alto: number,
+  texto1: string, texto2: string, tam1: number, tam2: number,
+  colorFondo: string = COLOR_NARANJA_BG, colorTinta: string = COLOR_NARANJA,
+) {
+  ctx.fillStyle = colorFondo;
   ctx.fillRect(x, y, ancho, alto);
   ctx.textAlign = 'left';
-  ctx.fillStyle = COLOR_NARANJA;
+  ctx.fillStyle = colorTinta;
   ctx.font = `bold ${tam1}px sans-serif`;
   ctx.fillText(texto1, x + 14, y + tam1 + 8);
   ctx.font = `${tam2}px sans-serif`;
   ctx.fillText(texto2, x + 14, y + tam1 + tam2 + 14);
+}
+
+// El recuadro de la esquina no puede seguir diciendo "Válido hasta" cuando el
+// presupuesto ya no se puede cobrar — ese documento se comparte por WhatsApp y
+// queda dando vueltas. El caso 'vigente' devuelve exactamente lo de siempre;
+// el texto2 vigente lo pasa cada formato porque carta y media carta lo dicen
+// con distinto largo.
+function recuadroEstadoPresupuesto(p: Presupuesto, texto2Vigente: string): {
+  texto1: string; texto2: string; fondo: string; tinta: string;
+} {
+  if (p.estado === 'anulado') {
+    return {
+      texto1: p.anulado_en ? `Anulado el ${fmtFechaSolo(p.anulado_en)}` : 'Presupuesto anulado',
+      texto2: 'Ya no se puede cobrar.',
+      fondo: COLOR_ROJO_BG, tinta: COLOR_ROJO,
+    };
+  }
+  if (p.estado === 'convertido') {
+    return {
+      texto1: 'Convertido en venta',
+      texto2: p.convertido_en ? `Se cobró el ${fmtFechaSolo(p.convertido_en)}.` : 'Este presupuesto ya se cobró.',
+      fondo: COLOR_DIVISOR, tinta: COLOR_TEXTO_SUAVE,
+    };
+  }
+  return {
+    texto1: `Válido hasta el ${fmtFechaCorta(p.fecha_vencimiento)}`,
+    texto2: texto2Vigente,
+    fondo: COLOR_NARANJA_BG, tinta: COLOR_NARANJA,
+  };
 }
 
 function dibujarPresupuestoCarta(ctx: CanvasRenderingContext2D, datos: DatosPresupuesto): number {
@@ -838,6 +874,23 @@ function dibujarPresupuestoCarta(ctx: CanvasRenderingContext2D, datos: DatosPres
     { texto: `Emitido el ${fmtFechaSolo(presupuesto.creado_en)}`, font: '13px sans-serif', color: COLOR_TEXTO_SUAVE, salto: 18 },
   ];
   let y = dibujarEncabezadoDosColumnas(ctx, ancho, padX, 56, izquierda, derecha) + 24;
+
+  if (presupuesto.estado === 'anulado') {
+    ctx.fillStyle = COLOR_ROJO;
+    ctx.fillRect(padX, y, ancho - padX * 2, 30);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 15px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('PRESUPUESTO ANULADO', padX + 16, y + 20);
+    y += 30 + 8;
+    if (presupuesto.motivo_anulacion) {
+      ctx.font = 'italic 13px sans-serif';
+      ctx.fillStyle = COLOR_TEXTO_SUAVE;
+      ctx.fillText(truncar(ctx, `Motivo: ${presupuesto.motivo_anulacion}`, ancho - padX * 2), padX, y);
+      y += 20;
+    }
+    y += 6;
+  }
 
   const anchoVigencia = 300;
   const xVigencia = ancho - padX - anchoVigencia;
@@ -860,11 +913,10 @@ function dibujarPresupuestoCarta(ctx: CanvasRenderingContext2D, datos: DatosPres
   ctx.fillStyle = COLOR_TEXTO;
   ctx.fillText(presupuesto.creado_por_nombre || '—', padX + 82, yTextos + 22);
 
+  const rec = recuadroEstadoPresupuesto(presupuesto, 'Los precios en bolívares pueden cambiar después de esa fecha.');
   dibujarRecuadroVigencia(
     ctx, xVigencia, y, anchoVigencia, altoFila,
-    `Válido hasta el ${fmtFechaCorta(presupuesto.fecha_vencimiento)}`,
-    'Los precios en bolívares pueden cambiar después de esa fecha.',
-    17, 12,
+    rec.texto1, rec.texto2, 17, 12, rec.fondo, rec.tinta,
   );
   y += altoFila;
   trazarLinea(ctx, padX, ancho - padX, y, { color: COLOR_DIVISOR });
@@ -958,6 +1010,22 @@ function dibujarPresupuestoMediaCarta(ctx: CanvasRenderingContext2D, datos: Dato
   ];
   let y = dibujarEncabezadoDosColumnas(ctx, ancho, padX, 26 + 4, izquierda, derecha) + 14;
 
+  if (presupuesto.estado === 'anulado') {
+    ctx.fillStyle = COLOR_ROJO;
+    ctx.font = 'bold 12px sans-serif';
+    const anchoBadge = ctx.measureText('PRESUPUESTO ANULADO').width + 24;
+    ctx.fillRect(padX, y, anchoBadge, 20);
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'left';
+    ctx.fillText('PRESUPUESTO ANULADO', padX + 12, y + 14);
+    if (presupuesto.motivo_anulacion) {
+      ctx.font = 'italic 11.5px sans-serif';
+      ctx.fillStyle = COLOR_TEXTO_SUAVE;
+      ctx.fillText(truncar(ctx, `Motivo: ${presupuesto.motivo_anulacion}`, ancho - padX * 2 - anchoBadge - 12), padX + anchoBadge + 12, y + 14);
+    }
+    y += 20 + 12;
+  }
+
   const anchoVigencia = 220;
   const xVigencia = ancho - padX - anchoVigencia;
   const altoFila = 42;
@@ -982,11 +1050,10 @@ function dibujarPresupuestoMediaCarta(ctx: CanvasRenderingContext2D, datos: Dato
   ctx.fillStyle = COLOR_TEXTO;
   ctx.fillText(presupuesto.creado_por_nombre || '—', xCursor, y + altoFila / 2 + 4);
 
+  const rec = recuadroEstadoPresupuesto(presupuesto, 'Los precios en Bs pueden cambiar después');
   dibujarRecuadroVigencia(
     ctx, xVigencia, y, anchoVigencia, altoFila,
-    `Válido hasta el ${fmtFechaCorta(presupuesto.fecha_vencimiento)}`,
-    'Los precios en Bs pueden cambiar después',
-    13.5, 10.5,
+    rec.texto1, rec.texto2, 13.5, 10.5, rec.fondo, rec.tinta,
   );
   y += altoFila + 14;
 
@@ -1051,7 +1118,8 @@ export async function generarPresupuestoPNG(datos: DatosPresupuesto): Promise<{ 
   const formato = datos.datosNegocio?.formatoPresupuesto ?? 'media_carta';
   const dibujar = formato === 'carta' ? dibujarPresupuestoCarta : dibujarPresupuestoMediaCarta;
   const blob = await generarPNG(816, ctx => dibujar(ctx, datos), formato === 'carta' ? 1056 : 528);
-  return { blob, nombreArchivo: `presupuesto-${datos.numero}.png` };
+  const sufijo = datos.presupuesto.estado === 'anulado' ? '-anulado' : '';
+  return { blob, nombreArchivo: `presupuesto-${datos.numero}${sufijo}.png` };
 }
 
 export async function compartirPresupuesto(datos: DatosPresupuesto): Promise<'compartido' | 'descargado'> {
