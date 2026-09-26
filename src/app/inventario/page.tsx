@@ -96,7 +96,7 @@ export default function InventarioPage() {
   const [productos, setProductos] = useState<Producto[]>([]);
   const [cargandoProductos, setCargandoProductos] = useState(true);
   const [busqueda, setBusqueda] = useState('');
-  const [chip, setChip] = useState<'todos' | 'bajo' | 'sin' | 'desactivados'>('todos');
+  const [chip, setChip] = useState<'todos' | 'bajo' | 'sin'>('todos');
   const [orden, setOrden] = useState<'stock' | 'nombre'>('stock');
   const [showModal, setShowModal] = useState(false);
   const [editando, setEditando] = useState<Producto | null>(null);
@@ -155,20 +155,20 @@ export default function InventarioPage() {
 
   if (!permitida) return null;
 
-  // Mismos 4 buckets del mockup (Inventario - movil): "bajo" y "sin" excluyen
+  // Mismos buckets del mockup (Inventario - movil): "bajo" y "sin" excluyen
   // productos sin control de stock y, en el caso de "bajo", además exigen
-  // stock > 0 (si no, un producto en cero contaría dos veces). Todos los
-  // chips salvo "desactivados" excluyen siempre los desactivados.
+  // stock > 0 (si no, un producto en cero contaría dos veces). La lista de
+  // Inventario, con cualquier chip, siempre queda restringida a activos —
+  // no hay chip "Desactivados" (decisión de Juan: eliminar se presenta y se
+  // entiende como permanente, no habría nada real que mostrar ahí).
   const activos = productos.filter(p => p.activo);
   const conControl = activos.filter(p => p.controla_stock !== false);
   const bajos = conControl.filter(p => stockBajo(p.stock, p.stock_minimo) && (p.stock ?? 0) > 0);
   const ceros = conControl.filter(p => p.stock != null && p.stock <= 0);
-  const desactivados = productos.filter(p => !p.activo);
 
   const q = busqueda.trim().toLowerCase();
   let filtrados = productos.filter(p => {
-    if (chip === 'desactivados') { if (p.activo) return false; }
-    else if (!p.activo) return false;
+    if (!p.activo) return false;
     if (chip === 'bajo' && !(p.controla_stock !== false && stockBajo(p.stock, p.stock_minimo) && (p.stock ?? 0) > 0)) return false;
     if (chip === 'sin' && !(p.controla_stock !== false && p.stock != null && p.stock <= 0)) return false;
     if (q && !(p.nombre.toLowerCase().includes(q) || (p.codigo_barra ?? '').toLowerCase().includes(q))) return false;
@@ -535,44 +535,6 @@ export default function InventarioPage() {
     showToast('Producto eliminado');
   };
 
-  // Único cambio: activo → true. Mismo camino optimista que guardar(), pero
-  // sin pasar por su validación de formulario — reactivar no depende de que
-  // el resto de los campos esté completo.
-  const reactivar = async () => {
-    if (!editando) return;
-    const original = editando;
-    const actualizado = { ...editando, activo: true };
-    await saveProducto(actualizado);
-    setEditando(actualizado);
-    setForm(f => ({ ...f, activo: true }));
-
-    if (!isOnline) {
-      await encolarEditarProducto(editando.id, { activo: true });
-      await cargar();
-      setShowModal(false);
-      showToast('Guardado localmente — se sincronizará cuando haya conexión');
-      return;
-    }
-
-    const resultado = await updateProductoSupabase(editando.id, { activo: true });
-    if (!resultado.ok) {
-      if (resultado.permanente === false) {
-        await encolarEditarProducto(editando.id, { activo: true });
-        await cargar();
-        setShowModal(false);
-        showToast('Guardado localmente — se sincronizará cuando haya conexión');
-        return;
-      }
-      await saveProducto(original);
-      await cargar();
-      showToast('No se pudo reactivar el producto. Intenta de nuevo.');
-      return;
-    }
-    await cargar();
-    setShowModal(false);
-    showToast('Producto reactivado');
-  };
-
   // Gramos → kg, igual que agregarPorPeso() en Caja: precio * (g / 1000).
   const gramosMermaNum = parseFloat(gramosMerma);
   const cantidadMermaAplicada = editando?.por_peso
@@ -784,9 +746,16 @@ export default function InventarioPage() {
     setCostoCaja('');
   };
 
+  // No usa handleCostoChange: ese recalcula margen/precio a partir de
+  // campoActivo, y si el activo era "precio" terminaría mezclando el precio
+  // VIEJO con el costo nuevo recién calculado — un % de margen que nadie
+  // decidió. Acá el margen se limpia a propósito: que el comerciante decida
+  // uno fresco (a mano o con los atajos) a partir del costo real que acaba
+  // de cargar.
   const usarCostoDeCaja = () => {
     if (costoUnitarioCaja === null) return;
-    handleCostoChange(costoUnitarioCaja);
+    setCampoActivo('margen');
+    setForm(f => ({ ...f, costo: costoUnitarioCaja, margen: '' }));
     cerrarCalcCaja();
   };
 
@@ -822,7 +791,7 @@ export default function InventarioPage() {
         </button>
       </header>
 
-      <div className="px-4 py-3 bg-superficie-barra border-b border-borde-divisor flex flex-col gap-2.5">
+      <div className="px-4 pt-3 pb-4 bg-superficie-barra border-b border-borde-divisor flex flex-col gap-2.5">
         <div className="flex gap-2">
           <div className="flex-1 relative">
             <Icon
@@ -850,12 +819,13 @@ export default function InventarioPage() {
           </button>
         </div>
 
-        <div className="flex gap-2 -mx-4 px-4 overflow-x-auto">
+        {/* pb-1 + overflow visible: deja aire para que la barra de scroll del
+            navegador no quede pegada/pisando los chips (reporte de Preview) */}
+        <div className="flex gap-2 -mx-4 px-4 pb-1 overflow-x-auto">
           {[
             { id: 'todos' as const, label: 'Todos', cuenta: activos.length },
             { id: 'bajo' as const, label: 'Stock bajo', cuenta: bajos.length },
             { id: 'sin' as const, label: 'Sin stock', cuenta: ceros.length },
-            { id: 'desactivados' as const, label: 'Desactivados', cuenta: desactivados.length },
           ].map(c => {
             const activo = chip === c.id;
             return (
@@ -918,9 +888,7 @@ export default function InventarioPage() {
         )}
 
         <div className="flex items-center justify-between gap-2">
-          <p className="text-[11px] font-bold uppercase tracking-wide text-texto-2">
-            {chip === 'desactivados' ? 'Productos desactivados' : 'Catálogo'}
-          </p>
+          <p className="text-[11px] font-bold uppercase tracking-wide text-texto-2">Catálogo</p>
           <button
             onClick={() => setOrden(o => (o === 'stock' ? 'nombre' : 'stock'))}
             className="h-[34px] px-3 rounded-full border border-borde-campo bg-tarjeta text-texto-2 text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap"
@@ -957,9 +925,11 @@ export default function InventarioPage() {
               const cero = controla && p.stock != null && p.stock <= 0;
               const bajo = controla && !cero && stockBajo(p.stock, p.stock_minimo);
 
+              // Sin chip "Desactivados", esta lista nunca incluye productos
+              // inactivos (ver filtro de "filtrados" más arriba) — no hace
+              // falta esa etiqueta acá.
               let etiqueta: { texto: string; bg: string; tx: string } | null = null;
-              if (!p.activo) etiqueta = { texto: 'Desactivado', bg: 'bg-tarjeta-hundida', tx: 'text-texto-2' };
-              else if (!controla) etiqueta = { texto: 'Sin control', bg: 'bg-tarjeta-hundida', tx: 'text-texto-2' };
+              if (!controla) etiqueta = { texto: 'Sin control', bg: 'bg-tarjeta-hundida', tx: 'text-texto-2' };
               else if (cero) etiqueta = { texto: 'En cero', bg: 'bg-negativo-fondo', tx: 'text-negativo' };
               else if (bajo) etiqueta = { texto: 'Stock bajo', bg: 'bg-aviso-fondo', tx: 'text-aviso' };
 
@@ -982,7 +952,6 @@ export default function InventarioPage() {
                 <button
                   key={p.id}
                   onClick={() => abrirEditar(p)}
-                  style={{ opacity: p.activo ? 1 : 0.6 }}
                   className={`text-left p-3 bg-tarjeta border rounded-2xl flex flex-col gap-2.5 transition-transform active:scale-[0.99] ${
                     cero ? 'border-negativo-borde' : 'border-borde-tarjeta'
                   }`}
@@ -1077,6 +1046,27 @@ export default function InventarioPage() {
                 }`}
               />
             </button>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm text-texto-3">Código de barra</label>
+            <div className="flex gap-2">
+              <Input
+                type="text"
+                value={form.codigo_barra}
+                onChange={e => setForm(f => ({ ...f, codigo_barra: e.target.value }))}
+                className="font-mono"
+                placeholder="Opcional"
+              />
+              <button
+                type="button"
+                onClick={() => setShowScanner(true)}
+                className="flex-none w-[52px] h-[52px] rounded-[12px] border border-borde-campo bg-tarjeta-hundida text-texto-2 flex items-center justify-center"
+                aria-label="Escanear código de barra"
+              >
+                <Icon nombre="escanearCodigoBarras" tamano={20} />
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-2.5 items-end">
@@ -1249,27 +1239,6 @@ export default function InventarioPage() {
             </>
           )}
 
-          <div className="flex flex-col gap-1.5">
-            <label className="text-sm text-texto-3">Código de barra</label>
-            <div className="flex gap-2">
-              <Input
-                type="text"
-                value={form.codigo_barra}
-                onChange={e => setForm(f => ({ ...f, codigo_barra: e.target.value }))}
-                className="font-mono"
-                placeholder="Opcional"
-              />
-              <button
-                type="button"
-                onClick={() => setShowScanner(true)}
-                className="flex-none w-[52px] h-[52px] rounded-[12px] border border-borde-campo bg-tarjeta-hundida text-texto-2 flex items-center justify-center"
-                aria-label="Escanear código de barra"
-              >
-                <Icon nombre="escanearCodigoBarras" tamano={20} />
-              </button>
-            </div>
-          </div>
-
           {mostrarCosto && (
             <>
               <div className="h-px bg-borde-divisor" />
@@ -1311,7 +1280,10 @@ export default function InventarioPage() {
                       step="0.01"
                       value={form.costo}
                       onChange={e => handleCostoChange(e.target.value)}
-                      className="w-full h-12 px-3 rounded-[10px] bg-tarjeta border border-borde-campo outline-none text-base font-semibold text-texto focus:border-foco"
+                      disabled={showCalcCaja}
+                      className={`w-full h-12 px-3 rounded-[10px] bg-tarjeta border border-borde-campo outline-none text-base font-semibold ${
+                        showCalcCaja ? 'text-texto-3 cursor-not-allowed' : 'text-texto focus:border-foco'
+                      }`}
                       placeholder="Opcional"
                     />
                     {showCalcCaja && (
@@ -1413,12 +1385,6 @@ export default function InventarioPage() {
           )}
 
           {error && <p className="text-negativo text-sm">{error}</p>}
-
-          {editando && !editando.activo && (
-            <Button variante="secundario" onClick={reactivar} className="w-full">
-              Reactivar producto
-            </Button>
-          )}
 
           <div className="flex gap-2">
             {editando && (
