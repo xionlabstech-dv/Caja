@@ -234,6 +234,16 @@ export interface ClienteFiado {
   creado_en: string;
 }
 
+// Datos derivados de fiado_movimientos que clientes_fiado no guarda —
+// llegan por la RPC fiado_clientes_listar y se cachean aparte para que el
+// saldo (y todo el camino offline del abono) siga viviendo solo en
+// clientes_fiado.
+export interface ResumenClienteFiado {
+  cliente_id: string;
+  movimientos: number;
+  ultimo_movimiento_en: string | null;
+}
+
 export type TipoMovimientoFiado = 'cargo' | 'abono';
 
 // Ledger de fiado, mismo patrón que MovimientoStock: cada fila es un

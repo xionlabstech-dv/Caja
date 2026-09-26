@@ -1,5 +1,5 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
-import { Producto, Configuracion, Venta, CierreCaja, OperacionPendiente, Rol, MovimientoStock, MetodoPago, EstadoNegocio, ClienteFiado, MovimientoFiado, Presupuesto, DatosNegocio } from '@/types';
+import { Producto, Configuracion, Venta, CierreCaja, OperacionPendiente, Rol, MovimientoStock, MetodoPago, EstadoNegocio, ClienteFiado, MovimientoFiado, Presupuesto, DatosNegocio, ResumenClienteFiado } from '@/types';
 
 interface MetaItem {
   key: string;
@@ -52,6 +52,10 @@ interface CajaDBSchema extends DBSchema {
     key: string;
     value: Presupuesto;
   };
+  fiado_resumen: {
+    key: string;
+    value: ResumenClienteFiado;
+  };
 }
 
 let dbPromise: Promise<IDBPDatabase<CajaDBSchema>> | null = null;
@@ -59,7 +63,7 @@ let dbPromise: Promise<IDBPDatabase<CajaDBSchema>> | null = null;
 function getDB() {
   if (typeof window === 'undefined') throw new Error('IDB solo disponible en el browser');
   if (!dbPromise) {
-    dbPromise = openDB<CajaDBSchema>('caja-db', 7, {
+    dbPromise = openDB<CajaDBSchema>('caja-db', 8, {
       async upgrade(db, oldVersion, _newVersion, transaction) {
         if (oldVersion < 1) {
           const productosStore = db.createObjectStore('productos', { keyPath: 'id' });
@@ -118,6 +122,13 @@ function getDB() {
           // Presupuestos: sin datos que migrar, funcionalidad enteramente
           // nueva — solo hace falta crear la store.
           db.createObjectStore('presupuestos', { keyPath: 'id' });
+        }
+        if (oldVersion < 8) {
+          // Resumen de fiado: datos derivados (conteo de movimientos y fecha
+          // del último) que clientes_fiado no guarda. Se puede reconstruir
+          // entero en cualquier sync, así que no hay nada que migrar ni que
+          // preservar.
+          db.createObjectStore('fiado_resumen', { keyPath: 'cliente_id' });
         }
       },
     });
@@ -419,7 +430,7 @@ export async function actualizarStockLocal(productoId: string, nuevoStock: numbe
 export async function clearTenantData(): Promise<void> {
   const db = await getDB();
   const tx = db.transaction(
-    ['productos', 'configuracion', 'ventas', 'cierres', 'meta', 'pendientes', 'movimientos', 'clientes_fiado', 'fiado_movimientos', 'presupuestos'],
+    ['productos', 'configuracion', 'ventas', 'cierres', 'meta', 'pendientes', 'movimientos', 'clientes_fiado', 'fiado_movimientos', 'presupuestos', 'fiado_resumen'],
     'readwrite',
   );
   await Promise.all([
@@ -433,6 +444,7 @@ export async function clearTenantData(): Promise<void> {
     tx.objectStore('clientes_fiado').clear(),
     tx.objectStore('fiado_movimientos').clear(),
     tx.objectStore('presupuestos').clear(),
+    tx.objectStore('fiado_resumen').clear(),
     tx.done,
   ]);
 }
@@ -566,6 +578,23 @@ export async function savePresupuestosResumen(
     await tx.store.put({ ...r, items: local?.items, sincronizado: true });
   }
   await tx.done;
+}
+
+// --- Resumen de fiado ---
+
+// A diferencia de saveClientesFiado/savePresupuestosResumen, este resumen no
+// carga saldo_usd ni ningún otro dato que el camino offline del abono pueda
+// modificar — se puede reemplazar a ciegas en cada sync, sin el cuidado de
+// no pisar un cambio local todavía sin confirmar.
+export async function saveResumenFiado(resumenes: ResumenClienteFiado[]): Promise<void> {
+  const db = await getDB();
+  const tx = db.transaction('fiado_resumen', 'readwrite');
+  await Promise.all([...resumenes.map(r => tx.store.put(r)), tx.done]);
+}
+
+export async function getResumenFiado(): Promise<ResumenClienteFiado[]> {
+  const db = await getDB();
+  return db.getAll('fiado_resumen');
 }
 
 export async function marcarPresupuestoSincronizado(id: string): Promise<void> {

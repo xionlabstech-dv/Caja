@@ -10,6 +10,7 @@ import {
   saveClientesFiado,
   actualizarSaldoFiadoLocal,
   savePresupuestosResumen,
+  saveResumenFiado,
   setCachedDatosNegocio,
 } from './db';
 import {
@@ -26,6 +27,7 @@ import {
   PresupuestoItem,
   EstadoPresupuesto,
   DatosNegocio,
+  ResumenClienteFiado,
 } from '@/types';
 
 // Límite de tiempo para llamadas RPC que no pueden quedarse esperando para
@@ -98,6 +100,15 @@ export async function syncFromSupabase(negocioId: string): Promise<Configuracion
 
     if (allClientesFiado.length > 0) {
       await saveClientesFiado(allClientesFiado);
+    }
+
+    // Resumen de fiado (conteo de movimientos y fecha del último) — vía
+    // fiado_clientes_listar, mismo criterio que presupuestos_listar más
+    // abajo. clientes_fiado sigue siendo la única fuente del saldo; esto
+    // solo decora la lista.
+    const resumenFiado = await getResumenFiadoRemoto(negocioId);
+    if (resumenFiado) {
+      await saveResumenFiado(resumenFiado);
     }
 
     // Presupuestos: mismo criterio, pero vía la función presupuestos_listar
@@ -980,6 +991,34 @@ export async function getMovimientosFiadoPorClienteRemoto(
       ocurrido_en: m.ocurrido_en,
       sincronizado: true,
     } as MovimientoFiado));
+  } catch {
+    return null;
+  }
+}
+
+// Resumen para decorar la lista (conteo de movimientos y fecha del último) —
+// vía la función fiado_clientes_listar, mismo patrón que
+// getPresupuestosRemoto/presupuestos_listar. clientes_fiado sigue siendo la
+// única fuente del saldo: esto no lo toca, solo agrega los 2 datos que esa
+// tabla no guarda. 'vencido' también viene en la RPC pero no se usa acá — se
+// calcula en el cliente a partir de ultimo_movimiento_en, para que envejezca
+// bien sin conexión (ver comentario en la pantalla de Fiado).
+export async function getResumenFiadoRemoto(negocioId: string): Promise<ResumenClienteFiado[] | null> {
+  try {
+    const { data, error } = await supabase
+      .rpc('fiado_clientes_listar', { p_negocio_id: negocioId })
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
+    if (error) throw error;
+    interface FilaResumenFiado {
+      id: string;
+      movimientos: number;
+      ultimo_movimiento_en: string | null;
+    }
+    return ((data ?? []) as FilaResumenFiado[]).map(r => ({
+      cliente_id: r.id,
+      movimientos: r.movimientos,
+      ultimo_movimiento_en: r.ultimo_movimiento_en,
+    }));
   } catch {
     return null;
   }
