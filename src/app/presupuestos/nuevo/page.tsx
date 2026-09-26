@@ -7,17 +7,24 @@ import { getProductos, getProductoPorCodigo, savePresupuesto, getPresupuestos } 
 import { encolarCrearPresupuesto } from '@/lib/outbox';
 import { precioBS, precioUSD, formatBS, formatUSD } from '@/lib/precio';
 import { pareceCodigoBarra } from '@/lib/barcode';
+import { debeOcultarStock, stockBajo } from '@/lib/stock';
 import { compartirPresupuesto } from '@/lib/comprobante';
 import { useApp } from '@/components/Providers';
 import { useGuardarRuta } from '@/lib/useGuardarRuta';
 import Scanner from '@/components/Scanner';
 import ThemeToggle from '@/components/ThemeToggle';
-import StockBadge from '@/components/StockBadge';
+import Button from '@/components/ui/Button';
+import Input from '@/components/ui/Input';
+import BottomSheet from '@/components/ui/BottomSheet';
+import Icon from '@/components/ui/Icon';
+import { TAMANO_ICONO } from '@/components/ui/iconos';
 
+// Identidad visual por producto en el catálogo — misma paleta que
+// COLORES_AVATAR/colorAvatar de Fiado (mismo propósito, no dos paletas
+// "crudas" distintas en el proyecto), no un token semántico del sistema.
+const COLORES_AVATAR = ['#8B5CF6', '#3B82F6', '#06B6D4', '#14B8A6', '#10B981', '#F59E0B', '#F97316', '#EC4899'];
 function avatarColor(nombre: string): string {
-  const idx = nombre.charCodeAt(0) % 8;
-  return ['bg-violet-500', 'bg-blue-500', 'bg-cyan-500', 'bg-teal-500',
-    'bg-emerald-500', 'bg-amber-500', 'bg-orange-500', 'bg-pink-500'][idx];
+  return COLORES_AVATAR[nombre.charCodeAt(0) % COLORES_AVATAR.length];
 }
 
 function formatearNombre(nombre: string): string {
@@ -31,6 +38,27 @@ function formatearNombre(nombre: string): string {
 function hoyISO(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// Mismo criterio que el componente compartido StockBadge.tsx (que sigue
+// usando la Caja real, sin rediseñar — no se toca, mismo trato que ya se le
+// dio en Inventario) — versión local retokenizada, misma lógica de
+// debeOcultarStock/stockBajo, sin ícono (esto es una fila de catálogo
+// chica, no la tarjeta grande de Inventario).
+function stockBadge(
+  producto: Producto,
+  isOnline: boolean,
+  ultimaSincronizacion: string | null
+): { texto: string; clase: string } | null {
+  if (producto.controla_stock === false || producto.stock == null) return null;
+  if (debeOcultarStock(producto.stock, producto.stock_minimo, isOnline, ultimaSincronizacion)) {
+    return { texto: 'Consultar', clase: 'bg-aviso-fondo text-aviso' };
+  }
+  const bajo = stockBajo(producto.stock, producto.stock_minimo);
+  const texto = producto.por_peso
+    ? `${producto.stock.toLocaleString('es-VE', { maximumFractionDigits: 2 })} kg`
+    : `${Math.round(producto.stock)}`;
+  return { texto, clase: bajo ? 'bg-negativo-fondo text-negativo' : 'bg-tarjeta-hundida text-texto-2' };
 }
 
 export default function NuevoPresupuestoPage() {
@@ -237,30 +265,21 @@ export default function NuevoPresupuestoPage() {
   if (guardado) {
     return (
       <div className="flex flex-col h-screen max-h-screen items-center justify-center p-6 text-center">
-        <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900/30 rounded-full flex items-center justify-center mb-3">
-          <svg className="w-8 h-8 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-          </svg>
+        <div className="w-16 h-16 bg-marca-suave rounded-full flex items-center justify-center mb-3">
+          <Icon nombre="confirmar" tamano={32} className="text-marca-suave-texto" />
         </div>
-        <h1 className="text-lg font-bold text-gray-900 dark:text-white">Presupuesto guardado</h1>
-        <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-400 mt-1">{formatBS(guardado.total_bs_estimado)}</p>
-        {tasa > 0 && <p className="text-gray-400 text-sm">{formatUSD(guardado.total_usd)}</p>}
+        <h1 className="text-lg font-bold text-texto">Presupuesto guardado</h1>
+        <p className="text-2xl font-bold text-marca mt-1 tabular-nums">{formatBS(guardado.total_bs_estimado)}</p>
+        {tasa > 0 && <p className="text-texto-4 text-sm tabular-nums">{formatUSD(guardado.total_usd)}</p>}
 
-        <div className="w-full max-w-sm mt-6 space-y-2">
-          <button
-            onClick={compartir}
-            disabled={compartiendo}
-            className="w-full bg-emerald-600 text-white py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 disabled:opacity-60"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M8.684 13.342a3 3 0 100-2.684m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
-            </svg>
+        <div className="w-full max-w-sm mt-6 flex flex-col gap-2">
+          <Button variante="primario" onClick={compartir} disabled={compartiendo} className="w-full">
+            <Icon nombre="compartir" tamano={TAMANO_ICONO.secundario} />
             {compartiendo ? 'Generando...' : 'Compartir presupuesto'}
-          </button>
+          </Button>
           <button
             onClick={() => router.push('/presupuestos')}
-            className="w-full bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 py-3.5 rounded-xl font-semibold"
+            className="w-full h-[52px] rounded-[12px] border border-borde-tarjeta text-texto-3 font-semibold"
           >
             Ver lista de presupuestos
           </button>
@@ -271,83 +290,78 @@ export default function NuevoPresupuestoPage() {
 
   return (
     <div className="flex flex-col h-screen max-h-screen">
-      <header className="bg-emerald-600 text-white px-4 pt-4 pb-3 flex items-center justify-between sticky top-0 z-30">
-        <div className="flex items-center gap-2 min-w-0">
-          <button onClick={() => router.back()} className="p-1 -ml-1 flex-shrink-0" aria-label="Volver">
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
-          <h1 className="text-lg font-bold truncate">Nuevo presupuesto</h1>
+      <header className="bg-superficie-barra border-b border-borde-divisor px-4 pt-3.5 pb-3 flex items-center gap-2.5 sticky top-0 z-30">
+        <button onClick={() => router.back()} className="p-1 -ml-1 flex-shrink-0 text-texto-3" aria-label="Volver">
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+        <div className="flex-1 min-w-0">
+          <h1 className="text-base font-bold text-texto truncate">Nuevo presupuesto</h1>
         </div>
-        <ThemeToggle />
+        <ThemeToggle variant="neutro" />
       </header>
 
-      <div className="p-4 pb-2 space-y-2">
+      <div className="p-4 pb-2">
         <div className="flex gap-2">
-          <input
+          <Input
             ref={searchRef}
             type="text"
             value={busqueda}
             onChange={e => setBusqueda(e.target.value)}
             onKeyDown={handleBuscadorKeyDown}
             placeholder="Buscar producto o escanear código..."
-            className="flex-1 border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-3 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-400"
+            className="flex-1"
           />
           <button
             type="button"
             onClick={() => setShowScanner(true)}
-            className="flex-shrink-0 px-3 py-3 rounded-xl bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 flex items-center justify-center"
             aria-label="Escanear código"
+            className="flex-shrink-0 w-[52px] h-[52px] rounded-[12px] bg-tarjeta-hundida text-texto-2 flex items-center justify-center"
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8v8M12 8v8M17 8v8" />
-            </svg>
+            <Icon nombre="escanearCodigoBarras" tamano={TAMANO_ICONO.secundario} />
           </button>
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 pb-3 space-y-2">
         {productosFiltrados.length === 0 ? (
-          <div className="text-center text-gray-400 py-12">
+          <div className="text-center text-texto-3 py-12">
             <p>{busqueda ? `No se encontró "${busqueda}"` : 'Sin productos'}</p>
           </div>
         ) : (
           productosFiltrados.map(producto => {
             const pbs = tasa > 0 ? precioBS(producto, tasa) : null;
             const pusd = tasa > 0 ? precioUSD(producto, tasa) : null;
+            const badge = stockBadge(producto, isOnline, ultimaSincronizacion);
             return (
               <button
                 key={producto.id}
                 onClick={() => agregarItem(producto)}
-                className="w-full bg-white dark:bg-slate-800 rounded-xl p-3 flex items-center gap-3 shadow-sm border border-gray-100 dark:border-slate-700 text-left"
+                className="w-full bg-tarjeta rounded-2xl p-3 flex items-center gap-3 border border-borde-tarjeta text-left"
               >
-                <div className={`w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center ${avatarColor(producto.nombre)}`}>
-                  <span className="text-white font-bold text-sm">{producto.nombre.charAt(0).toUpperCase()}</span>
+                <div
+                  className="w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center"
+                  style={{ backgroundColor: avatarColor(producto.nombre) }}
+                >
+                  <span className="text-texto-invertido font-bold text-sm">{producto.nombre.charAt(0).toUpperCase()}</span>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm text-gray-900 dark:text-white truncate">
+                  <p className="font-medium text-sm text-texto truncate">
                     {formatearNombre(producto.nombre)}{producto.por_peso ? ' /kg' : ''}
                   </p>
                   {pbs !== null ? (
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                    <p className="text-sm text-texto-3">
                       {formatBS(pbs)}{pusd !== null && ` · ${formatUSD(pusd)}`}
                     </p>
                   ) : (
-                    <p className="text-xs text-gray-400">Tasa no configurada</p>
+                    <p className="text-xs text-texto-4">Tasa no configurada</p>
                   )}
                 </div>
-                {usaStock && (
-                  <StockBadge
-                    stock={producto.stock}
-                    stockMinimo={producto.stock_minimo}
-                    controlaStock={producto.controla_stock}
-                    esPorPeso={producto.por_peso}
-                    isOnline={isOnline}
-                    ultimaSincronizacion={ultimaSincronizacion}
-                  />
+                {usaStock && badge && (
+                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${badge.clase}`}>
+                    {badge.texto}
+                  </span>
                 )}
               </button>
             );
@@ -360,7 +374,7 @@ export default function NuevoPresupuestoPage() {
       {items.length > 0 && !showCarrito && !showDatos && (
         <button
           onClick={() => setShowCarrito(true)}
-          className="fixed bottom-20 right-4 bg-emerald-600 text-white px-5 py-3 rounded-2xl shadow-xl shadow-emerald-900/30 flex items-center gap-2 z-30"
+          className="fixed bottom-20 right-4 bg-marca text-texto-invertido px-5 py-3 rounded-2xl shadow-[0_8px_24px_rgba(4,135,90,0.35)] flex items-center gap-2 z-30"
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -378,186 +392,142 @@ export default function NuevoPresupuestoPage() {
           presupuesto. La lista de arriba desapareció apenas se hacía
           scroll al catálogo; acá siempre queda a un toque del botón
           flotante. */}
-      {showCarrito && (
-        <div className="fixed inset-0 z-50 flex items-end">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setShowCarrito(false)} />
-          <div className="relative w-full max-w-lg mx-auto bg-white dark:bg-slate-800 rounded-t-2xl max-h-[80vh] flex flex-col">
-            <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-slate-700">
-              <h2 className="text-lg font-bold text-gray-900 dark:text-white">Tu presupuesto</h2>
-              <button onClick={() => setShowCarrito(false)} className="p-1 text-gray-400">
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <BottomSheet abierto={showCarrito} onCerrar={() => setShowCarrito(false)} titulo="Tu presupuesto">
+        <div className="flex flex-col gap-2">
+          {items.map(item => (
+            <div key={item.id} className="flex items-center gap-3 bg-tarjeta-hundida rounded-[12px] p-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-texto truncate">{formatearNombre(item.nombre)}</p>
+                <p className="text-xs text-texto-4">
+                  {item.gramos !== undefined ? `${item.gramos}g` : `${item.cantidad}×`}
+                  {' · '}{formatBS(itemSubtotalBs(item))}
+                </p>
+              </div>
+              {item.gramos === undefined && (
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <button
+                    onClick={() => actualizarCantidad(item.id, -1)}
+                    className="w-7 h-7 rounded-full bg-tarjeta flex items-center justify-center text-texto-2 font-bold"
+                  >
+                    −
+                  </button>
+                  <span className="w-5 text-center text-sm font-semibold text-texto">{item.cantidad}</span>
+                  <button
+                    onClick={() => actualizarCantidad(item.id, 1)}
+                    className="w-7 h-7 rounded-full bg-marca-suave flex items-center justify-center text-marca-suave-texto font-bold"
+                  >
+                    +
+                  </button>
+                </div>
+              )}
+              <button onClick={() => quitarItem(item.id)} className="text-texto-4 flex-shrink-0" aria-label="Quitar">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             </div>
-
-            <div className="flex-1 overflow-y-auto p-4 space-y-2">
-              {items.map(item => (
-                <div key={item.id} className="flex items-center gap-3 bg-gray-50 dark:bg-slate-700 rounded-xl p-3">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                      {formatearNombre(item.nombre)}
-                    </p>
-                    <p className="text-xs text-gray-400">
-                      {item.gramos !== undefined ? `${item.gramos}g` : `${item.cantidad}×`}
-                      {' · '}{formatBS(itemSubtotalBs(item))}
-                    </p>
-                  </div>
-                  {item.gramos === undefined ? (
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      <button
-                        onClick={() => actualizarCantidad(item.id, -1)}
-                        className="w-7 h-7 rounded-full bg-gray-100 dark:bg-slate-600 flex items-center justify-center text-gray-600 dark:text-gray-300 font-bold"
-                      >
-                        −
-                      </button>
-                      <span className="w-5 text-center text-sm font-semibold text-gray-800 dark:text-gray-200">{item.cantidad}</span>
-                      <button
-                        onClick={() => actualizarCantidad(item.id, 1)}
-                        className="w-7 h-7 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center text-emerald-700 dark:text-emerald-400 font-bold"
-                      >
-                        +
-                      </button>
-                    </div>
-                  ) : null}
-                  <button onClick={() => quitarItem(item.id)} className="text-gray-300 flex-shrink-0" aria-label="Quitar">
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-              ))}
-            </div>
-
-            <div className="p-4 border-t border-gray-100 dark:border-slate-700">
-              <div className="flex justify-between items-center mb-3">
-                <span className="text-gray-600 dark:text-gray-300">Total</span>
-                <div className="text-right">
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white">{formatBS(totalBs)}</p>
-                  {tasa > 0 && <p className="text-sm text-gray-400">{formatUSD(totalUsd)}</p>}
-                </div>
-              </div>
-              <button
-                onClick={() => { setShowCarrito(false); setShowDatos(true); }}
-                className="w-full bg-emerald-600 text-white py-4 rounded-xl text-lg font-bold"
-              >
-                Continuar
-              </button>
+          ))}
+        </div>
+        <div className="mt-4 pt-4 border-t border-borde-divisor">
+          <div className="flex justify-between items-center mb-3">
+            <span className="text-texto-2">Total</span>
+            <div className="text-right">
+              <p className="text-2xl font-bold text-texto tabular-nums">{formatBS(totalBs)}</p>
+              {tasa > 0 && <p className="text-sm text-texto-4 tabular-nums">{formatUSD(totalUsd)}</p>}
             </div>
           </div>
+          <Button variante="primario" onClick={() => { setShowCarrito(false); setShowDatos(true); }} className="w-full">
+            Continuar
+          </Button>
         </div>
-      )}
+      </BottomSheet>
 
       {/* Datos del presupuesto — mismo patrón de hoja que Caja para la
           hoja de pago: tocar el backdrop vuelve al carrito, no pierde
           todo. */}
-      {showDatos && (
-        <div className="fixed inset-0 z-50 flex items-end">
-          <div className="absolute inset-0 bg-black/40" onClick={() => { setShowDatos(false); setShowCarrito(true); }} />
-          <div className="relative w-full max-w-lg mx-auto bg-white dark:bg-slate-800 rounded-t-2xl max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-slate-700">
-              <h2 className="text-lg font-bold text-gray-900 dark:text-white">Datos del presupuesto</h2>
-              <button
-                onClick={() => { setShowDatos(false); setShowCarrito(true); }}
-                className="p-1 text-gray-400"
+      <BottomSheet
+        abierto={showDatos}
+        onCerrar={() => { setShowDatos(false); setShowCarrito(true); }}
+        titulo="Datos del presupuesto"
+      >
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-3">
+            {clienteNombre.trim() && (
+              <div
+                className="flex-none w-9 h-9 rounded-full flex items-center justify-center text-texto-invertido font-bold text-sm"
+                style={{ backgroundColor: avatarColor(clienteNombre.trim()) }}
               >
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                </svg>
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Cliente (opcional)</label>
-                <input
-                  type="text"
-                  value={clienteNombre}
-                  onChange={e => setClienteNombre(e.target.value)}
-                  placeholder="Nombre del cliente"
-                  className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-2.5 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-400"
-                />
+                {clienteNombre.trim().charAt(0).toUpperCase()}
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Válido hasta</label>
-                <input
-                  type="date"
-                  value={fechaVencimiento}
-                  min={hoyISO()}
-                  onChange={e => setFechaVencimiento(e.target.value)}
-                  className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-2.5 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-400"
-                />
-              </div>
-
-              <div>
-                <p className="text-xs text-gray-400">Total</p>
-                <p className="text-xl font-bold text-gray-900 dark:text-white">{formatBS(totalBs)}</p>
-                {tasa > 0 && <p className="text-xs text-gray-400">{formatUSD(totalUsd)}</p>}
-              </div>
-
-              {error && <p className="text-red-500 text-sm">{error}</p>}
-            </div>
-
-            <div className="p-4 border-t border-gray-100 dark:border-slate-700">
-              <button
-                onClick={guardarPresupuesto}
-                disabled={guardando || items.length === 0}
-                className="w-full bg-emerald-600 text-white py-4 rounded-xl text-lg font-bold disabled:opacity-40"
-              >
-                {guardando ? 'Guardando...' : 'Guardar presupuesto'}
-              </button>
-            </div>
+            )}
+            <Input
+              label="Cliente (opcional)"
+              value={clienteNombre}
+              onChange={e => setClienteNombre(e.target.value)}
+              placeholder="Nombre del cliente"
+              className="flex-1"
+            />
           </div>
-        </div>
-      )}
+          <Input
+            label="Válido hasta"
+            type="date"
+            value={fechaVencimiento}
+            min={hoyISO()}
+            onChange={e => setFechaVencimiento(e.target.value)}
+          />
+          <p className="text-xs text-texto-4 -mt-1.5">
+            Después de esa fecha el presupuesto queda vencido y los precios se recalculan al pasarlo a cobro.
+          </p>
 
-      {/* Weight input modal */}
-      {showPeso && productoPeso && (
-        <div className="fixed inset-0 z-50 flex items-end">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setShowPeso(false)} />
-          <div className="relative w-full max-w-lg mx-auto bg-white dark:bg-slate-800 rounded-t-2xl">
-            <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-slate-700">
-              <h2 className="text-lg font-bold text-gray-900 dark:text-white">{formatearNombre(productoPeso.nombre)}</h2>
-              <button onClick={() => setShowPeso(false)} className="p-1 text-gray-400">
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <div className="p-4">
-              <label className="block text-sm text-gray-500 mb-1">Peso (gramos)</label>
-              <input
-                type="number"
-                step="1"
-                value={gramos}
-                onChange={e => setGramos(e.target.value)}
-                className="w-full border border-gray-300 dark:border-slate-600 rounded-xl p-3 text-xl font-bold bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-400"
-                placeholder="0"
-                autoFocus
-              />
-              {tasa > 0 && parseFloat(gramos) > 0 && (
-                <p className="text-center text-lg font-bold text-emerald-700 dark:text-emerald-400 mt-3">
-                  {formatBS(precioBS(productoPeso, tasa) * (parseFloat(gramos) / 1000))}
-                </p>
-              )}
-            </div>
-            <div className="p-4 border-t border-gray-100 dark:border-slate-700">
-              <button
-                onClick={agregarPorPeso}
-                disabled={!gramos || parseFloat(gramos) <= 0}
-                className="w-full bg-emerald-600 text-white py-4 rounded-xl text-lg font-bold disabled:opacity-40"
-              >
-                Agregar
-              </button>
-            </div>
+          <div className="p-3 rounded-[12px] bg-tarjeta-hundida">
+            <p className="text-xs text-texto-4">Total</p>
+            <p className="text-xl font-bold text-texto tabular-nums">{formatBS(totalBs)}</p>
+            {tasa > 0 && <p className="text-xs text-texto-4 tabular-nums">{formatUSD(totalUsd)}</p>}
           </div>
+
+          {error && <p className="text-sm text-negativo">{error}</p>}
         </div>
-      )}
+        <div className="mt-4">
+          <Button variante="primario" onClick={guardarPresupuesto} disabled={guardando || items.length === 0} className="w-full">
+            {guardando ? 'Guardando...' : 'Guardar presupuesto'}
+          </Button>
+        </div>
+      </BottomSheet>
+
+      {/* Weight input sheet */}
+      <BottomSheet
+        abierto={showPeso}
+        onCerrar={() => setShowPeso(false)}
+        titulo={productoPeso ? formatearNombre(productoPeso.nombre) : undefined}
+      >
+        {productoPeso && (
+          <>
+            <Input
+              label="Peso (gramos)"
+              type="number"
+              step="1"
+              value={gramos}
+              onChange={e => setGramos(e.target.value)}
+              className="text-xl font-bold"
+              placeholder="0"
+              autoFocus
+            />
+            {tasa > 0 && parseFloat(gramos) > 0 && (
+              <p className="text-center text-lg font-bold text-marca mt-3 tabular-nums">
+                {formatBS(precioBS(productoPeso, tasa) * (parseFloat(gramos) / 1000))}
+              </p>
+            )}
+            <Button variante="primario" onClick={agregarPorPeso} disabled={!gramos || parseFloat(gramos) <= 0} className="w-full mt-4">
+              Agregar
+            </Button>
+          </>
+        )}
+      </BottomSheet>
 
       {showScanner && <Scanner continuous onDetect={handleScan} onClose={() => setShowScanner(false)} />}
 
       {toast && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-5 py-2.5 rounded-xl text-sm font-medium z-50 shadow-lg max-w-xs text-center">
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-toast-fondo text-toast-texto px-5 py-2.5 rounded-xl text-sm font-medium z-50 shadow-lg max-w-xs text-center">
           {toast}
         </div>
       )}
