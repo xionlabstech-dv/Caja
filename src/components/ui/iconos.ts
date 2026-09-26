@@ -53,6 +53,7 @@ import {
   ChevronRight,
   RotateCw,
   Calendar,
+  ArrowUpDown,
   type LucideIcon,
 } from 'lucide-react';
 import type { MetodoPago } from '@/types';
@@ -106,6 +107,9 @@ export const ICONOS = {
 
   // Pantalla "Reportes" (rediseño) — chip de período "Personalizado"
   calendario: Calendar,
+
+  // Pantalla "Inventario" (rediseño) — alternar orden del catálogo
+  ordenar: ArrowUpDown,
 
   // Métodos de pago
   metodoEfectivoBs: Banknote,
