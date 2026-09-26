@@ -1,33 +1,43 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useApp } from '@/components/Providers';
-import { PERIODOS, TipoPeriodo, rangoPeriodo, labelPeriodoAnterior } from '@/lib/periodos';
+import { PERIODOS, TipoPeriodo, rangoPeriodo } from '@/lib/periodos';
 import {
   fetchTotales,
   fetchPorMetodo,
   fetchTopProductos,
   fetchPorDiaSemana,
-  fetchStockBajo,
   fetchMermas,
+  fetchAbonosFiado,
+  fetchAnulaciones,
+  fetchConsumoPropio,
+  fetchFaltantesConteo,
   TotalesPeriodo,
   DesglosePorMetodo,
   TopProducto,
   VentasPorDiaSemana,
   OrdenTopProductos,
-  StockBajoProducto,
   MermaPorMotivo,
+  AbonosFiadoPeriodo,
+  VentaAnulada,
+  PerdidaAgregada,
 } from '@/lib/reportes';
 import { formatBS, formatUSD } from '@/lib/precio';
 import { useGuardarRuta } from '@/lib/useGuardarRuta';
 import ThemeToggle from '@/components/ThemeToggle';
+import Icon from '@/components/ui/Icon';
+import { TAMANO_ICONO } from '@/components/ui/iconos';
 
 // ventas.metodo_pago es texto libre en Supabase (sin enum/check), y conviven
 // dos esquemas de nombres en los datos reales: el que usa la pantalla de
 // Caja ('efectivo_bs'/'efectivo_usd') y el que aparece en el histórico ya
 // cargado ('efectivo'/'divisa'). Se mapean ambos al mismo label/color/moneda
 // para que ningún método quede sin etiqueta — y cualquier valor futuro no
-// contemplado cae en un fallback visible en vez de un chip vacío.
+// contemplado cae en un fallback visible en vez de un chip vacío. Paleta
+// categórica plana (no son tokens del sistema neutro) — mismo criterio que
+// los chips de método en Resumen/Ventas recientes.
 interface MetodoInfo { label: string; color: string; enUsd: boolean }
 
 const METODO_INFO: Record<string, MetodoInfo> = {
@@ -38,6 +48,9 @@ const METODO_INFO: Record<string, MetodoInfo> = {
   tarjeta: { label: 'Tarjeta', color: 'bg-slate-100 text-slate-700', enUsd: false },
   efectivo_usd: { label: 'Efectivo $', color: 'bg-amber-100 text-amber-700', enUsd: true },
   divisa: { label: 'Efectivo $', color: 'bg-amber-100 text-amber-700', enUsd: true },
+  // reportes_por_metodo lee de venta_pagos, donde 'fiado' sí aparece como
+  // método real (273 ventas en producción) — antes caía en el fallback gris.
+  fiado: { label: 'Fiado', color: 'bg-orange-100 text-orange-700', enUsd: false },
 };
 
 function metodoInfo(metodoPago: string): MetodoInfo {
@@ -45,13 +58,17 @@ function metodoInfo(metodoPago: string): MetodoInfo {
 }
 
 const DIAS_SEMANA = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+const DIAS_SEMANA_CORTO = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 const ORDEN_LUNES_A_DOMINGO = [1, 2, 3, 4, 5, 6, 0];
 
 const MERMA_MOTIVO_LABELS: Record<string, string> = {
   dano: 'Daño',
   vencido: 'Vencido',
-  consumo_propio: 'Consumo propio',
   perdida: 'Pérdida',
+};
+
+const EYEBROW_PERIODO: Record<TipoPeriodo, string> = {
+  hoy: 'hoy', semana: 'esta semana', mes: 'este mes', personalizado: 'el período',
 };
 
 function formatearNombre(nombre: string): string {
@@ -62,25 +79,114 @@ function formatearNombre(nombre: string): string {
     .join(' ');
 }
 
+function capitalizar(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// hasta siempre llega exclusivo (ver periodos.ts) — se resta un día para
+// mostrar el último día real incluido en el rango.
+function formatearRango(tipo: TipoPeriodo, desde: Date, hastaExclusiva: Date): string {
+  const hasta = new Date(hastaExclusiva.getTime() - 1);
+  if (tipo === 'hoy') {
+    return capitalizar(desde.toLocaleDateString('es-VE', { weekday: 'long', day: 'numeric', month: 'long' }));
+  }
+  const mismoMes = desde.getMonth() === hasta.getMonth() && desde.getFullYear() === hasta.getFullYear();
+  const desdeTxt = desde.toLocaleDateString('es-VE', mismoMes ? { day: 'numeric' } : { day: 'numeric', month: 'long' });
+  const hastaTxt = hasta.toLocaleDateString('es-VE', { day: 'numeric', month: 'long', year: 'numeric' });
+  return `${desdeTxt} — ${hastaTxt}`;
+}
+
+function fmtFechaHoraCorta(iso: string): string {
+  return new Date(iso).toLocaleString('es-VE', { day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit' });
+}
+
+function fmtUnidades(cantidad: number): string {
+  const txt = cantidad.toLocaleString('es-VE', { maximumFractionDigits: 3 });
+  return `${txt} ${cantidad === 1 ? 'unidad' : 'uds'}`;
+}
+
+// yyyy-mm-dd local — lo que espera/devuelve <input type="date">. Se arma a
+// mano (no toISOString) para no correr el día por huso horario.
+function fechaInputStr(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function parseFechaInput(s: string): Date {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function calcularRango(periodoTipo: TipoPeriodo, personalizado: { desde: Date; hasta: Date } | null): { desde: Date; hasta: Date } {
+  if (periodoTipo === 'personalizado') return personalizado ?? rangoPeriodo('mes');
+  return rangoPeriodo(periodoTipo);
+}
+
+const ATAJOS_RANGO: { label: string; calcular: () => { desde: Date; hasta: Date } }[] = [
+  {
+    label: 'Últimos 7 días',
+    calcular: () => {
+      const hoy = new Date();
+      const desde = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() - 6);
+      return { desde, hasta: hoy };
+    },
+  },
+  {
+    label: 'Mes pasado',
+    calcular: () => {
+      const hoy = new Date();
+      const desde = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+      const hasta = new Date(hoy.getFullYear(), hoy.getMonth(), 0);
+      return { desde, hasta };
+    },
+  },
+  {
+    label: 'Últimos 3 meses',
+    calcular: () => {
+      const hoy = new Date();
+      const desde = new Date(hoy.getFullYear(), hoy.getMonth() - 3, hoy.getDate());
+      return { desde, hasta: hoy };
+    },
+  },
+];
+
 export default function ReportesPage() {
   const permitida = useGuardarRuta();
+  const router = useRouter();
   const { negocioId, isOnline, rol, usaCostos, usaStock, tasa } = useApp();
+
   const [periodoTipo, setPeriodoTipo] = useState<TipoPeriodo>('hoy');
+  const [rangoPersonalizado, setRangoPersonalizado] = useState<{ desde: Date; hasta: Date } | null>(null);
+
   const [loading, setLoading] = useState(true);
   const [huboError, setHuboError] = useState(false);
   const [totales, setTotales] = useState<TotalesPeriodo | null>(null);
-  const [totalesAnterior, setTotalesAnterior] = useState<TotalesPeriodo | null>(null);
   const [porMetodo, setPorMetodo] = useState<DesglosePorMetodo[]>([]);
   const [topProductos, setTopProductos] = useState<TopProducto[]>([]);
   const [porDiaSemana, setPorDiaSemana] = useState<VentasPorDiaSemana[]>([]);
-  const [stockBajoList, setStockBajoList] = useState<StockBajoProducto[]>([]);
   const [mermasList, setMermasList] = useState<MermaPorMotivo[]>([]);
+  const [abonosFiado, setAbonosFiado] = useState<AbonosFiadoPeriodo | null>(null);
+  const [anulaciones, setAnulaciones] = useState<VentaAnulada[]>([]);
+  const [consumoPropio, setConsumoPropio] = useState<PerdidaAgregada | null>(null);
+  const [faltantesConteo, setFaltantesConteo] = useState<PerdidaAgregada | null>(null);
   // Solo tiene sentido si podría haber ganancia que mostrar — ver también el
   // gate de renderizado más abajo (mostrarGanancia).
   const [ordenTop, setOrdenTop] = useState<OrdenTopProductos>('cantidad');
 
+  const [showRango, setShowRango] = useState(false);
+  const [desdeInput, setDesdeInput] = useState('');
+  const [hastaInput, setHastaInput] = useState('');
+
   useEffect(() => {
     if (!isOnline || !negocioId) {
+      setLoading(false);
+      return;
+    }
+    // Personalizado recién elegido en el chip (antes de pasar por la hoja):
+    // todavía no hay rango que pedir.
+    if (periodoTipo === 'personalizado' && !rangoPersonalizado) {
       setLoading(false);
       return;
     }
@@ -89,20 +195,22 @@ export default function ReportesPage() {
     setLoading(true);
     setHuboError(false);
 
-    const { desde, hasta } = rangoPeriodo(periodoTipo, 0);
-    const { desde: desdeAnt, hasta: hastaAnt } = rangoPeriodo(periodoTipo, -1);
+    const { desde, hasta } = calcularRango(periodoTipo, rangoPersonalizado);
 
     Promise.all([
       fetchTotales(negocioId, desde, hasta),
-      fetchTotales(negocioId, desdeAnt, hastaAnt),
       fetchPorMetodo(negocioId, desde, hasta),
       fetchTopProductos(negocioId, desde, hasta, 10, ordenTop),
       fetchPorDiaSemana(negocioId, desde, hasta),
-      // Solo se piden si el negocio usa_stock — evita una consulta al
-      // pedo para negocios que no llevan control de inventario.
-      usaStock ? fetchStockBajo(negocioId) : Promise.resolve(null),
+      // Mermas sigue atado a usa_stock (igual que hoy) — a diferencia de
+      // abonos/anulaciones/consumo propio/faltantes, que se muestran
+      // siempre, tenga o no el negocio control de inventario activado.
       usaStock ? fetchMermas(negocioId, desde, hasta) : Promise.resolve(null),
-    ]).then(([tot, totAnt, metodo, top, dias, stockBajoData, mermasData]) => {
+      fetchAbonosFiado(negocioId, desde, hasta),
+      fetchAnulaciones(negocioId, desde, hasta),
+      fetchConsumoPropio(negocioId, desde, hasta),
+      fetchFaltantesConteo(negocioId, desde, hasta),
+    ]).then(([tot, metodo, top, dias, mermasData, abonos, anuls, consumo, faltantes]) => {
       if (cancelado) return;
       if (tot === null) {
         setHuboError(true);
@@ -110,29 +218,31 @@ export default function ReportesPage() {
         return;
       }
       setTotales(tot);
-      setTotalesAnterior(totAnt);
       setPorMetodo(metodo ?? []);
       setTopProductos(top ?? []);
       setPorDiaSemana(dias ?? []);
-      setStockBajoList(stockBajoData ?? []);
       setMermasList(mermasData ?? []);
+      setAbonosFiado(abonos);
+      setAnulaciones(anuls ?? []);
+      setConsumoPropio(consumo);
+      setFaltantesConteo(faltantes);
       setLoading(false);
     });
 
     return () => { cancelado = true; };
-  }, [periodoTipo, isOnline, negocioId, ordenTop, usaStock]);
+  }, [periodoTipo, rangoPersonalizado, isOnline, negocioId, ordenTop, usaStock]);
 
   if (!permitida) return null;
+
+  const rango = calcularRango(periodoTipo, rangoPersonalizado);
+  const rangoTexto = formatearRango(periodoTipo, rango.desde, rango.hasta);
+  const diasEnPeriodo = Math.max(1, Math.round((rango.hasta.getTime() - rango.desde.getTime()) / 86400000));
 
   const ticketPromedioBs = totales && totales.cantidad_ventas > 0 ? totales.total_bs / totales.cantidad_ventas : 0;
   const ticketPromedioUsd = totales && totales.cantidad_ventas > 0 ? totales.total_usd / totales.cantidad_ventas : 0;
 
-  const cambioPct =
-    totales && totalesAnterior && totalesAnterior.total_bs > 0
-      ? ((totales.total_bs - totalesAnterior.total_bs) / totalesAnterior.total_bs) * 100
-      : null;
-
   const totalGeneral = porMetodo.reduce((s, m) => s + m.total_bs, 0);
+  const maxMetodoBs = porMetodo.length > 0 ? Math.max(...porMetodo.map(m => m.total_bs)) : 0;
 
   // Gate por rol Y por preferencia del negocio — aunque la RPC ya devuelve
   // null en ganancia_usd para un no-admin, esta pantalla nunca debe intentar
@@ -141,294 +251,491 @@ export default function ReportesPage() {
   const mostrarGanancia = rol === 'admin' && usaCostos;
   const hayGanancia = mostrarGanancia && totales?.items_con_costo != null && totales.items_con_costo > 0;
   const gananciaBs = hayGanancia ? totales!.ganancia_usd! * tasa : 0;
-  // Margen SOBRE EL COSTO (markup), igual definición que el formulario de
-  // producto: costo = monto_con_costo_usd - ganancia_usd (precio - ganancia
-  // = costo), y el % es ganancia / costo, no ganancia / venta.
-  const costoTotalUsd = hayGanancia ? totales!.monto_con_costo_usd! - totales!.ganancia_usd! : 0;
-  const margenPeriodoPct = hayGanancia && costoTotalUsd > 0 ? (totales!.ganancia_usd! / costoTotalUsd) * 100 : null;
-  const coberturaParcial =
-    hayGanancia && totales!.items_totales != null && totales!.items_con_costo! < totales!.items_totales;
+  const coberturaPct = hayGanancia && totales?.items_totales
+    ? Math.round((totales!.items_con_costo! / totales!.items_totales!) * 100)
+    : null;
 
-  // Stock bajo y mermas no dependen de si hubo ventas en el período — un
-  // negocio puede no haber vendido nada hoy y aun así tener existencias
-  // bajas o una merma por daño. Se muestran fuera del estado "sin ventas".
-  const mostrarStock = rol === 'admin' && usaStock;
+  const sinVentas = !totales || totales.cantidad_ventas === 0;
+  const totalBsTexto = formatBS(totales?.total_bs ?? 0);
+
+  const mermaTotalCantidad = mermasList.reduce((s, m) => s + m.cantidad, 0);
+  const mermaTotalValorUsd = mermasList.reduce((s, m) => s + (m.valor_usd ?? 0), 0);
+  const consumoCantidad = consumoPropio?.cantidad ?? 0;
+  const faltantesCantidad = faltantesConteo?.cantidad ?? 0;
+
+  const anulTotalBs = anulaciones.reduce((s, a) => s + a.total_bs, 0);
+  const anulTotalUsd = anulaciones.reduce((s, a) => s + a.total_usd, 0);
+
+  // Gráfico de ventas por día: 7 columnas fijas Lun–Dom, la de hoy resaltada
+  // (no necesariamente la de mayor promedio).
+  const hoyDow = new Date().getDay();
+  const diasConDatos = ORDEN_LUNES_A_DOMINGO.map(dow => porDiaSemana.find(d => d.dia_semana === dow && d.ocurrencias > 0) ?? null);
+  const promedios = diasConDatos.filter((d): d is VentasPorDiaSemana => d !== null).map(d => d.promedio_bs);
+  const maxProm = promedios.length > 0 ? Math.max(...promedios) : 1;
+  const hayDatosDia = promedios.length > 0;
+
+  const barras = ORDEN_LUNES_A_DOMINGO.map((dow, i) => {
+    const d = diasConDatos[i];
+    return {
+      dow,
+      label: DIAS_SEMANA_CORTO[dow],
+      esHoy: dow === hoyDow,
+      altoPx: d ? Math.max(6, (d.promedio_bs / maxProm) * 96) : 6,
+      valorTexto: d ? Math.round(d.promedio_bs).toLocaleString('es-VE') : '—',
+    };
+  });
+
+  let diasNota = 'Promedio vendido en Bs por cada día de la semana dentro del período.';
+  const diasReales = diasConDatos.filter((d): d is VentasPorDiaSemana => d !== null);
+  if (diasReales.length >= 2) {
+    const mayor = diasReales.reduce((a, b) => (a.promedio_bs >= b.promedio_bs ? a : b));
+    const menor = diasReales.reduce((a, b) => (a.promedio_bs <= b.promedio_bs ? a : b));
+    if (menor.promedio_bs > 0 && mayor.dia_semana !== menor.dia_semana) {
+      const factor = mayor.promedio_bs / menor.promedio_bs;
+      diasNota = `El ${DIAS_SEMANA[mayor.dia_semana].toLowerCase()} rinde ${factor.toLocaleString('es-VE', { maximumFractionDigits: 1 })} veces lo del ${DIAS_SEMANA[menor.dia_semana].toLowerCase()}.`;
+    }
+  }
+
+  // Hoja de período personalizado
+  const abrirRango = () => {
+    const base = rangoPersonalizado ?? rangoPeriodo('mes');
+    const hastaInclusiva = new Date(base.hasta.getTime() - 1);
+    setDesdeInput(fechaInputStr(base.desde));
+    setHastaInput(fechaInputStr(hastaInclusiva));
+    setShowRango(true);
+  };
+  const errorRango = hastaInput < desdeInput ? 'La fecha "hasta" no puede ser anterior a "desde".' : '';
+  const confirmarRango = () => {
+    if (errorRango) return;
+    const desde = parseFechaInput(desdeInput);
+    const hastaInclusiva = parseFechaInput(hastaInput);
+    const hasta = new Date(hastaInclusiva.getFullYear(), hastaInclusiva.getMonth(), hastaInclusiva.getDate() + 1);
+    setRangoPersonalizado({ desde, hasta });
+    setPeriodoTipo('personalizado');
+    setShowRango(false);
+  };
 
   return (
     <div>
-      <header className="bg-emerald-600 text-white px-4 pt-4 pb-3 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold">Reportes</h1>
-          <p className="text-emerald-200 text-sm mt-0.5">Histórico de ventas</p>
+      <header className="bg-superficie-barra border-b border-borde-divisor px-4 pt-3.5 pb-3 flex items-center gap-2.5">
+        <button onClick={() => router.back()} className="p-1 -ml-1 flex-shrink-0 text-texto-3" aria-label="Volver">
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+        <div className="flex-1 min-w-0">
+          <h1 className="text-base font-bold text-texto truncate">Reportes</h1>
+          <p className="text-[11px] font-medium text-texto-3 truncate">{rangoTexto}</p>
         </div>
-        <ThemeToggle />
+        <div className={`flex-none flex items-center gap-1.5 h-7 px-2.5 rounded-full ${isOnline ? 'bg-marca-suave' : 'bg-aviso-fondo'}`}>
+          <Icon
+            nombre={isOnline ? 'enLinea' : 'sinConexion'}
+            tamano={TAMANO_ICONO.chip}
+            className={isOnline ? 'text-marca-suave-texto' : 'text-aviso'}
+          />
+          <span className={`text-[11px] font-semibold whitespace-nowrap ${isOnline ? 'text-marca-suave-texto' : 'text-aviso'}`}>
+            {isOnline ? 'En línea' : 'Sin conexión'}
+          </span>
+        </div>
+        <ThemeToggle variant="neutro" />
       </header>
 
-      {/* Selector de período */}
-      <div className="px-4 py-3 bg-white dark:bg-slate-800 border-b border-gray-100 dark:border-slate-700 flex gap-2 overflow-x-auto">
-        {PERIODOS.map(p => (
-          <button
-            key={p.tipo}
-            onClick={() => setPeriodoTipo(p.tipo)}
-            className={`flex-shrink-0 px-3.5 py-2 rounded-full text-sm font-medium transition-colors ${
-              periodoTipo === p.tipo
-                ? 'bg-emerald-600 text-white'
-                : 'bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300'
-            }`}
-          >
-            {p.label}
-          </button>
-        ))}
+      <div className="px-4 py-3 bg-superficie-barra border-b border-borde-divisor flex gap-2 overflow-x-auto">
+        {PERIODOS.map(p => {
+          const activo = periodoTipo === p.tipo;
+          return (
+            <button
+              key={p.tipo}
+              onClick={() => (p.tipo === 'personalizado' ? abrirRango() : setPeriodoTipo(p.tipo))}
+              className={`flex-shrink-0 px-3.5 py-2 rounded-full text-sm font-semibold flex items-center gap-1.5 transition-colors border ${
+                activo ? 'bg-marca-suave text-marca-suave-texto border-marca' : 'bg-transparent text-texto-3 border-borde-campo'
+              }`}
+            >
+              {p.tipo === 'personalizado' && <Icon nombre="calendario" tamano={14} />}
+              {p.label}
+            </button>
+          );
+        })}
       </div>
 
       <div className="p-4 space-y-4">
         {!isOnline ? (
-          <div className="text-center text-gray-400 py-16">
-            <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                d="M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829m-4.243 2.829a4.978 4.978 0 01-1.414-2.83m-1.414 5.658a9 9 0 01-2.167-9.238m7.824 2.167a1 1 0 111.414 1.414m-1.414-1.414L3 3" />
-            </svg>
+          <div className="text-center text-texto-3 py-16">
+            <Icon nombre="sinConexion" tamano={48} className="mx-auto mb-3 text-texto-4" />
             <p className="font-medium">Los reportes necesitan conexión a internet</p>
             <p className="text-sm mt-1">Se muestran apenas recuperes la señal</p>
           </div>
         ) : loading ? (
-          <div className="text-center text-gray-400 py-16">
-            <svg className="w-8 h-8 mx-auto mb-3 text-emerald-400 animate-spin" fill="none" viewBox="0 0 24 24">
+          <div className="text-center text-texto-3 py-16">
+            <svg className="w-8 h-8 mx-auto mb-3 text-marca animate-spin" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
             </svg>
             <p className="font-medium">Calculando...</p>
           </div>
         ) : huboError ? (
-          <div className="text-center text-gray-400 py-16">
-            <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-            </svg>
+          <div className="text-center text-texto-3 py-16">
             <p className="font-medium">No se pudieron cargar los reportes</p>
             <p className="text-sm mt-1">Intenta de nuevo en unos segundos</p>
           </div>
         ) : (
           <>
-            {/* Stock bajo y mermas: no dependen de si hubo ventas en el
-                período, así que van antes de ese gate. */}
-            {mostrarStock && stockBajoList.length > 0 && (
-              <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-slate-700">
-                <h2 className="font-semibold text-gray-700 dark:text-gray-300 mb-3">Stock bajo o agotado</h2>
-                <div className="space-y-2">
-                  {stockBajoList.map(p => (
-                    <div key={p.producto_id} className="flex items-center justify-between text-sm gap-3">
-                      <span className="text-gray-700 dark:text-gray-200 truncate">{formatearNombre(p.nombre)}</span>
-                      <span className={`font-bold flex-shrink-0 ${p.stock <= 0 ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'}`}>
-                        {p.stock.toLocaleString('es-VE', { maximumFractionDigits: p.es_por_peso ? 2 : 0 })}{p.es_por_peso ? ' kg' : ''}
-                        <span className="text-gray-400 font-normal text-xs"> / mín {p.stock_minimo.toLocaleString('es-VE', { maximumFractionDigits: p.es_por_peso ? 2 : 0 })}</span>
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {mostrarStock && mermasList.length > 0 && (
-              <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-slate-700">
-                <h2 className="font-semibold text-gray-700 dark:text-gray-300 mb-3">Mermas del período</h2>
-                <div className="space-y-2">
-                  {mermasList.map(m => (
-                    <div key={m.motivo} className="flex items-center justify-between text-sm">
-                      <span className="text-gray-600 dark:text-gray-300">{MERMA_MOTIVO_LABELS[m.motivo] ?? m.motivo}</span>
-                      <div className="text-right">
-                        <span className="font-bold text-gray-800 dark:text-gray-100">
-                          {m.cantidad.toLocaleString('es-VE', { maximumFractionDigits: 3 })}
-                        </span>
-                        {m.valor_usd != null && (
-                          <span className="text-xs text-red-500 dark:text-red-400 ml-1.5">
-                            −{formatBS(m.valor_usd * tasa)}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {!totales || totales.cantidad_ventas === 0 ? (
-              <div className="text-center text-gray-400 py-16">
-                <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                    d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-                <p className="font-medium">Sin ventas registradas en este período</p>
-              </div>
-            ) : (
-              <>
-            {/* Totales del período */}
-            <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-slate-700 text-center">
-              <p className="text-gray-500 dark:text-gray-400 text-sm mb-1">Total vendido</p>
-              <p className="text-4xl font-bold text-gray-900 dark:text-white">{formatBS(totales.total_bs)}</p>
-              <p className="text-gray-400 mt-1">{formatUSD(totales.total_usd)}</p>
-
-              <div className="flex items-center justify-center gap-6 mt-4 pt-4 border-t border-gray-100 dark:border-slate-700">
-                <div>
-                  <p className="text-lg font-bold text-gray-900 dark:text-white">{totales.cantidad_ventas}</p>
-                  <p className="text-xs text-gray-400">{totales.cantidad_ventas === 1 ? 'venta' : 'ventas'}</p>
-                </div>
-                <div>
-                  <p className="text-lg font-bold text-gray-900 dark:text-white">{formatBS(ticketPromedioBs)}</p>
-                  <p className="text-xs text-gray-400">ticket promedio</p>
-                  <p className="text-xs text-gray-400">{formatUSD(ticketPromedioUsd)}</p>
-                </div>
-              </div>
-
-              {hayGanancia && (
-                <div className="mt-4 pt-4 border-t border-gray-100 dark:border-slate-700">
-                  <p className="text-emerald-600 dark:text-emerald-400 font-semibold">
-                    Ganancia estimada: {formatBS(gananciaBs)}
-                    {margenPeriodoPct !== null && (
-                      <span> ({margenPeriodoPct.toLocaleString('es-VE', { maximumFractionDigits: 1 })}%)</span>
-                    )}
-                  </p>
-                  {coberturaParcial && (
-                    <p className="text-xs text-gray-400 mt-1">
-                      Basado en {totales!.items_con_costo} de {totales!.items_totales} productos vendidos
-                    </p>
-                  )}
-                </div>
-              )}
+            {/* Total vendido — único elemento "en tinta" de la pantalla */}
+            <div className="p-5 rounded-2xl bg-tinta">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-tinta-etiqueta">
+                Total vendido · {EYEBROW_PERIODO[periodoTipo]}
+              </p>
+              <p className={`mt-1.5 font-extrabold text-tinta-texto tracking-tight ${totalBsTexto.length > 14 ? 'text-3xl' : 'text-4xl'}`}>
+                {totalBsTexto}
+              </p>
+              <p className="mt-1 text-tinta-etiqueta">{formatUSD(totales?.total_usd ?? 0)}</p>
             </div>
 
-            {/* Comparación con período anterior */}
-            {cambioPct !== null && (
-              <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-slate-700">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-500 dark:text-gray-400">
-                    {PERIODOS.find(p => p.tipo === periodoTipo)?.label}: <span className="font-semibold text-gray-800 dark:text-gray-200">{formatBS(totales.total_bs)}</span>
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-sm mt-1.5">
-                  <span className="text-gray-500 dark:text-gray-400">
-                    {labelPeriodoAnterior(periodoTipo)}: <span className="font-semibold text-gray-800 dark:text-gray-200">{formatBS(totalesAnterior!.total_bs)}</span>
-                  </span>
-                </div>
-                <p className={`text-right font-bold mt-2 ${cambioPct >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-                  {cambioPct >= 0 ? '+' : ''}{cambioPct.toLocaleString('es-VE', { maximumFractionDigits: 1 })}%
+            {sinVentas && (
+              <div className="p-4 rounded-2xl bg-tarjeta border border-borde-tarjeta space-y-1">
+                <p className="font-bold text-texto">No hubo ventas en este período</p>
+                <p className="text-sm text-texto-3">
+                  Si esperabas ventas acá, revisa el rango de fechas. Lo que sí se movió en el período sigue más abajo.
                 </p>
               </div>
             )}
 
-            {/* Desglose por método de pago */}
-            {porMetodo.length > 0 && (
-              <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-slate-700">
-                <h2 className="font-semibold text-gray-700 dark:text-gray-300 mb-3">Por método de pago</h2>
-                <div className="space-y-3">
-                  {porMetodo.map(m => {
-                    const pct = totalGeneral > 0 ? (m.total_bs / totalGeneral) * 100 : 0;
-                    const info = metodoInfo(m.metodo_pago);
-                    return (
-                      <div key={m.metodo_pago}>
-                        <div className="flex items-center justify-between mb-1">
-                          <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${info.color}`}>
-                            {info.label}
-                          </span>
-                          <div className="text-right">
-                            <span className="font-bold text-gray-800 dark:text-gray-100">
-                              {info.enUsd ? formatUSD(m.total_usd) : formatBS(m.total_bs)}
-                            </span>
-                            <span className="text-xs text-gray-400 ml-1.5">
-                              {m.cantidad} {m.cantidad === 1 ? 'venta' : 'ventas'} · {pct.toLocaleString('es-VE', { maximumFractionDigits: 0 })}%
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Top 10 productos */}
-            {topProductos.length > 0 && (
-              <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-slate-700">
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="font-semibold text-gray-700 dark:text-gray-300">Productos más vendidos</h2>
-                  {mostrarGanancia && (
-                    <div className="flex gap-1 bg-gray-100 dark:bg-slate-700 rounded-full p-0.5">
-                      {([
-                        ['cantidad', 'Cantidad'],
-                        ['ganancia', 'Ganancia'],
-                      ] as [OrdenTopProductos, string][]).map(([valor, label]) => (
-                        <button
-                          key={valor}
-                          onClick={() => setOrdenTop(valor)}
-                          className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
-                            ordenTop === valor
-                              ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-400 shadow-sm'
-                              : 'text-gray-500 dark:text-gray-400'
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      ))}
+            {!sinVentas && (
+              <>
+                {/* Indicadores */}
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div className="p-3.5 rounded-2xl bg-tarjeta border border-borde-tarjeta space-y-1">
+                    <p className="text-[11px] font-semibold text-texto-3 truncate">Ventas</p>
+                    <p className="text-xl font-bold text-texto">{totales!.cantidad_ventas}</p>
+                    <p className="text-[11px] text-texto-3">
+                      {diasEnPeriodo > 1 ? `${Math.round(totales!.cantidad_ventas / diasEnPeriodo)} por día` : 'en el día'}
+                    </p>
+                  </div>
+                  <div className="p-3.5 rounded-2xl bg-tarjeta border border-borde-tarjeta space-y-1">
+                    <p className="text-[11px] font-semibold text-texto-3 truncate">Ticket promedio</p>
+                    <p className="text-xl font-bold text-texto">{formatBS(ticketPromedioBs)}</p>
+                    <p className="text-[11px] text-texto-3">{formatUSD(ticketPromedioUsd)}</p>
+                  </div>
+                  {hayGanancia && (
+                    <div className="col-span-2 p-3.5 rounded-2xl bg-tarjeta border border-borde-tarjeta space-y-1">
+                      <p className="text-[11px] font-semibold text-texto-3">Ganancia estimada</p>
+                      <p className="text-xl font-bold text-texto">{formatBS(gananciaBs)}</p>
+                      {coberturaPct !== null && (
+                        <p className="text-[11px] text-texto-3">calculada sobre {coberturaPct}% de lo vendido con costo cargado</p>
+                      )}
                     </div>
                   )}
                 </div>
-                <div className="space-y-2.5">
-                  {topProductos.map((p, i) => (
-                    <div key={p.producto_id ?? p.nombre} className="flex items-center gap-3">
-                      <span className="w-6 h-6 rounded-full bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 text-xs font-bold flex items-center justify-center flex-shrink-0">
-                        {i + 1}
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-800 dark:text-gray-100 truncate">{formatearNombre(p.nombre)}</p>
-                        <p className="text-xs text-gray-400">
-                          {p.es_por_peso
-                            ? `${p.cantidad_total.toLocaleString('es-VE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kg`
-                            : `${Math.round(p.cantidad_total)} vendidos`}
-                        </p>
-                      </div>
-                      <div className="text-right flex-shrink-0">
-                        <span className="font-bold text-sm text-gray-800 dark:text-gray-100 block">{formatBS(p.monto_total)}</span>
-                        {mostrarGanancia && p.ganancia_usd != null && (
-                          <span className={`text-xs ${p.ganancia_usd >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500'}`}>
-                            {p.ganancia_usd >= 0 ? '+' : ''}{formatBS(p.ganancia_usd * tasa)}
-                          </span>
+
+                {/* Productos más vendidos */}
+                {topProductos.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-[11px] font-bold uppercase tracking-wide text-texto-3">Productos más vendidos</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-texto-3">top 10</span>
+                        {mostrarGanancia && (
+                          <div className="flex gap-1 bg-tarjeta-hundida rounded-full p-0.5">
+                            {(['cantidad', 'ganancia'] as OrdenTopProductos[]).map(valor => (
+                              <button
+                                key={valor}
+                                onClick={() => setOrdenTop(valor)}
+                                className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                                  ordenTop === valor ? 'bg-tarjeta text-marca-suave-texto shadow-sm' : 'text-texto-3'
+                                }`}
+                              >
+                                {valor === 'cantidad' ? 'Cantidad' : 'Ganancia'}
+                              </button>
+                            ))}
+                          </div>
                         )}
                       </div>
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Ventas por día de la semana */}
-            {porDiaSemana.filter(d => d.ocurrencias > 0).length > 0 && (
-              <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-slate-700">
-                <h2 className="font-semibold text-gray-700 dark:text-gray-300 mb-1">Ventas por día de la semana</h2>
-                <p className="text-xs text-gray-400 mb-3">Promedio dentro del período seleccionado</p>
-                <div className="space-y-2">
-                  {ORDEN_LUNES_A_DOMINGO.map(dow => {
-                    const d = porDiaSemana.find(x => x.dia_semana === dow);
-                    if (!d || d.ocurrencias === 0) return null;
-                    return (
-                      <div key={dow} className="flex items-center justify-between text-sm">
-                        <span className="text-gray-600 dark:text-gray-300">{DIAS_SEMANA[dow]}</span>
-                        <div className="text-right">
-                          <span className="font-semibold text-gray-800 dark:text-gray-100">{formatBS(d.promedio_bs)}</span>
-                          <span className="text-xs text-gray-400 ml-1.5">
-                            total {formatBS(d.total_bs)} · {d.cantidad_ventas} {d.cantidad_ventas === 1 ? 'venta' : 'ventas'}
+                    <div className="flex flex-col gap-px bg-borde-divisor rounded-2xl overflow-hidden">
+                      {topProductos.map((p, i) => (
+                        <div key={p.producto_id ?? p.nombre} className="flex items-center gap-3 px-3.5 py-2.5 bg-tarjeta">
+                          <span className="w-5 flex-none text-right text-sm font-bold text-texto-4">{i + 1}</span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-texto truncate">{formatearNombre(p.nombre)}</p>
+                            <p className="text-xs text-texto-3">
+                              {formatBS(p.monto_total)}
+                              {mostrarGanancia && p.ganancia_usd != null && (
+                                <span className={p.ganancia_usd >= 0 ? 'text-marca-suave-texto' : 'text-negativo'}>
+                                  {' '}· {p.ganancia_usd >= 0 ? '+' : ''}{formatBS(p.ganancia_usd * tasa)}
+                                </span>
+                              )}
+                            </p>
+                          </div>
+                          <span className="flex-none text-sm font-bold text-texto text-right">
+                            {p.es_por_peso
+                              ? `${p.cantidad_total.toLocaleString('es-VE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kg`
+                              : Math.round(p.cantidad_total)}
                           </span>
                         </div>
-                      </div>
-                    );
-                  })}
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Por método de pago */}
+                {porMetodo.length > 0 && (
+                  <div className="space-y-2">
+                    <span className="block text-[11px] font-bold uppercase tracking-wide text-texto-3">Por método de pago</span>
+                    <div className="space-y-2.5">
+                      {porMetodo.map(m => {
+                        const info = metodoInfo(m.metodo_pago);
+                        const pct = totalGeneral > 0 ? (m.total_bs / totalGeneral) * 100 : 0;
+                        const pctAncho = maxMetodoBs > 0 ? (m.total_bs / maxMetodoBs) * 100 : 0;
+                        return (
+                          <div key={m.metodo_pago} className="relative overflow-hidden p-3.5 rounded-2xl bg-tarjeta border border-borde-tarjeta">
+                            <div className="absolute inset-y-0 left-0 bg-tarjeta-hundida" style={{ width: `${pctAncho}%` }} />
+                            <div className="relative grid grid-cols-[1fr_auto] gap-x-3 gap-y-1.5 items-center">
+                              <span className={`justify-self-start px-2.5 py-1 rounded-full text-xs font-bold ${info.color}`}>
+                                {info.label}
+                              </span>
+                              <span className="text-right text-xl font-bold text-texto">
+                                {info.enUsd ? formatUSD(m.total_usd) : formatBS(m.total_bs)}
+                              </span>
+                              <span className="text-sm text-texto-3">{m.cantidad} {m.cantidad === 1 ? 'venta' : 'ventas'}</span>
+                              <span className="text-right text-sm text-texto-3">{pct.toLocaleString('es-VE', { maximumFractionDigits: 0 })}%</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Abonos de fiado — no depende de que haya ventas en el período */}
+            <div className="space-y-2">
+              <span className="block text-[11px] font-bold uppercase tracking-wide text-texto-3">Abonos de fiado</span>
+              <div className="p-3.5 rounded-2xl bg-tarjeta border border-borde-tarjeta space-y-2.5">
+                <div className="flex items-end justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-2xl font-bold text-texto tracking-tight">{formatBS(abonosFiado?.total_bs ?? 0)}</p>
+                    <p className="text-sm text-texto-3">
+                      {formatUSD(abonosFiado?.total_usd ?? 0)} · {abonosFiado?.cantidad === 1 ? '1 abono' : `${abonosFiado?.cantidad ?? 0} abonos`}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => router.push('/fiado')}
+                    className="flex-none h-11 px-3 rounded-xl border border-borde-tarjeta bg-tarjeta-hundida text-texto-3 text-sm font-semibold flex items-center gap-1.5"
+                  >
+                    Ver fiado
+                    <Icon nombre="flechaDerecha" tamano={14} />
+                  </button>
+                </div>
+                <p className="text-xs text-texto-3">Plata que entró sin ser venta — no suma al total vendido.</p>
+              </div>
+            </div>
+
+            {/* Pérdidas del período — tres bloques que nunca se suman */}
+            <div className="space-y-2">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wide text-texto-3">Pérdidas del período</span>
+                {!mostrarGanancia && <span className="text-[11px] font-medium text-texto-3">en unidades</span>}
+              </div>
+
+              <div className="space-y-2.5">
+                {/* Mermas */}
+                <div className={`p-3.5 rounded-2xl bg-tarjeta border space-y-2.5 ${mermaTotalCantidad > 0 ? 'border-aviso-borde' : 'border-borde-tarjeta'}`}>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <p className="text-sm font-bold text-texto">Mermas</p>
+                    <p className={`text-base font-bold ${mermaTotalCantidad > 0 ? 'text-aviso' : 'text-texto-3'}`}>
+                      {mermaTotalCantidad === 0
+                        ? 'Ninguna'
+                        : `${fmtUnidades(mermaTotalCantidad)}${mostrarGanancia ? ` · ${formatUSD(mermaTotalValorUsd)}` : ''}`}
+                    </p>
+                  </div>
+                  {mermaTotalCantidad > 0 ? (
+                    <div className="flex flex-col gap-px bg-borde-divisor rounded-lg overflow-hidden">
+                      {mermasList.filter(m => m.cantidad > 0).map(m => (
+                        <div key={m.motivo} className="flex items-baseline justify-between gap-3 px-3 py-2 bg-tarjeta-hundida">
+                          <span className="text-sm text-texto-3">{MERMA_MOTIVO_LABELS[m.motivo] ?? m.motivo}</span>
+                          <span className="text-sm font-semibold text-texto">
+                            {fmtUnidades(m.cantidad)}{mostrarGanancia && m.valor_usd != null ? ` · ${formatUSD(m.valor_usd)}` : ''}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-texto-3">No se registró ninguna merma en el período.</p>
+                  )}
+                </div>
+
+                {/* Consumo propio */}
+                <div className="p-3.5 rounded-2xl bg-tarjeta border border-borde-tarjeta space-y-1">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <p className="text-sm font-bold text-texto">Consumo propio</p>
+                    <p className={`text-base font-bold ${consumoCantidad === 0 ? 'text-texto-3' : 'text-texto'}`}>
+                      {consumoCantidad === 0
+                        ? 'Ninguno'
+                        : `${fmtUnidades(consumoCantidad)}${mostrarGanancia && consumoPropio?.valor_usd != null ? ` · ${formatUSD(consumoPropio.valor_usd)}` : ''}`}
+                    </p>
+                  </div>
+                  <p className="text-xs text-texto-3">
+                    {consumoCantidad === 0
+                      ? 'No se registró consumo del negocio en el período.'
+                      : 'Lo que el negocio se llevó para sí — no es pérdida por daño.'}
+                  </p>
+                </div>
+
+                {/* Faltantes por conteo */}
+                <div className={`p-3.5 rounded-2xl bg-tarjeta border space-y-1 ${faltantesCantidad > 0 ? 'border-negativo-borde' : 'border-borde-tarjeta'}`}>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <p className="text-sm font-bold text-texto">Faltantes por conteo</p>
+                    <p className={`text-base font-bold ${faltantesCantidad > 0 ? 'text-negativo' : 'text-texto-3'}`}>
+                      {faltantesCantidad === 0
+                        ? 'Ninguno'
+                        : `${fmtUnidades(faltantesCantidad)}${mostrarGanancia && faltantesConteo?.valor_usd != null ? ` · ${formatUSD(faltantesConteo.valor_usd)}` : ''}`}
+                    </p>
+                  </div>
+                  <p className="text-xs text-texto-3">
+                    {faltantesCantidad === 0
+                      ? 'Los conteos del período cerraron sin diferencia.'
+                      : 'Diferencia entre lo que decía el sistema y lo que se contó.'}
+                  </p>
                 </div>
               </div>
-            )}
-              </>
+            </div>
+
+            {/* Anulaciones — no depende de que haya ventas en el período */}
+            <div className="space-y-2">
+              <span className="block text-[11px] font-bold uppercase tracking-wide text-texto-3">Anulaciones</span>
+              <div className={`p-3.5 rounded-2xl bg-tarjeta border space-y-3 ${anulaciones.length > 0 ? 'border-negativo-borde' : 'border-borde-tarjeta'}`}>
+                <div>
+                  <p className={`text-2xl font-bold tracking-tight ${anulaciones.length > 0 ? 'text-negativo' : 'text-texto-3'}`}>
+                    {anulaciones.length > 0 ? formatBS(anulTotalBs) : 'Ninguna'}
+                  </p>
+                  <p className="text-sm text-texto-3">
+                    {anulaciones.length === 0
+                      ? 'Sin anulaciones'
+                      : `${anulaciones.length === 1 ? '1 venta anulada' : `${anulaciones.length} ventas anuladas`} · ${formatUSD(anulTotalUsd)}`}
+                  </p>
+                </div>
+                {anulaciones.length > 0 && (
+                  <div className="flex flex-col gap-px bg-borde-divisor rounded-lg overflow-hidden">
+                    {anulaciones.map(a => (
+                      <div key={a.venta_id} className="px-3 py-2.5 bg-tarjeta-hundida space-y-1">
+                        <div className="flex items-baseline justify-between gap-3">
+                          {/* No hay correlativo ("Venta #N") disponible en esta
+                              RPC — solo venta_id (uuid) — así que se identifica
+                              por fecha/hora, no por número. Ver nota en el PR. */}
+                          <span className="text-sm font-bold text-texto">{fmtFechaHoraCorta(a.vendida_en)}</span>
+                          <span className="text-base font-bold text-texto line-through">{formatBS(a.total_bs)}</span>
+                        </div>
+                        {a.motivo_anulacion && <p className="text-sm text-texto">&ldquo;{a.motivo_anulacion}&rdquo;</p>}
+                        {a.anulada_por_nombre && <p className="text-xs text-texto-3">Anulada por {a.anulada_por_nombre}</p>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Ventas por día — promedio, no total; va al final */}
+            {!sinVentas && hayDatosDia && (
+              <div className="space-y-2">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-[11px] font-bold uppercase tracking-wide text-texto-3">Ventas por día</span>
+                  <span className="text-[11px] font-medium text-texto-3">promedio por día</span>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-tarjeta border border-borde-tarjeta space-y-2.5">
+                  <div className="grid grid-cols-7 gap-1.5 items-end h-32">
+                    {barras.map(b => (
+                      <div key={b.dow} className="flex flex-col justify-end gap-1 h-32">
+                        <span className="text-[10px] font-semibold text-texto-3 text-center whitespace-nowrap">{b.valorTexto}</span>
+                        <div className={`rounded-t ${b.esHoy ? 'bg-marca' : 'bg-marca-suave'}`} style={{ height: `${b.altoPx}px` }} />
+                      </div>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-7 gap-1.5">
+                    {barras.map(b => (
+                      <div key={b.dow} className={`text-[11px] font-semibold text-center ${b.esHoy ? 'text-marca' : 'text-texto-3'}`}>
+                        {b.label}
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-texto-3">{diasNota}</p>
+                </div>
+              </div>
             )}
           </>
         )}
       </div>
+
+      {/* Hoja: período personalizado */}
+      {showRango && (
+        <div className="fixed inset-0 z-50 flex items-end">
+          <div className="absolute inset-0 bg-overlay" onClick={() => setShowRango(false)} />
+          <div className="relative w-full max-w-lg mx-auto bg-tarjeta rounded-t-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-center px-4 pt-4 pb-2">
+              <div className="w-8 h-1 bg-borde-tarjeta rounded-full" />
+            </div>
+            <div className="flex items-center gap-2 px-4 pb-2">
+              <p className="flex-1 min-w-0 text-base font-bold text-texto">Período personalizado</p>
+              <button onClick={() => setShowRango(false)} aria-label="Cerrar" className="flex-none w-9 h-9 flex items-center justify-center text-texto-4">
+                <Icon nombre="cerrar" tamano={20} />
+              </button>
+            </div>
+            <div className="px-4 pb-4 space-y-3">
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-sm font-semibold text-texto-2 mb-1.5">Desde</label>
+                  <input
+                    type="date"
+                    value={desdeInput}
+                    onChange={e => setDesdeInput(e.target.value)}
+                    className="w-full h-[52px] px-3 rounded-xl bg-tarjeta-hundida border border-borde-campo outline-none text-[15px] font-semibold text-texto"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-texto-2 mb-1.5">Hasta</label>
+                  <input
+                    type="date"
+                    value={hastaInput}
+                    onChange={e => setHastaInput(e.target.value)}
+                    className={`w-full h-[52px] px-3 rounded-xl bg-tarjeta-hundida border outline-none text-[15px] font-semibold text-texto ${
+                      errorRango ? 'border-negativo-borde' : 'border-borde-campo'
+                    }`}
+                  />
+                </div>
+              </div>
+              {errorRango && (
+                <p className="px-3 py-2.5 rounded-lg bg-negativo-fondo border border-negativo-borde text-sm font-semibold text-negativo">
+                  {errorRango}
+                </p>
+              )}
+              <div className="flex gap-2 flex-wrap">
+                {ATAJOS_RANGO.map(a => (
+                  <button
+                    key={a.label}
+                    onClick={() => {
+                      const r = a.calcular();
+                      setDesdeInput(fechaInputStr(r.desde));
+                      setHastaInput(fechaInputStr(r.hasta));
+                    }}
+                    className="h-11 px-3.5 rounded-full border border-borde-campo bg-tarjeta-hundida text-texto-3 text-sm font-semibold whitespace-nowrap"
+                  >
+                    {a.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="px-4 pt-3 pb-5 border-t border-borde-tarjeta">
+              <button
+                onClick={confirmarRango}
+                disabled={!!errorRango}
+                className="w-full h-[52px] rounded-2xl bg-marca text-texto-invertido font-bold text-[17px] disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Ver el período
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
