@@ -19,11 +19,15 @@ import { compartirComprobante } from '@/lib/comprobante';
 import { Venta, MetodoPago, MetodoPagoVenta, CierreCaja, DesgloseCierre, MovimientoFiado } from '@/types';
 import { useApp } from '@/components/Providers';
 import ThemeToggle from '@/components/ThemeToggle';
+import Button from '@/components/ui/Button';
+import BottomSheet from '@/components/ui/BottomSheet';
+import Icon from '@/components/ui/Icon';
+import { TAMANO_ICONO } from '@/components/ui/iconos';
 
 // desglose_metodos (cierres) y porMetodo (abajo) se arman siempre a partir
 // de venta.pagos, así que sus llaves son MetodoPago real — 'mixto' nunca
 // aparece ahí. El badge por venta (venta.metodo_pago) sí puede ser 'mixto',
-// por eso estos tres mapas cubren MetodoPagoVenta completo.
+// por eso estos mapas cubren MetodoPagoVenta completo.
 const METODO_LABELS: Record<MetodoPagoVenta, string> = {
   efectivo_bs: 'Efectivo Bs',
   pago_movil: 'Pago Móvil',
@@ -34,60 +38,25 @@ const METODO_LABELS: Record<MetodoPagoVenta, string> = {
   mixto: 'Mixto',
 };
 
-const METODO_COLORS: Record<MetodoPagoVenta, string> = {
-  efectivo_bs: 'bg-emerald-100 text-emerald-700',
-  pago_movil: 'bg-blue-100 text-blue-700',
-  biopago: 'bg-purple-100 text-purple-700',
-  tarjeta: 'bg-slate-100 text-slate-700',
-  efectivo_usd: 'bg-amber-100 text-amber-700',
-  fiado: 'bg-orange-100 text-orange-700',
-  mixto: 'bg-indigo-100 text-indigo-700',
+// Identidad visual por método de pago (chips en "Por método" y en cada
+// venta) — no son tokens semánticos del sistema, es categórico a propósito,
+// igual que COLORES_AVATAR en Fiado. Pares [fondo, texto] para claro/oscuro,
+// tomados del mockup (llegó a una paleta casi idéntica a la que ya usaba
+// esta pantalla, de forma independiente).
+const METODOS_COLOR: Record<MetodoPagoVenta, { claro: [string, string]; oscuro: [string, string] }> = {
+  efectivo_bs: { claro: ['#D1FAE5', '#036B48'], oscuro: ['rgba(4,135,90,.22)', '#6EE7B7'] },
+  pago_movil: { claro: ['#DBEAFE', '#1D4ED8'], oscuro: ['rgba(29,78,216,.22)', '#93C5FD'] },
+  biopago: { claro: ['#F3E8FF', '#7E22CE'], oscuro: ['rgba(126,34,206,.22)', '#D8B4FE'] },
+  tarjeta: { claro: ['#F1F5F9', '#334155'], oscuro: ['rgba(51,65,85,.6)', '#CBD5E1'] },
+  efectivo_usd: { claro: ['#FEF3C7', '#B45309'], oscuro: ['rgba(180,83,9,.22)', '#FCD34D'] },
+  fiado: { claro: ['#FFEDD5', '#C2410C'], oscuro: ['rgba(194,65,12,.22)', '#FDBA74'] },
+  mixto: { claro: ['#E0E7FF', '#4338CA'], oscuro: ['rgba(67,56,202,.22)', '#A5B4FC'] },
 };
 
-const METODO_ICONS: Record<MetodoPagoVenta, JSX.Element> = {
-  efectivo_bs: (
-    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
-        d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
-    </svg>
-  ),
-  pago_movil: (
-    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
-        d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
-    </svg>
-  ),
-  biopago: (
-    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
-        d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 008 4.07M3 15.364c.64-1.319 1-2.8 1-4.364 0-1.457.39-2.823 1.07-4" />
-    </svg>
-  ),
-  tarjeta: (
-    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
-        d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-    </svg>
-  ),
-  efectivo_usd: (
-    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
-        d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-  ),
-  fiado: (
-    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
-        d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-1.13a4 4 0 10-4-4 4 4 0 004 4zm6 0a4 4 0 10-4-4" />
-    </svg>
-  ),
-  mixto: (
-    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
-        d="M8 7h12m0 0l-4-4m4 4l-4 4M16 17H4m0 0l4 4m-4-4l4-4" />
-    </svg>
-  ),
-};
+function colorMetodo(metodo: MetodoPagoVenta, tema: 'light' | 'dark'): { backgroundColor: string; color: string } {
+  const [fondo, texto] = METODOS_COLOR[metodo][tema === 'dark' ? 'oscuro' : 'claro'];
+  return { backgroundColor: fondo, color: texto };
+}
 
 function fmtFecha(iso: string, conHora = true) {
   return new Date(iso).toLocaleDateString('es-VE', {
@@ -95,6 +64,12 @@ function fmtFecha(iso: string, conHora = true) {
     month: 'short',
     ...(conHora ? { hour: '2-digit', minute: '2-digit' } : { year: 'numeric' }),
   });
+}
+
+// Versión corta (solo día y mes) para el subtítulo del header — fmtFecha
+// sigue igual, se usa tal cual en el resto del archivo.
+function fmtFechaCorta(iso: string): string {
+  return new Date(iso).toLocaleDateString('es-VE', { day: '2-digit', month: 'short' });
 }
 
 function formatearNombre(nombre: string): string {
@@ -106,7 +81,7 @@ function formatearNombre(nombre: string): string {
 }
 
 export default function ResumenPage() {
-  const { tasa, negocioId, negocioNombre, datosNegocio, isOnline, user, userNombre, rol, estado, usaStock, sincronizarAhora } = useApp();
+  const { tasa, negocioId, negocioNombre, datosNegocio, isOnline, user, userNombre, rol, estado, usaStock, sincronizarAhora, theme } = useApp();
   const [ventas, setVentas] = useState<Venta[]>([]);
   const [abonos, setAbonos] = useState<MovimientoFiado[]>([]);
   const [cierres, setCierres] = useState<CierreCaja[]>([]);
@@ -473,211 +448,266 @@ export default function ResumenPage() {
     if (usaStock) sincronizarAhora();
   };
 
+  // Igual construcción que porMetodo (bs por pagos vigentes) pero con el
+  // conteo — solo para pintar en pantalla (barra de "Por método" y resumen
+  // de la hoja de cierre). porMetodo en sí no se toca, sigue exactamente
+  // igual que hoy (ver brief, protegido en §1).
+  const countPorMetodo = ventasVigentes.reduce((acc, v) => {
+    for (const p of v.pagos) acc[p.metodo] = (acc[p.metodo] || 0) + 1;
+    return acc;
+  }, {} as Partial<Record<MetodoPago, number>>);
+  const montoMetodoMayor = Math.max(0, ...Object.values(porMetodo));
+  const anuladasCount = ventas.filter(v => v.anulada).length;
+
   return (
     <div>
-      <header className="bg-emerald-600 text-white px-4 pt-4 pb-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <h1 className="text-xl font-bold">Período actual</h1>
-            <p className="text-emerald-200 text-sm mt-0.5">
-              {periodoInicio
-                ? `Desde ${fmtFecha(periodoInicio)}`
-                : 'Sin ventas pendientes'}
-            </p>
-          </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <ThemeToggle />
-            {ventas.length > 0 && (
-              <button
-                onClick={() => { setConfirmoSoloDispositivo(false); setShowConfirmCierre(true); }}
-                className="bg-white text-emerald-700 px-3 py-2 rounded-xl font-semibold text-sm flex items-center gap-1.5"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                </svg>
-                Cerrar caja
-              </button>
-            )}
-          </div>
-        </div>
-      </header>
-
-      {soloDispositivo && (
-        <div className="mx-4 mt-3 p-2.5 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl text-gray-600 dark:text-gray-300 text-xs text-center">
-          Mostrando solo las ventas de este dispositivo — puede haber más ventas de otros usuarios
-        </div>
-      )}
-
-      <div className="p-4 space-y-4">
-        {/* Total del período */}
-        <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 text-center">
-          <p className="text-gray-500 text-sm mb-1">Total sin cerrar</p>
-          <p className="text-4xl font-bold text-gray-900">{formatBS(totalBS)}</p>
-          {tasa > 0 && <p className="text-gray-400 mt-1">{formatUSD(totalUSD)}</p>}
-          <p className="text-emerald-600 text-sm font-medium mt-2">
-            {ventasVigentes.length} {ventasVigentes.length === 1 ? 'venta' : 'ventas'}
+      <header className="bg-superficie-barra border-b border-borde-divisor px-4 pt-3.5 pb-3 flex items-center gap-2.5">
+        <div className="flex-1 min-w-0">
+          <h1 className="text-base font-bold text-texto truncate">Resumen</h1>
+          <p className="text-[11px] font-medium text-texto-3 truncate">
+            {periodoInicio ? `Desde ${fmtFechaCorta(periodoInicio)}` : 'Sin ventas pendientes'}
           </p>
         </div>
+        <div className={`flex-none flex items-center gap-1.5 h-7 px-2.5 rounded-full ${isOnline ? 'bg-marca-suave' : 'bg-aviso-fondo'}`}>
+          <Icon
+            nombre={isOnline ? 'enLinea' : 'sinConexion'}
+            tamano={TAMANO_ICONO.chip}
+            className={isOnline ? 'text-marca-suave-texto' : 'text-aviso'}
+          />
+          <span className={`text-[11px] font-semibold whitespace-nowrap ${isOnline ? 'text-marca-suave-texto' : 'text-aviso'}`}>
+            {isOnline ? 'En línea' : 'Sin conexión'}
+          </span>
+        </div>
+        <ThemeToggle variant="neutro" />
+      </header>
 
-        {/* Por método */}
-        {Object.keys(porMetodo).length > 0 && (
-          <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
-            <h2 className="font-semibold text-gray-700 mb-3">Por método de pago</h2>
-            <div className="space-y-2">
-              {(Object.entries(porMetodo) as [MetodoPago, number][]).map(([metodo, total]) => (
-                <div key={metodo} className="flex items-center justify-between">
-                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full flex items-center gap-1 ${METODO_COLORS[metodo]}`}>
-                    {METODO_ICONS[metodo]}
-                    {METODO_LABELS[metodo]}
-                  </span>
-                  <span className="font-bold text-gray-800">{formatBS(total)}</span>
-                </div>
-              ))}
-            </div>
+      <div className="px-4 py-3.5 flex flex-col gap-3.5">
+        {soloDispositivo && (
+          <div className="p-3 rounded-[12px] bg-aviso-fondo border border-aviso-borde text-aviso text-sm">
+            Mostrando solo las ventas de este dispositivo — puede haber más ventas de otros usuarios
           </div>
         )}
 
-        {/* Abonos recibidos — separado del total vendido a propósito: "vendido
-            hoy" y "cobrado hoy" son números distintos, un abono puede venir
-            de una venta de otro día. */}
-        {abonos.length > 0 && (
-          <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
-            <h2 className="font-semibold text-gray-700 mb-2">Abonos recibidos</h2>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-500">
-                {abonos.length} {abonos.length === 1 ? 'abono' : 'abonos'}
-              </span>
-              <div className="text-right">
-                <p className="font-bold text-gray-800">{formatBS(totalAbonadoBs)}</p>
-                {tasa > 0 && <p className="text-xs text-gray-400">{formatUSD(totalAbonadoUsd)}</p>}
+        <div className="p-5 rounded-2xl bg-tinta">
+          <p className="text-[11px] font-bold uppercase tracking-wide text-tinta-etiqueta">Vendido sin cerrar</p>
+          <p className="mt-1.5 text-4xl font-extrabold text-tinta-texto tracking-tight tabular-nums">
+            {formatBS(totalBS)}
+          </p>
+          {tasa > 0 && (
+            <p className="mt-1 text-tinta-etiqueta tabular-nums">
+              {formatUSD(totalUSD)} · tasa {tasa.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </p>
+          )}
+        </div>
+
+        {ventasVigentes.length > 0 && (
+          <>
+            {/* Indicadores */}
+            <div className="grid grid-cols-2 gap-2.5">
+              <div className="p-3.5 rounded-2xl bg-tarjeta border border-borde-tarjeta space-y-1">
+                <p className="text-[11px] font-semibold text-texto-3">Ventas</p>
+                <p className="text-xl font-bold text-texto">{ventasVigentes.length}</p>
+                <p className="text-[11px] text-texto-3">vigentes en el turno</p>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-tarjeta border border-borde-tarjeta space-y-1">
+                <p className="text-[11px] font-semibold text-texto-3">Ticket promedio</p>
+                <p className="text-xl font-bold text-texto">
+                  {formatBS(ventasVigentes.length > 0 ? totalBS / ventasVigentes.length : 0)}
+                </p>
+                <p className="text-[11px] text-texto-3">
+                  {formatUSD(ventasVigentes.length > 0 ? totalUSD / ventasVigentes.length : 0)}
+                </p>
+              </div>
+              <div className={`p-3.5 rounded-2xl bg-tarjeta border border-borde-tarjeta space-y-1 ${anuladasCount === 0 ? 'col-span-2' : ''}`}>
+                <p className="text-[11px] font-semibold text-texto-3">Abonado a fiado</p>
+                <p className="text-xl font-bold text-texto">{formatBS(totalAbonadoBs)}</p>
+                <p className="text-[11px] text-texto-3">cobrado, no vendido</p>
+              </div>
+              {anuladasCount > 0 && (
+                <div className="p-3.5 rounded-2xl bg-tarjeta border border-borde-tarjeta space-y-1">
+                  <p className="text-[11px] font-semibold text-texto-3">Anuladas</p>
+                  <p className="text-xl font-bold text-negativo">{anuladasCount}</p>
+                  <p className="text-[11px] text-texto-3">no suman al total</p>
+                </div>
+              )}
+            </div>
+
+            {/* Por método de pago */}
+            <div className="flex flex-col gap-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-texto-3">Por método de pago</p>
+                <p className="text-[11px] font-bold uppercase tracking-wide text-texto-3">
+                  {Object.keys(porMetodo).length} {Object.keys(porMetodo).length === 1 ? 'método' : 'métodos'}
+                </p>
+              </div>
+              <div className="flex flex-col gap-2">
+                {(Object.entries(porMetodo) as [MetodoPago, number][]).map(([metodo, total]) => {
+                  const pctAncho = (total / Math.max(montoMetodoMayor, 1)) * 100;
+                  const pct = totalBS > 0 ? (total / totalBS) * 100 : 0;
+                  const count = countPorMetodo[metodo] ?? 0;
+                  return (
+                    <div key={metodo} className="relative overflow-hidden rounded-[12px] bg-tarjeta border border-borde-tarjeta">
+                      <div className="absolute inset-y-0 left-0 bg-tarjeta-hundida" style={{ width: `${pctAncho}%` }} />
+                      <div className="relative z-10 p-3 flex flex-col gap-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span
+                            className="h-6 px-2.5 inline-flex items-center rounded-full text-xs font-semibold whitespace-nowrap"
+                            style={colorMetodo(metodo, theme)}
+                          >
+                            {METODO_LABELS[metodo]}
+                          </span>
+                          <span className="font-bold text-texto tabular-nums">{formatBS(total)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs text-texto-3">
+                          <span>{count} {count === 1 ? 'venta' : 'ventas'}</span>
+                          <span className="tabular-nums">{pct.toFixed(0)} %</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
-          </div>
+          </>
         )}
 
-        {/* Lista de ventas pendientes */}
+        {/* Ventas del turno */}
         {ventas.length > 0 ? (
-          <div className="space-y-2">
-            <h2 className="font-semibold text-gray-700 px-1">Ventas</h2>
-            {ventasParaMostrar.map(venta => {
-              const hora = new Date(venta.fecha).toLocaleTimeString('es-VE', {
-                hour: '2-digit',
-                minute: '2-digit',
-              });
-              const isOpen = expandido === venta.id;
+          <div className="flex flex-col gap-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-texto-3">Ventas del turno</p>
+              <p className="text-[11px] font-bold uppercase tracking-wide text-texto-3">
+                {ventas.length} {ventas.length === 1 ? 'venta' : 'ventas'}
+                {anuladasCount > 0 ? ` · ${anuladasCount} anuladas` : ''}
+              </p>
+            </div>
+            <div className="bg-tarjeta rounded-2xl border border-borde-tarjeta overflow-hidden divide-y divide-borde-divisor">
+              {ventasParaMostrar.map(venta => {
+                const hora = new Date(venta.fecha).toLocaleTimeString('es-VE', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                });
+                const isOpen = expandido === venta.id;
 
-              return (
-                <div
-                  key={venta.id}
-                  className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden"
-                >
-                  <button
-                    className="w-full flex items-center justify-between p-4 text-left"
-                    onClick={() => setExpandido(isOpen ? null : venta.id)}
-                  >
-                    <div>
-                      <p className="font-semibold text-gray-800">Venta #{numeroPorVenta.get(venta.id)}</p>
-                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                        <span className="text-gray-400 text-xs">{hora}</span>
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex items-center gap-1 ${METODO_COLORS[venta.metodo_pago]}`}>
-                          {METODO_ICONS[venta.metodo_pago]}
+                return (
+                  <div key={venta.id}>
+                    <button
+                      className="w-full flex items-center justify-between gap-3 p-3.5 text-left"
+                      onClick={() => setExpandido(isOpen ? null : venta.id)}
+                    >
+                      <div className="min-w-0 flex items-center gap-2 flex-wrap">
+                        <span className="text-texto-3 text-xs">{hora}</span>
+                        <span
+                          className="h-5 px-2 inline-flex items-center rounded-full text-[11px] font-semibold whitespace-nowrap"
+                          style={colorMetodo(venta.metodo_pago, theme)}
+                        >
                           {METODO_LABELS[venta.metodo_pago]}
                         </span>
                         {venta.anulada && (
-                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-700">
+                          <span className="h-5 px-2 inline-flex items-center rounded-full bg-negativo-fondo text-negativo text-[11px] font-bold whitespace-nowrap">
                             Anulada
                           </span>
                         )}
                       </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <p className={`font-bold ${venta.anulada ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
-                        {formatBS(venta.total_bs)}
-                      </p>
-                      <svg
-                        className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
-                        fill="none" viewBox="0 0 24 24" stroke="currentColor"
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </div>
-                  </button>
-
-                  {isOpen && (
-                    <div className="border-t border-gray-100 px-4 pb-4 pt-3 space-y-2">
-                      {venta.items.map((item, i) => (
-                        <div key={i} className="flex justify-between text-sm">
-                          <span className="text-gray-600">
-                            {item.gramos !== undefined
-                              ? formatearNombre(item.nombre)
-                              : `${item.cantidad}× ${formatearNombre(item.nombre)}`}
-                          </span>
-                          <span className="font-medium">{formatBS(item.subtotal_bs)}</span>
-                        </div>
-                      ))}
-                      {venta.pagos.length > 1 && (
-                        <div className="border-t border-gray-100 pt-2 space-y-1">
-                          {venta.pagos.map(p => (
-                            <div key={p.id} className="flex justify-between text-sm">
-                              <span className="text-gray-500">{METODO_LABELS[p.metodo]}</span>
-                              <span className="text-gray-600">{formatBS(p.monto_bs)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      <div className="border-t border-gray-100 pt-2 flex justify-between text-sm">
-                        <span className="text-gray-500">Tasa usada</span>
-                        <span className="text-gray-600">Bs {venta.tasa_usada.toLocaleString('es-VE')}</span>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <p className={`font-bold tabular-nums ${venta.anulada ? 'text-texto-4 line-through' : 'text-texto'}`}>
+                          {formatBS(venta.total_bs)}
+                        </p>
+                        <Icon
+                          nombre="flechaDerecha"
+                          tamano={16}
+                          className={`text-texto-4 transition-transform ${isOpen ? 'rotate-90' : ''}`}
+                        />
                       </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-500">Vendida por</span>
-                        <span className="text-gray-600">{venta.usuario_nombre || '—'}</span>
-                      </div>
+                    </button>
 
-                      <button
-                        onClick={() => compartirComprobanteVenta(venta, numeroPorVenta.get(venta.id) ?? 0)}
-                        disabled={compartiendoComprobante === venta.id}
-                        className="w-full mt-1 py-2.5 rounded-xl text-sm font-semibold bg-emerald-50 text-emerald-700 disabled:opacity-60"
-                      >
-                        {compartiendoComprobante === venta.id ? 'Generando...' : 'Compartir comprobante'}
-                      </button>
-
-                      {venta.anulada ? (
-                        <div className="border-t border-gray-100 pt-2 space-y-1">
-                          <div className="flex justify-between text-sm">
-                            <span className="text-gray-500">Anulada por</span>
-                            <span className="text-gray-600">{venta.anulada_por_nombre || '—'}</span>
+                    {isOpen && (
+                      <div className="px-3.5 pb-3.5 pt-1 flex flex-col gap-2.5">
+                        {venta.items.map((item, i) => (
+                          <div key={i} className="flex items-center justify-between text-sm">
+                            <span className="text-texto-2">
+                              {item.gramos !== undefined
+                                ? formatearNombre(item.nombre)
+                                : `${item.cantidad}× ${formatearNombre(item.nombre)}`}
+                            </span>
+                            <span className="font-medium text-texto">{formatBS(item.subtotal_bs)}</span>
                           </div>
-                          <div className="flex justify-between text-sm">
-                            <span className="text-gray-500">Fecha de anulación</span>
-                            <span className="text-gray-600">{venta.anulada_en ? fmtFecha(venta.anulada_en) : '—'}</span>
+                        ))}
+                        {venta.pagos.length > 1 && (
+                          <div className="border-t border-borde-divisor pt-2 flex flex-col gap-1">
+                            {venta.pagos.map(p => (
+                              <div key={p.id} className="flex items-center justify-between text-sm">
+                                <span className="text-texto-3">{METODO_LABELS[p.metodo]}</span>
+                                <span className="text-texto-2">{formatBS(p.monto_bs)}</span>
+                              </div>
+                            ))}
                           </div>
-                          <p className="text-sm text-red-700 bg-red-50 rounded-lg px-2.5 py-2 mt-1">
-                            Motivo: {venta.motivo_anulacion || '—'}
-                          </p>
+                        )}
+                        <div className="border-t border-borde-divisor pt-2 flex items-center justify-between text-sm">
+                          <span className="text-texto-3">Tasa usada</span>
+                          <span className="text-texto-2">Bs {venta.tasa_usada.toLocaleString('es-VE')}</span>
                         </div>
-                      ) : rol === 'admin' && estado !== 'restringido' && (
-                        <button
-                          onClick={() => abrirAnular(venta)}
-                          disabled={!isOnline}
-                          className="w-full mt-1 py-2.5 rounded-xl text-sm font-semibold bg-red-50 text-red-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-texto-3">Vendida por</span>
+                          <span className="text-texto-2">{venta.usuario_nombre || '—'}</span>
+                        </div>
+
+                        <Button
+                          variante="secundario"
+                          onClick={() => compartirComprobanteVenta(venta, numeroPorVenta.get(venta.id) ?? 0)}
+                          disabled={compartiendoComprobante === venta.id}
+                          className="w-full mt-1"
                         >
-                          {isOnline ? 'Anular venta' : 'Necesitas conexión para anular'}
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                          <Icon nombre="compartir" tamano={TAMANO_ICONO.secundario} />
+                          {compartiendoComprobante === venta.id ? 'Generando...' : 'Compartir comprobante'}
+                        </Button>
+
+                        {venta.anulada ? (
+                          <div className="border-t border-borde-divisor pt-2 flex flex-col gap-1">
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="text-texto-3">Anulada por</span>
+                              <span className="text-texto-2">{venta.anulada_por_nombre || '—'}</span>
+                            </div>
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="text-texto-3">Fecha de anulación</span>
+                              <span className="text-texto-2">{venta.anulada_en ? fmtFecha(venta.anulada_en) : '—'}</span>
+                            </div>
+                            <p className="text-sm text-negativo bg-negativo-fondo rounded-[10px] px-2.5 py-2 mt-1">
+                              Motivo: {venta.motivo_anulacion || '—'}
+                            </p>
+                          </div>
+                        ) : (
+                          rol === 'admin' && estado !== 'restringido' && (
+                            <Button
+                              variante="destructivo"
+                              onClick={() => abrirAnular(venta)}
+                              disabled={!isOnline}
+                              className="w-full mt-1"
+                            >
+                              <Icon nombre="anular" tamano={TAMANO_ICONO.secundario} />
+                              {isOnline ? 'Anular venta' : 'Necesitas conexión para anular'}
+                            </Button>
+                          )
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <Button
+              variante="primario"
+              className="w-full"
+              onClick={() => { setConfirmoSoloDispositivo(false); setShowConfirmCierre(true); }}
+            >
+              <Icon nombre="confirmar" tamano={TAMANO_ICONO.secundario} />
+              Cerrar caja
+            </Button>
           </div>
         ) : (
-          <div className="text-center text-gray-400 py-10">
-            <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
-            </svg>
+          <div className="text-center text-texto-3 py-10">
+            <Icon nombre="resumen" tamano={48} className="mx-auto mb-3 text-texto-4" />
             <p className="font-medium">Caja cerrada</p>
             <p className="text-sm mt-1">Las nuevas ventas aparecerán aquí</p>
           </div>
@@ -685,323 +715,320 @@ export default function ResumenPage() {
 
         {/* Cierres anteriores */}
         {cierres.length > 0 && (
-          <div className="space-y-2">
-            <h2 className="font-semibold text-gray-700 px-1">Cierres anteriores</h2>
-            {cierres.map(cierre => {
-              const isOpen = expandidoCierre === cierre.id;
-              return (
-                <div key={cierre.id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-                  <button
-                    className="w-full flex items-center justify-between p-4 text-left"
-                    onClick={() => expandirCierre(cierre.id)}
-                  >
-                    <div>
-                      <p className="font-semibold text-gray-800">{fmtFecha(cierre.periodo_fin)}</p>
-                      <p className="text-xs text-gray-400 mt-0.5">
-                        {cierre.cantidad_ventas} {cierre.cantidad_ventas === 1 ? 'venta' : 'ventas'}
-                        {' · '}desde {fmtFecha(cierre.periodo_inicio)}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <p className="font-bold text-gray-900">{formatBS(cierre.total_bs)}</p>
-                      <svg
-                        className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
-                        fill="none" viewBox="0 0 24 24" stroke="currentColor"
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </div>
-                  </button>
-
-                  {isOpen && (
-                    <div className="border-t border-gray-100 px-4 pb-4 pt-3 space-y-2">
-                      {cierre.total_usd > 0 && (
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="text-gray-500">Total</span>
-                          <span className="font-medium text-gray-700">{formatUSD(cierre.total_usd)}</span>
-                        </div>
-                      )}
-                      {(Object.entries(cierre.desglose_metodos) as [MetodoPago, DesgloseCierre][]).map(([metodo, d]) => (
-                        <div key={metodo} className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 ${METODO_COLORS[metodo]}`}>
-                              {METODO_ICONS[metodo]}
-                              {METODO_LABELS[metodo]}
-                            </span>
-                            <span className="text-xs text-gray-400">{d.count} venta{d.count !== 1 ? 's' : ''}</span>
-                          </div>
-                          <span className="font-bold text-sm text-gray-800">{formatBS(d.bs)}</span>
-                        </div>
-                      ))}
-                      {!!cierre.cantidad_abonos && (
-                        <div className="border-t border-gray-100 pt-2 flex items-center justify-between">
-                          <span className="text-xs text-gray-500">
-                            Abonos recibidos ({cierre.cantidad_abonos})
-                          </span>
-                          <span className="font-bold text-sm text-gray-800">{formatBS(cierre.total_abonado_bs ?? 0)}</span>
-                        </div>
-                      )}
-                      <div className="border-t border-gray-100 pt-2 flex justify-between text-sm">
-                        <span className="text-gray-500">Tasa al cierre</span>
-                        <span className="text-gray-600">
-                          Bs {cierre.tasa_cierre.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-500">Cerrado por</span>
-                        <span className="text-gray-600">{cierre.usuario_nombre || '—'}</span>
-                      </div>
-
-                      {/* Detalle de ventas del cierre — versión simple, solo
-                          para ver: sin compartir ni anular acá. Copia visual
-                          del bloque de "Ventas" del período actual (no
-                          extraída a componente compartido a propósito, ver
-                          brief). */}
-                      <div className="border-t border-gray-100 pt-3 mt-1 space-y-2">
-                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                          Ventas de este cierre
+          <div className="flex flex-col gap-2.5">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-texto-3">Cierres anteriores</p>
+            <div className="bg-tarjeta rounded-2xl border border-borde-tarjeta overflow-hidden divide-y divide-borde-divisor">
+              {cierres.map(cierre => {
+                const isOpen = expandidoCierre === cierre.id;
+                return (
+                  <div key={cierre.id}>
+                    <button
+                      className="w-full flex items-center justify-between gap-3 p-3.5 text-left"
+                      onClick={() => expandirCierre(cierre.id)}
+                    >
+                      <div className="min-w-0">
+                        <p className="font-semibold text-texto">{fmtFecha(cierre.periodo_fin)}</p>
+                        <p className="text-xs text-texto-3 mt-0.5">
+                          {cierre.cantidad_ventas} {cierre.cantidad_ventas === 1 ? 'venta' : 'ventas'}
+                          {' · '}desde {fmtFecha(cierre.periodo_inicio)}
                         </p>
-                        {cargandoVentasCierreId === cierre.id ? (
-                          <p className="text-sm text-gray-400 py-1">Cargando ventas…</p>
-                        ) : !ventasPorCierreId[cierre.id] ? (
-                          <p className="text-sm text-amber-600 py-1">Necesitas conexión para ver el detalle</p>
-                        ) : ventasPorCierreId[cierre.id].length === 0 ? (
-                          <p className="text-sm text-gray-400 py-1">Sin ventas registradas</p>
-                        ) : (
-                          [...ventasPorCierreId[cierre.id]]
-                            .sort((a, b) => a.fecha.localeCompare(b.fecha))
-                            .map((venta, i) => {
-                              const numeroEnCierre = i + 1;
-                              const hora = new Date(venta.fecha).toLocaleTimeString('es-VE', {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              });
-                              const ventaKey = `${cierre.id}:${venta.id}`;
-                              const ventaOpen = expandidoVentaCierre === ventaKey;
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <p className="font-bold text-texto tabular-nums">{formatBS(cierre.total_bs)}</p>
+                        <Icon
+                          nombre="flechaDerecha"
+                          tamano={16}
+                          className={`text-texto-4 transition-transform ${isOpen ? 'rotate-90' : ''}`}
+                        />
+                      </div>
+                    </button>
 
-                              return (
-                                <div key={venta.id} className="bg-gray-50 rounded-xl overflow-hidden">
-                                  <button
-                                    className="w-full flex items-center justify-between p-3 text-left"
-                                    onClick={() => setExpandidoVentaCierre(ventaOpen ? null : ventaKey)}
-                                  >
-                                    <div>
-                                      <p className="font-semibold text-gray-800 text-sm">Venta #{numeroEnCierre}</p>
-                                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                                        <span className="text-gray-400 text-xs">{hora}</span>
-                                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex items-center gap-1 ${METODO_COLORS[venta.metodo_pago]}`}>
-                                          {METODO_ICONS[venta.metodo_pago]}
-                                          {METODO_LABELS[venta.metodo_pago]}
-                                        </span>
-                                        {venta.anulada && (
-                                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-700">
-                                            Anulada
-                                          </span>
-                                        )}
-                                      </div>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                      <p className={`font-bold text-sm ${venta.anulada ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
-                                        {formatBS(venta.total_bs)}
-                                      </p>
-                                      <svg
-                                        className={`w-4 h-4 text-gray-400 transition-transform ${ventaOpen ? 'rotate-180' : ''}`}
-                                        fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                    {isOpen && (
+                      <div className="px-3.5 pb-3.5 pt-1 flex flex-col gap-2.5">
+                        {cierre.total_usd > 0 && (
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-texto-3">Total</span>
+                            <span className="font-medium text-texto-2">{formatUSD(cierre.total_usd)}</span>
+                          </div>
+                        )}
+                        <div className="flex flex-col gap-2">
+                          {(Object.entries(cierre.desglose_metodos) as [MetodoPago, DesgloseCierre][]).map(([metodo, d]) => (
+                            <div key={metodo} className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className="h-5 px-2 inline-flex items-center rounded-full text-[11px] font-semibold whitespace-nowrap"
+                                  style={colorMetodo(metodo, theme)}
+                                >
+                                  {METODO_LABELS[metodo]}
+                                </span>
+                                <span className="text-xs text-texto-3">{d.count} {d.count === 1 ? 'venta' : 'ventas'}</span>
+                              </div>
+                              <span className="font-bold text-sm text-texto tabular-nums">{formatBS(d.bs)}</span>
+                            </div>
+                          ))}
+                        </div>
+                        {!!cierre.cantidad_abonos && (
+                          <div className="border-t border-borde-divisor pt-2 flex items-center justify-between">
+                            <span className="text-xs text-texto-3">Abonos recibidos ({cierre.cantidad_abonos})</span>
+                            <span className="font-bold text-sm text-texto tabular-nums">
+                              {formatBS(cierre.total_abonado_bs ?? 0)}
+                            </span>
+                          </div>
+                        )}
+                        <div className="border-t border-borde-divisor pt-2 flex items-center justify-between text-sm">
+                          <span className="text-texto-3">Tasa al cierre</span>
+                          <span className="text-texto-2">
+                            Bs {cierre.tasa_cierre.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-texto-3">Cerrado por</span>
+                          <span className="text-texto-2">{cierre.usuario_nombre || '—'}</span>
+                        </div>
+
+                        {/* Detalle de ventas del cierre — versión de solo
+                            lectura: sin compartir ni anular acá. Copia visual
+                            del bloque de "Ventas del turno" de arriba (no
+                            extraída a componente compartido a propósito, ver
+                            brief). */}
+                        <div className="border-t border-borde-divisor pt-3 mt-1 flex flex-col gap-2">
+                          <p className="text-[11px] font-semibold text-texto-3 uppercase tracking-wide">
+                            Ventas de este cierre
+                          </p>
+                          {cargandoVentasCierreId === cierre.id ? (
+                            <p className="text-sm text-texto-3 py-1">Cargando ventas…</p>
+                          ) : !ventasPorCierreId[cierre.id] ? (
+                            <p className="text-sm text-aviso py-1">Necesitas conexión para ver el detalle</p>
+                          ) : ventasPorCierreId[cierre.id].length === 0 ? (
+                            <p className="text-sm text-texto-3 py-1">Sin ventas registradas</p>
+                          ) : (
+                            <div className="rounded-[12px] border border-borde-tarjeta overflow-hidden divide-y divide-borde-divisor">
+                              {[...ventasPorCierreId[cierre.id]]
+                                .sort((a, b) => a.fecha.localeCompare(b.fecha))
+                                .map(venta => {
+                                  const hora = new Date(venta.fecha).toLocaleTimeString('es-VE', {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  });
+                                  const ventaKey = `${cierre.id}:${venta.id}`;
+                                  const ventaOpen = expandidoVentaCierre === ventaKey;
+
+                                  return (
+                                    <div key={venta.id}>
+                                      <button
+                                        className="w-full flex items-center justify-between gap-3 p-3 text-left"
+                                        onClick={() => setExpandidoVentaCierre(ventaOpen ? null : ventaKey)}
                                       >
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                      </svg>
-                                    </div>
-                                  </button>
-
-                                  {ventaOpen && (
-                                    <div className="border-t border-gray-100 px-3 pb-3 pt-2 space-y-2">
-                                      {venta.items.map((item, idx) => (
-                                        <div key={idx} className="flex justify-between text-sm">
-                                          <span className="text-gray-600">
-                                            {item.gramos !== undefined
-                                              ? formatearNombre(item.nombre)
-                                              : `${item.cantidad}× ${formatearNombre(item.nombre)}`}
+                                        <div className="min-w-0 flex items-center gap-2 flex-wrap">
+                                          <span className="text-texto-3 text-xs">{hora}</span>
+                                          <span
+                                            className="h-5 px-2 inline-flex items-center rounded-full text-[11px] font-semibold whitespace-nowrap"
+                                            style={colorMetodo(venta.metodo_pago, theme)}
+                                          >
+                                            {METODO_LABELS[venta.metodo_pago]}
                                           </span>
-                                          <span className="font-medium">{formatBS(item.subtotal_bs)}</span>
+                                          {venta.anulada && (
+                                            <span className="h-5 px-2 inline-flex items-center rounded-full bg-negativo-fondo text-negativo text-[11px] font-bold whitespace-nowrap">
+                                              Anulada
+                                            </span>
+                                          )}
                                         </div>
-                                      ))}
-                                      {venta.pagos.length > 1 && (
-                                        <div className="border-t border-gray-100 pt-2 space-y-1">
-                                          {venta.pagos.map(p => (
-                                            <div key={p.id} className="flex justify-between text-sm">
-                                              <span className="text-gray-500">{METODO_LABELS[p.metodo]}</span>
-                                              <span className="text-gray-600">{formatBS(p.monto_bs)}</span>
+                                        <div className="flex items-center gap-2 flex-shrink-0">
+                                          <p className={`font-bold text-sm tabular-nums ${venta.anulada ? 'text-texto-4 line-through' : 'text-texto'}`}>
+                                            {formatBS(venta.total_bs)}
+                                          </p>
+                                          <Icon
+                                            nombre="flechaDerecha"
+                                            tamano={14}
+                                            className={`text-texto-4 transition-transform ${ventaOpen ? 'rotate-90' : ''}`}
+                                          />
+                                        </div>
+                                      </button>
+
+                                      {ventaOpen && (
+                                        <div className="px-3 pb-3 pt-1 flex flex-col gap-2 bg-tarjeta-hundida">
+                                          {venta.items.map((item, idx) => (
+                                            <div key={idx} className="flex items-center justify-between text-sm">
+                                              <span className="text-texto-2">
+                                                {item.gramos !== undefined
+                                                  ? formatearNombre(item.nombre)
+                                                  : `${item.cantidad}× ${formatearNombre(item.nombre)}`}
+                                              </span>
+                                              <span className="font-medium text-texto">{formatBS(item.subtotal_bs)}</span>
                                             </div>
                                           ))}
+                                          {venta.pagos.length > 1 && (
+                                            <div className="border-t border-borde-divisor pt-2 flex flex-col gap-1">
+                                              {venta.pagos.map(p => (
+                                                <div key={p.id} className="flex items-center justify-between text-sm">
+                                                  <span className="text-texto-3">{METODO_LABELS[p.metodo]}</span>
+                                                  <span className="text-texto-2">{formatBS(p.monto_bs)}</span>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+                                          <div className="border-t border-borde-divisor pt-2 flex items-center justify-between text-sm">
+                                            <span className="text-texto-3">Tasa usada</span>
+                                            <span className="text-texto-2">Bs {venta.tasa_usada.toLocaleString('es-VE')}</span>
+                                          </div>
+                                          <div className="flex items-center justify-between text-sm">
+                                            <span className="text-texto-3">Vendida por</span>
+                                            <span className="text-texto-2">{venta.usuario_nombre || '—'}</span>
+                                          </div>
                                         </div>
                                       )}
-                                      <div className="border-t border-gray-100 pt-2 flex justify-between text-sm">
-                                        <span className="text-gray-500">Tasa usada</span>
-                                        <span className="text-gray-600">Bs {venta.tasa_usada.toLocaleString('es-VE')}</span>
-                                      </div>
-                                      <div className="flex justify-between text-sm">
-                                        <span className="text-gray-500">Vendida por</span>
-                                        <span className="text-gray-600">{venta.usuario_nombre || '—'}</span>
-                                      </div>
                                     </div>
-                                  )}
-                                </div>
-                              );
-                            })
-                        )}
+                                  );
+                                })}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>
 
-      {/* Confirmation modal */}
-      {showConfirmCierre && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div
-            className="absolute inset-0 bg-black/40"
-            onClick={() => { if (!cerrando) setShowConfirmCierre(false); }}
-          />
-          <div className="relative bg-white rounded-2xl w-full max-w-sm shadow-xl overflow-hidden">
-            <div className="p-5">
-              <h2 className="text-xl font-bold text-gray-900 mb-1">Cerrar caja</h2>
-              <p className="text-sm text-gray-500 mb-4">
-                Se archivarán todas las ventas del período actual.
-              </p>
+      {/* Cerrar caja */}
+      <BottomSheet
+        abierto={showConfirmCierre}
+        onCerrar={() => { if (!cerrando) setShowConfirmCierre(false); }}
+        titulo="Cerrar caja"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-texto-3">
+            Se archivará todo el período actual. Esta acción no se puede deshacer.
+          </p>
 
-              <div className="bg-emerald-50 rounded-xl p-4 mb-4 text-center">
-                <p className="text-3xl font-bold text-gray-900">{formatBS(totalBS)}</p>
-                {tasa > 0 && <p className="text-sm text-gray-500 mt-0.5">{formatUSD(totalUSD)}</p>}
-                <p className="text-emerald-600 text-sm font-medium mt-1">
-                  {ventasVigentes.length} {ventasVigentes.length === 1 ? 'venta' : 'ventas'}
-                </p>
-              </div>
-
-              {Object.keys(porMetodo).length > 0 && (
-                <div className="space-y-2 mb-4">
-                  {(Object.entries(porMetodo) as [MetodoPago, number][]).map(([metodo, total]) => (
-                    <div key={metodo} className="flex items-center justify-between">
-                      <span className={`text-xs font-semibold px-2.5 py-1 rounded-full flex items-center gap-1 ${METODO_COLORS[metodo]}`}>
-                        {METODO_ICONS[metodo]}
-                        {METODO_LABELS[metodo]}
-                      </span>
-                      <span className="font-bold text-sm text-gray-800">{formatBS(total)}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {abonos.length > 0 && (
-                <div className="flex items-center justify-between mb-4 p-3 bg-gray-50 rounded-xl">
-                  <span className="text-sm text-gray-600">
-                    Abonos recibidos ({abonos.length})
-                  </span>
-                  <span className="font-bold text-sm text-gray-800">{formatBS(totalAbonadoBs)}</span>
-                </div>
-              )}
-
-              {!isOnline && (
-                <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-sm">
-                  <p className="font-semibold text-center mb-1">Sin conexión</p>
-                  <p className="text-center">
-                    Solo se cerrarán las ventas de este dispositivo. Si hay otros
-                    cajeros vendiendo en este momento, sus ventas quedarán fuera
-                    de este cierre. Si puedes, espera a tener conexión.
-                  </p>
-                  <label className="flex items-start gap-2 mt-3 text-left cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={confirmoSoloDispositivo}
-                      onChange={e => setConfirmoSoloDispositivo(e.target.checked)}
-                      className="mt-0.5 w-4 h-4 flex-shrink-0"
-                    />
-                    <span>Entiendo que solo se cerrarán las ventas de este dispositivo</span>
-                  </label>
-                </div>
-              )}
-
-              <p className="text-xs text-gray-400 text-center mb-4">Esta acción no se puede deshacer.</p>
-
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowConfirmCierre(false)}
-                  disabled={cerrando}
-                  className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-700 font-semibold disabled:opacity-40"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={confirmarCierre}
-                  disabled={cerrando || (!isOnline && !confirmoSoloDispositivo)}
-                  className="flex-1 py-3 rounded-xl bg-emerald-600 text-white font-bold disabled:opacity-40"
-                >
-                  {cerrando ? 'Cerrando...' : 'Confirmar cierre'}
-                </button>
-              </div>
-            </div>
+          <div className="p-4 rounded-2xl bg-tinta text-center">
+            <p className="text-2xl font-extrabold text-tinta-texto tabular-nums">{formatBS(totalBS)}</p>
+            {tasa > 0 && <p className="text-tinta-etiqueta text-sm mt-0.5 tabular-nums">{formatUSD(totalUSD)}</p>}
+            <p className="text-tinta-etiqueta text-sm font-medium mt-1">
+              {ventasVigentes.length} {ventasVigentes.length === 1 ? 'venta' : 'ventas'}
+            </p>
           </div>
+
+          {Object.keys(porMetodo).length > 0 && (
+            <div className="flex flex-col gap-2">
+              {(Object.entries(porMetodo) as [MetodoPago, number][]).map(([metodo, total]) => (
+                <div key={metodo} className="flex items-center justify-between">
+                  <span
+                    className="h-6 px-2.5 inline-flex items-center rounded-full text-xs font-semibold whitespace-nowrap"
+                    style={colorMetodo(metodo, theme)}
+                  >
+                    {METODO_LABELS[metodo]}
+                  </span>
+                  <span className="font-bold text-sm text-texto tabular-nums">{formatBS(total)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {abonos.length > 0 && (
+            <div className="flex items-center justify-between p-3 rounded-[12px] bg-tarjeta-hundida">
+              <span className="text-sm text-texto-2">Abonos recibidos ({abonos.length})</span>
+              <span className="font-bold text-sm text-texto tabular-nums">{formatBS(totalAbonadoBs)}</span>
+            </div>
+          )}
+
+          {!isOnline && (
+            <div className="p-3 rounded-[12px] bg-aviso-fondo border border-aviso-borde">
+              <p className="text-sm font-bold text-aviso text-center">Sin conexión</p>
+              <p className="text-sm text-aviso text-center mt-1">
+                Solo se cerrarán las ventas de este dispositivo. Si hay otros cajeros vendiendo en este momento,
+                sus ventas quedarán fuera de este cierre. Si puedes, espera a tener conexión.
+              </p>
+              <label className="flex items-start gap-2.5 mt-3 cursor-pointer">
+                <button
+                  type="button"
+                  role="checkbox"
+                  aria-checked={confirmoSoloDispositivo}
+                  onClick={() => setConfirmoSoloDispositivo(v => !v)}
+                  className={`flex-none w-5 h-5 mt-0.5 rounded-[6px] border flex items-center justify-center ${
+                    confirmoSoloDispositivo ? 'bg-marca border-marca' : 'border-aviso-borde'
+                  }`}
+                >
+                  {confirmoSoloDispositivo && <Icon nombre="confirmar" tamano={14} className="text-texto-invertido" />}
+                </button>
+                <span className="text-sm text-aviso">Entiendo que solo se cerrarán las ventas de este dispositivo</span>
+              </label>
+            </div>
+          )}
+
+          <Button
+            variante="primario"
+            disabled={cerrando || (!isOnline && !confirmoSoloDispositivo)}
+            onClick={confirmarCierre}
+            className="w-full"
+          >
+            {cerrando ? 'Cerrando...' : 'Confirmar cierre'}
+          </Button>
+          <button
+            type="button"
+            onClick={() => setShowConfirmCierre(false)}
+            disabled={cerrando}
+            className="w-full h-[52px] rounded-[12px] border border-borde-tarjeta text-texto-3 font-semibold disabled:opacity-40"
+          >
+            Volver
+          </button>
         </div>
-      )}
+      </BottomSheet>
 
       {/* Anular venta */}
-      {anulando && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div
-            className="absolute inset-0 bg-black/40"
-            onClick={() => { if (!guardandoAnulacion) cerrarAnular(); }}
-          />
-          <div className="relative bg-white rounded-2xl w-full max-w-sm shadow-xl overflow-hidden">
-            <div className="p-5">
-              <h2 className="text-xl font-bold text-gray-900 mb-1">Anular venta</h2>
-              <p className="text-sm text-gray-500 mb-4">
-                Venta #{numeroPorVenta.get(anulando.id)} · {formatBS(anulando.total_bs)}. Esta acción no se puede deshacer.
-              </p>
+      <BottomSheet
+        abierto={!!anulando}
+        onCerrar={() => { if (!guardandoAnulacion) cerrarAnular(); }}
+        titulo="Anular venta"
+      >
+        {anulando && (
+          <div className="space-y-4">
+            <p className="text-sm text-texto-3">
+              Venta #{numeroPorVenta.get(anulando.id)} · {formatBS(anulando.total_bs)}. Esta acción no se puede deshacer.
+            </p>
 
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Motivo <span className="text-red-400">*</span>
-              </label>
+            <div>
+              <label className="block text-sm text-texto-3 mb-1.5">Motivo</label>
               <textarea
                 value={motivoAnular}
                 onChange={e => setMotivoAnular(e.target.value)}
                 rows={3}
                 placeholder="¿Por qué se anula esta venta?"
-                className="w-full border border-gray-300 rounded-xl p-3 text-sm focus:outline-none focus:border-red-400"
+                className={`font-caja w-full rounded-[12px] border bg-tarjeta text-texto text-base px-4 py-3 placeholder:text-texto-4 outline-none transition-colors duration-150 ${
+                  errorAnular ? 'border-negativo' : 'border-borde-campo focus:border-foco'
+                }`}
                 autoFocus
               />
-
-              {errorAnular && <p className="text-red-500 text-sm mt-2">{errorAnular}</p>}
-              {!isOnline && (
-                <p className="text-amber-600 text-sm mt-2">Necesitas conexión para anular</p>
-              )}
-
-              <div className="flex gap-3 mt-4">
-                <button
-                  onClick={cerrarAnular}
-                  disabled={guardandoAnulacion}
-                  className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-700 font-semibold disabled:opacity-40"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={confirmarAnular}
-                  disabled={guardandoAnulacion || !motivoAnular.trim() || !isOnline}
-                  className="flex-1 py-3 rounded-xl bg-red-600 text-white font-bold disabled:opacity-40"
-                >
-                  {guardandoAnulacion ? 'Anulando...' : 'Anular'}
-                </button>
-              </div>
             </div>
-          </div>
-        </div>
-      )}
 
-      {/* Toast */}
+            {errorAnular && <p className="text-sm text-negativo">{errorAnular}</p>}
+            {!isOnline && <p className="text-sm text-aviso">Necesitas conexión para anular</p>}
+
+            <Button
+              variante="destructivo"
+              disabled={guardandoAnulacion || !motivoAnular.trim() || !isOnline}
+              onClick={confirmarAnular}
+              className="w-full"
+            >
+              {guardandoAnulacion ? 'Anulando...' : 'Anular'}
+            </Button>
+            <button
+              type="button"
+              onClick={cerrarAnular}
+              disabled={guardandoAnulacion}
+              className="w-full h-[52px] rounded-[12px] border border-borde-tarjeta text-texto-3 font-semibold disabled:opacity-40"
+            >
+              Cancelar
+            </button>
+          </div>
+        )}
+      </BottomSheet>
+
       {toast && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-5 py-2.5 rounded-xl text-sm font-medium z-50 shadow-lg max-w-xs text-center">
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-toast-fondo text-toast-texto px-5 py-2.5 rounded-xl text-sm font-medium z-50 shadow-lg max-w-xs text-center">
           {toast}
         </div>
       )}
