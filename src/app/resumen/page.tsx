@@ -478,6 +478,15 @@ export default function ResumenPage() {
             {isOnline ? 'En línea' : 'Sin conexión'}
           </span>
         </div>
+        {ventas.length > 0 && (
+          <button
+            onClick={() => { setConfirmoSoloDispositivo(false); setShowConfirmCierre(true); }}
+            className="flex-none h-7 px-3 rounded-full bg-marca text-texto-invertido font-semibold text-[11px] flex items-center gap-1"
+          >
+            <Icon nombre="confirmar" tamano={TAMANO_ICONO.chip} />
+            Cerrar caja
+          </button>
+        )}
         <ThemeToggle variant="neutro" />
       </header>
 
@@ -695,15 +704,6 @@ export default function ResumenPage() {
                 );
               })}
             </div>
-
-            <Button
-              variante="primario"
-              className="w-full"
-              onClick={() => { setConfirmoSoloDispositivo(false); setShowConfirmCierre(true); }}
-            >
-              <Icon nombre="confirmar" tamano={TAMANO_ICONO.secundario} />
-              Cerrar caja
-            </Button>
           </div>
         ) : (
           <div className="text-center text-texto-3 py-10">
