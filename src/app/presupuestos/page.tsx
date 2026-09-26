@@ -348,7 +348,7 @@ export default function PresupuestosPage() {
         <div className="flex-1 min-w-0">
           <h1 className="text-base font-bold text-texto truncate">Presupuestos</h1>
           <p className="text-[11px] font-medium text-texto-3 truncate">
-            {presupuestos.length} {presupuestos.length === 1 ? 'presupuesto' : 'presupuestos'}
+            {presupuestosVisibles.length} {presupuestosVisibles.length === 1 ? 'presupuesto' : 'presupuestos'}
           </p>
         </div>
         {/* píldora de conexión — sí aplica acá: alExpandir depende de
