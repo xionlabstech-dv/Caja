@@ -482,10 +482,12 @@ export default function FiadoPage() {
                           </div>
                         );
                       })()}
-                      <Button variante="primario" onClick={() => abrirAbonar(c)} className="w-full">
-                        <Icon nombre="confirmar" tamano={TAMANO_ICONO.secundario} />
-                        Registrar abono
-                      </Button>
+                      {debe && (
+                        <Button variante="primario" onClick={() => abrirAbonar(c)} className="w-full">
+                          <Icon nombre="confirmar" tamano={TAMANO_ICONO.secundario} />
+                          Registrar abono
+                        </Button>
+                      )}
                     </div>
                   )}
                 </div>
