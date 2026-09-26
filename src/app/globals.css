@@ -59,9 +59,15 @@ input[type='number']::-webkit-outer-spin-button {
   --tarjeta: #FFFFFF;
   --tarjeta-hundida: #F3F4F6;
 
-  --borde-tarjeta: #F3F4F6;
+  /* Rondas anteriores (#E5E7EB, luego #D1D5DB) seguían sin notarse lo
+     suficiente contra --superficie. Salto completo a --texto-4: el borde
+     de la tarjeta usa el mismo tono que el texto más apagado del sistema.
+     Se evaluó --marca y se descartó — verde ya significa específicamente
+     "acción principal / activo" en el sistema, usarlo como borde neutro le
+     quita ese significado. --borde-divisor sube igual, por simetría. */
+  --borde-tarjeta: #9CA3AF;
   --borde-campo: #E5E7EB;
-  --borde-divisor: #F3F4F6;
+  --borde-divisor: #9CA3AF;
 
   --texto: #111827;
   --texto-2: #374151;
@@ -98,9 +104,11 @@ input[type='number']::-webkit-outer-spin-button {
   --tarjeta: #1E293B;
   --tarjeta-hundida: #334155;
 
-  --borde-tarjeta: #334155;
+  /* = --texto-4 en oscuro — mismo criterio que en claro, los dos modos
+     quedan con el mismo tono de borde relativo a su propio --texto-4. */
+  --borde-tarjeta: #64748B;
   --borde-campo: #475569;
-  --borde-divisor: #334155;
+  --borde-divisor: #64748B;
 
   --texto: #F1F5F9;
   --texto-2: #CBD5E1;
