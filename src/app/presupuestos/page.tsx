@@ -56,6 +56,19 @@ function diasEntre(desdeIso: string, hastaIso: string): number {
   return Math.round((hasta - desde) / 86400000);
 }
 
+// Convertido/Anulado son historial cerrado — sin este corte la lista crece
+// para siempre y termina mezclando lo de hoy con presupuestos de hace
+// meses (a diferencia de Resumen, que se acota solo por el cierre de
+// caja). Vigente/Vencido nunca se ocultan, siempre hay algo pendiente con
+// ellos.
+const DIAS_HISTORIAL_RECIENTE = 30;
+
+// La fecha que decide si un presupuesto cerrado es "reciente" es la del
+// evento que lo cerró (cuándo se anuló o convirtió), no la de creación.
+function fechaCierre(p: Presupuesto): string {
+  return p.anulado_en ?? p.convertido_en ?? p.creado_en;
+}
+
 type ChipId = 'todos' | 'vigente' | 'vencido' | 'convertido' | 'anulado';
 
 const ESTADO_ESTILO: Record<Presupuesto['estado'], string> = {
@@ -78,6 +91,7 @@ export default function PresupuestosPage() {
   const [presupuestos, setPresupuestos] = useState<Presupuesto[]>([]);
   const [cargando, setCargando] = useState(true);
   const [chip, setChip] = useState<ChipId>('todos');
+  const [verHistorialCompleto, setVerHistorialCompleto] = useState(false);
   const [expandido, setExpandido] = useState<string | null>(null);
   const [cargandoItems, setCargandoItems] = useState<string | null>(null);
   const [convirtiendo, setConvirtiendo] = useState<string | null>(null);
@@ -262,6 +276,17 @@ export default function PresupuestosPage() {
   const hoy = hoyISO();
   const esVencido = (p: Presupuesto) => p.estado === 'vigente' && p.fecha_vencimiento < hoy;
 
+  const corteHistorial = new Date();
+  corteHistorial.setDate(corteHistorial.getDate() - DIAS_HISTORIAL_RECIENTE);
+
+  // new Date(...), no comparación de string: anulado_en/convertido_en llegan
+  // en formato distinto según vengan de este dispositivo
+  // (new Date().toISOString(), termina en "Z") o del sync remoto (Supabase,
+  // termina en "+00:00") — mismo instante, string distinto. new Date(...)
+  // los interpreta bien a los dos, una comparación de texto no.
+  const esReciente = (p: Presupuesto) =>
+    p.estado === 'vigente' || new Date(fechaCierre(p)) >= corteHistorial;
+
   const vigentes = presupuestos.filter(p => p.estado === 'vigente' && !esVencido(p));
   const vencidos = presupuestos.filter(esVencido);
   const totalVigenteUsd = presupuestos
@@ -271,20 +296,26 @@ export default function PresupuestosPage() {
     .filter(p => p.estado === 'vigente')
     .reduce((s, p) => s + p.total_bs_estimado, 0);
 
+  const presupuestosVisibles = verHistorialCompleto ? presupuestos : presupuestos.filter(esReciente);
+
   const CHIPS: { id: ChipId; label: string; cuenta: number }[] = [
-    { id: 'todos', label: 'Todos', cuenta: presupuestos.length },
+    { id: 'todos', label: 'Todos', cuenta: presupuestosVisibles.length },
     { id: 'vigente', label: 'Vigente', cuenta: vigentes.length },
     { id: 'vencido', label: 'Vencido', cuenta: vencidos.length },
-    { id: 'convertido', label: 'Convertido', cuenta: presupuestos.filter(p => p.estado === 'convertido').length },
-    { id: 'anulado', label: 'Anulado', cuenta: presupuestos.filter(p => p.estado === 'anulado').length },
+    { id: 'convertido', label: 'Convertido', cuenta: presupuestosVisibles.filter(p => p.estado === 'convertido').length },
+    { id: 'anulado', label: 'Anulado', cuenta: presupuestosVisibles.filter(p => p.estado === 'anulado').length },
   ];
 
-  const presupuestosFiltrados = presupuestos.filter(p => {
+  const presupuestosFiltrados = presupuestosVisibles.filter(p => {
     if (chip === 'todos') return true;
     if (chip === 'vigente') return p.estado === 'vigente' && !esVencido(p);
     if (chip === 'vencido') return esVencido(p);
     return p.estado === chip;
   });
+
+  const chipPuedeTenerHistorialOculto = chip === 'todos' || chip === 'convertido' || chip === 'anulado';
+  const historialOcultos = presupuestos.length - presupuestosVisibles.length;
+  const mostrarBotonHistorial = !verHistorialCompleto && chipPuedeTenerHistorialOculto && historialOcultos > 0;
 
   // Correlativo por orden de creación, calculado una sola vez para toda la
   // lista (no por fila) — mismo criterio que "Venta #N" en Resumen.
@@ -404,6 +435,14 @@ export default function PresupuestosPage() {
         ) : presupuestosFiltrados.length === 0 ? (
           <div className="text-center text-texto-3 py-12">
             <p className="font-medium">Ningún presupuesto en este filtro</p>
+            {mostrarBotonHistorial && (
+              <button
+                onClick={() => setVerHistorialCompleto(true)}
+                className="mt-3 text-sm font-semibold text-marca"
+              >
+                Ver historial completo ({historialOcultos} más)
+              </button>
+            )}
           </div>
         ) : (
           <div className="flex flex-col gap-2.5">
@@ -536,6 +575,11 @@ export default function PresupuestosPage() {
                 </div>
               );
             })}
+            {mostrarBotonHistorial && (
+              <Button variante="secundario" onClick={() => setVerHistorialCompleto(true)} className="w-full">
+                Ver historial completo ({historialOcultos} más)
+              </Button>
+            )}
           </div>
         )}
       </div>
