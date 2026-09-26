@@ -11,6 +11,10 @@ import { compartirPresupuesto } from '@/lib/comprobante';
 import { useApp } from '@/components/Providers';
 import { useGuardarRuta } from '@/lib/useGuardarRuta';
 import ThemeToggle from '@/components/ThemeToggle';
+import Button from '@/components/ui/Button';
+import BottomSheet from '@/components/ui/BottomSheet';
+import Icon from '@/components/ui/Icon';
+import { TAMANO_ICONO } from '@/components/ui/iconos';
 
 function formatearNombre(nombre: string): string {
   return nombre
@@ -28,21 +32,42 @@ function fmtFechaCorta(iso: string): string {
   return new Date(anio, mes - 1, dia).toLocaleDateString('es-VE', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+// A diferencia de fmtFechaCorta (fecha pura), convertido_en/anulado_en son
+// timestamps reales (new Date().toISOString()) — acá sí corresponde
+// new Date(iso) directo: toLocaleDateString ya convierte el instante a la
+// zona horaria local, cortar el string y reparsearlo como fecha pura
+// desplazaría el día cerca de la medianoche UTC.
+function fmtFechaEvento(iso: string): string {
+  return new Date(iso).toLocaleDateString('es-VE', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
 function hoyISO(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+// Diferencia en días entre dos 'YYYY-MM-DD' puros — misma construcción
+// local-safe que fmtFechaCorta, nunca `new Date(iso)` a secas.
+function diasEntre(desdeIso: string, hastaIso: string): number {
+  const [a1, m1, d1] = desdeIso.split('-').map(Number);
+  const [a2, m2, d2] = hastaIso.split('-').map(Number);
+  const desde = new Date(a1, m1 - 1, d1).getTime();
+  const hasta = new Date(a2, m2 - 1, d2).getTime();
+  return Math.round((hasta - desde) / 86400000);
+}
+
+type ChipId = 'todos' | 'vigente' | 'vencido' | 'convertido' | 'anulado';
+
+const ESTADO_ESTILO: Record<Presupuesto['estado'], string> = {
+  vigente: 'bg-marca-suave text-marca-suave-texto',
+  convertido: 'bg-informativo-fondo text-informativo',
+  anulado: 'bg-negativo-fondo text-negativo',
+};
+
 const ESTADO_LABELS: Record<Presupuesto['estado'], string> = {
   vigente: 'Vigente',
   convertido: 'Convertido',
   anulado: 'Anulado',
-};
-
-const ESTADO_COLORS: Record<Presupuesto['estado'], string> = {
-  vigente: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
-  convertido: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
-  anulado: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
 };
 
 export default function PresupuestosPage() {
@@ -52,6 +77,7 @@ export default function PresupuestosPage() {
 
   const [presupuestos, setPresupuestos] = useState<Presupuesto[]>([]);
   const [cargando, setCargando] = useState(true);
+  const [chip, setChip] = useState<ChipId>('todos');
   const [expandido, setExpandido] = useState<string | null>(null);
   const [cargandoItems, setCargandoItems] = useState<string | null>(null);
   const [convirtiendo, setConvirtiendo] = useState<string | null>(null);
@@ -234,96 +260,202 @@ export default function PresupuestosPage() {
   };
 
   const hoy = hoyISO();
+  const esVencido = (p: Presupuesto) => p.estado === 'vigente' && p.fecha_vencimiento < hoy;
+
+  const vigentes = presupuestos.filter(p => p.estado === 'vigente' && !esVencido(p));
+  const vencidos = presupuestos.filter(esVencido);
+  const totalVigenteUsd = presupuestos
+    .filter(p => p.estado === 'vigente')
+    .reduce((s, p) => s + p.total_usd, 0);
+  const totalVigenteBs = presupuestos
+    .filter(p => p.estado === 'vigente')
+    .reduce((s, p) => s + p.total_bs_estimado, 0);
+
+  const CHIPS: { id: ChipId; label: string; cuenta: number }[] = [
+    { id: 'todos', label: 'Todos', cuenta: presupuestos.length },
+    { id: 'vigente', label: 'Vigente', cuenta: vigentes.length },
+    { id: 'vencido', label: 'Vencido', cuenta: vencidos.length },
+    { id: 'convertido', label: 'Convertido', cuenta: presupuestos.filter(p => p.estado === 'convertido').length },
+    { id: 'anulado', label: 'Anulado', cuenta: presupuestos.filter(p => p.estado === 'anulado').length },
+  ];
+
+  const presupuestosFiltrados = presupuestos.filter(p => {
+    if (chip === 'todos') return true;
+    if (chip === 'vigente') return p.estado === 'vigente' && !esVencido(p);
+    if (chip === 'vencido') return esVencido(p);
+    return p.estado === chip;
+  });
+
+  // Correlativo por orden de creación, calculado una sola vez para toda la
+  // lista (no por fila) — mismo criterio que "Venta #N" en Resumen.
+  const ordenados = [...presupuestos].sort((a, b) => a.creado_en.localeCompare(b.creado_en));
+  const numeroPorId = new Map(ordenados.map((p, i) => [p.id, i + 1]));
+
+  function textoVigencia(p: Presupuesto): string {
+    if (p.estado === 'convertido') {
+      return p.convertido_en ? `Se convirtió en venta · ${fmtFechaEvento(p.convertido_en)}` : 'Se convirtió en venta';
+    }
+    if (p.estado === 'anulado') {
+      return p.anulado_en ? `Anulado · ${fmtFechaEvento(p.anulado_en)}` : 'Anulado';
+    }
+    if (esVencido(p)) {
+      const dias = diasEntre(p.fecha_vencimiento, hoy);
+      return `Venció hace ${dias} ${dias === 1 ? 'día' : 'días'} · los precios ya no se sostienen`;
+    }
+    const dias = diasEntre(hoy, p.fecha_vencimiento);
+    return dias === 0 ? 'Vence hoy' : `Vence en ${dias} ${dias === 1 ? 'día' : 'días'}`;
+  }
 
   return (
     <div>
-      <header className="bg-emerald-600 text-white px-4 pt-4 pb-3 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold">Presupuestos</h1>
-          <p className="text-emerald-200 text-sm">Cotizaciones para clientes</p>
+      <header className="bg-superficie-barra border-b border-borde-divisor px-4 pt-3.5 pb-3 flex items-center gap-2.5">
+        <div className="flex-1 min-w-0">
+          <h1 className="text-base font-bold text-texto truncate">Presupuestos</h1>
+          <p className="text-[11px] font-medium text-texto-3 truncate">
+            {presupuestos.length} {presupuestos.length === 1 ? 'presupuesto' : 'presupuestos'}
+          </p>
         </div>
-        <ThemeToggle />
+        {/* píldora de conexión — sí aplica acá: alExpandir depende de
+            isOnline para traer detalle, y convertirPresupuesto puede
+            bloquearse sin conexión */}
+        <div className={`flex-none flex items-center gap-1.5 h-7 px-2.5 rounded-full ${isOnline ? 'bg-marca-suave' : 'bg-aviso-fondo'}`}>
+          <Icon
+            nombre={isOnline ? 'enLinea' : 'sinConexion'}
+            tamano={TAMANO_ICONO.chip}
+            className={isOnline ? 'text-marca-suave-texto' : 'text-aviso'}
+          />
+          <span className={`text-[11px] font-semibold whitespace-nowrap ${isOnline ? 'text-marca-suave-texto' : 'text-aviso'}`}>
+            {isOnline ? 'En línea' : 'Sin conexión'}
+          </span>
+        </div>
+        <ThemeToggle variant="neutro" />
       </header>
 
-      <div className="p-4 space-y-4">
-        <button
-          onClick={() => router.push('/presupuestos/nuevo')}
-          className="w-full bg-emerald-600 text-white py-3.5 rounded-xl font-bold flex items-center justify-center gap-2"
-        >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
+      {/* pb-1 + overflow visible: mismo arreglo que Inventario/Fiado para
+          que la barra de scroll del navegador no pise los chips */}
+      <div className="px-4 pt-3 pb-4 bg-superficie-barra border-b border-borde-divisor">
+        <div className="flex gap-2 -mx-4 px-4 pb-1 overflow-x-auto">
+          {CHIPS.map(c => {
+            const activo = chip === c.id;
+            return (
+              <button
+                key={c.id}
+                onClick={() => { setChip(c.id); setExpandido(null); }}
+                className={`flex-shrink-0 h-[34px] px-3.5 rounded-full text-sm font-semibold flex items-center gap-1.5 whitespace-nowrap transition-colors border ${
+                  activo ? 'bg-marca-suave text-marca-suave-texto border-marca' : 'bg-tarjeta text-texto-2 border-borde-campo'
+                }`}
+              >
+                {c.label}
+                <span className="tabular-nums opacity-70">{c.cuenta}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="px-4 py-3.5 flex flex-col gap-3.5">
+        <Button variante="primario" onClick={() => router.push('/presupuestos/nuevo')} className="w-full">
+          <Icon nombre="agregar" tamano={TAMANO_ICONO.secundario} />
           Nuevo presupuesto
-        </button>
+        </Button>
+
+        {presupuestos.length > 0 && (
+          <div className="p-5 rounded-2xl bg-tinta">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-tinta-etiqueta">Presupuestado vigente</p>
+            <p className="mt-1.5 text-4xl font-extrabold text-tinta-texto tracking-tight tabular-nums">
+              {formatUSD(totalVigenteUsd)}
+            </p>
+            <p className="mt-1 text-tinta-etiqueta tabular-nums">
+              {formatBS(totalVigenteBs)} · {vigentes.length} {vigentes.length === 1 ? 'presupuesto vigente' : 'presupuestos vigentes'}
+            </p>
+            {vencidos.length > 0 && (
+              <>
+                <div className="h-px bg-[rgba(255,255,255,0.14)] my-3" />
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="h-6 px-2.5 inline-flex items-center rounded-full bg-aviso-fondo text-aviso text-[11px] font-bold whitespace-nowrap">
+                    {vencidos.length} {vencidos.length === 1 ? 'vencido' : 'vencidos'}
+                  </span>
+                  <span className="text-tinta-etiqueta text-sm">los precios ya no se sostienen</span>
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         {cargando ? (
-          <div className="text-center text-gray-400 py-16">
-            <svg className="w-8 h-8 mx-auto mb-3 text-emerald-400 animate-spin" fill="none" viewBox="0 0 24 24">
+          <div className="text-center text-texto-3 py-16">
+            <svg className="w-8 h-8 mx-auto mb-3 text-marca animate-spin" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
             </svg>
           </div>
         ) : presupuestos.length === 0 ? (
-          <div className="text-center text-gray-400 py-12">
+          <div className="text-center text-texto-3 py-12">
+            <Icon nombre="presupuestos" tamano={48} className="mx-auto mb-3 text-texto-4" />
             <p className="font-medium">Sin presupuestos todavía</p>
           </div>
+        ) : presupuestosFiltrados.length === 0 ? (
+          <div className="text-center text-texto-3 py-12">
+            <p className="font-medium">Ningún presupuesto en este filtro</p>
+          </div>
         ) : (
-          <div className="space-y-2">
-            {presupuestos.map(p => {
-              const vencido = p.estado === 'vigente' && p.fecha_vencimiento < hoy;
+          <div className="flex flex-col gap-2.5">
+            {presupuestosFiltrados.map(p => {
+              const vencido = esVencido(p);
               const isOpen = expandido === p.id;
               return (
-                <div key={p.id} className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
-                  <button
-                    className="w-full flex items-center justify-between p-4 text-left"
-                    onClick={() => alExpandir(p)}
-                  >
-                    <div className="min-w-0">
-                      <p className="font-semibold text-gray-800 dark:text-white truncate">
+                <div
+                  key={p.id}
+                  className={`bg-tarjeta rounded-2xl border overflow-hidden ${vencido ? 'border-aviso-borde' : 'border-borde-tarjeta'}`}
+                >
+                  <button className="w-full flex items-center justify-between gap-3 p-3.5 text-left" onClick={() => alExpandir(p)}>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold text-texto truncate">
                         {p.cliente_nombre ? formatearNombre(p.cliente_nombre) : 'Sin nombre de cliente'}
                       </p>
                       <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${ESTADO_COLORS[p.estado]}`}>
+                        <span className={`h-5 px-2 inline-flex items-center rounded-full text-[11px] font-bold whitespace-nowrap ${ESTADO_ESTILO[p.estado]}`}>
                           {ESTADO_LABELS[p.estado]}
                         </span>
                         {vencido && (
-                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                          <span className="h-5 px-2 inline-flex items-center rounded-full bg-aviso-fondo text-aviso text-[11px] font-bold whitespace-nowrap">
                             Vencido
                           </span>
                         )}
-                        <span className="text-xs text-gray-400">Vence {fmtFechaCorta(p.fecha_vencimiento)}</span>
                       </div>
+                      <p className="text-xs text-texto-3 mt-1">
+                        Presupuesto #{numeroPorId.get(p.id)} · {textoVigencia(p)}
+                      </p>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <div className="text-right">
-                        <p className="font-bold text-gray-900 dark:text-white">{formatUSD(p.total_usd)}</p>
-                        <p className="text-xs text-gray-400">{formatBS(p.total_bs_estimado)}</p>
+                        <p className="font-bold text-texto tabular-nums">{formatUSD(p.total_usd)}</p>
+                        <p className="text-xs text-texto-3 tabular-nums">{formatBS(p.total_bs_estimado)}</p>
                       </div>
-                      <svg
-                        className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
-                        fill="none" viewBox="0 0 24 24" stroke="currentColor"
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                      </svg>
+                      <Icon
+                        nombre="flechaDerecha"
+                        tamano={16}
+                        className={`text-texto-4 transition-transform ${isOpen ? 'rotate-90' : ''}`}
+                      />
                     </div>
                   </button>
 
                   {isOpen && (
-                    <div className="border-t border-gray-100 dark:border-slate-700 px-4 pb-4 pt-3 space-y-2">
+                    <div className="border-t border-borde-divisor px-3.5 pb-3.5 pt-3 flex flex-col gap-2.5">
                       {cargandoItems === p.id ? (
-                        <p className="text-xs text-gray-400 py-1">Cargando...</p>
+                        <p className="text-xs text-texto-3 py-1">Cargando...</p>
                       ) : !p.items || p.items.length === 0 ? (
-                        <p className="text-xs text-gray-400 py-1">
+                        <p className="text-xs text-texto-3 py-1">
                           {isOnline ? 'Sin detalle disponible' : 'Sin conexión — hace falta señal para ver el detalle'}
                         </p>
                       ) : (
                         p.items.map(item => (
-                          <div key={item.id} className="flex justify-between text-sm">
-                            <span className="text-gray-600 dark:text-gray-300">
+                          <div key={item.id} className="flex items-center justify-between text-sm">
+                            <span className="text-texto-2">
                               {item.gramos !== undefined ? `${item.gramos}g ` : `${item.cantidad}× `}
                               {formatearNombre(item.nombre)}
                             </span>
-                            <span className="font-medium text-gray-700 dark:text-gray-200">
+                            <span className="font-medium text-texto">
                               {formatBS(
                                 item.gramos !== undefined
                                   ? item.precioUnitarioBs * (item.gramos / 1000)
@@ -333,41 +465,60 @@ export default function PresupuestosPage() {
                           </div>
                         ))
                       )}
-                      <div className="border-t border-gray-100 dark:border-slate-700 pt-2 flex justify-between text-sm">
-                        <span className="text-gray-500">Equivalente</span>
-                        <span className="text-gray-600 dark:text-gray-300">{formatUSD(p.total_usd)}</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-500">Creado por</span>
-                        <span className="text-gray-600 dark:text-gray-300">{p.creado_por_nombre || '—'}</span>
-                      </div>
 
-                      {p.estado === 'anulado' && (
-                        <p className="text-sm text-red-700 bg-red-50 dark:bg-red-900/20 dark:text-red-400 rounded-lg px-2.5 py-2 mt-1">
-                          Motivo: {p.motivo_anulacion || '—'}
-                        </p>
+                      {vencido && (
+                        <div className="p-3 rounded-[12px] bg-aviso-fondo border border-aviso-borde">
+                          <p className="text-sm text-aviso leading-relaxed">
+                            El precio en dólares es el que se cotizó. El bolívar se recalcula con la tasa de hoy al
+                            convertirlo en venta.
+                          </p>
+                        </div>
                       )}
+                      {p.estado === 'convertido' && (
+                        <div className="p-3 rounded-[12px] bg-informativo-fondo border border-informativo">
+                          <p className="text-sm text-informativo">Ya se convirtió en venta.</p>
+                        </div>
+                      )}
+                      {p.estado === 'anulado' && (
+                        <div className="p-3 rounded-[12px] bg-negativo-fondo border border-negativo-borde flex flex-col gap-1">
+                          <p className="text-sm text-negativo">
+                            Anulado. Se conserva para dejar constancia, pero no se puede cobrar.
+                          </p>
+                          <p className="text-sm text-negativo">Motivo: {p.motivo_anulacion || '—'}</p>
+                        </div>
+                      )}
+
+                      <div className="border-t border-borde-divisor pt-2 flex items-center justify-between text-sm">
+                        <span className="text-texto-3">Equivalente</span>
+                        <span className="text-texto-2">{formatUSD(p.total_usd)}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-texto-3">Creado por</span>
+                        <span className="text-texto-2">{p.creado_por_nombre || '—'}</span>
+                      </div>
 
                       <button
                         onClick={() => compartir(p)}
                         disabled={compartiendo === p.id}
-                        className="w-full py-2.5 rounded-xl text-sm font-semibold bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 disabled:opacity-50 mt-1"
+                        className="w-full h-11 rounded-[12px] text-sm font-semibold bg-tarjeta-hundida text-texto-2 disabled:opacity-50 mt-1 flex items-center justify-center gap-2"
                       >
+                        <Icon nombre="compartir" tamano={TAMANO_ICONO.secundario} />
                         {compartiendo === p.id ? 'Generando...' : 'Compartir'}
                       </button>
 
                       {p.estado === 'vigente' && (
                         <div className="flex gap-2">
-                          <button
+                          <Button
+                            variante="primario"
                             onClick={() => convertirPresupuesto(p)}
                             disabled={convirtiendo === p.id}
-                            className="flex-1 py-2.5 rounded-xl text-sm font-semibold bg-emerald-600 text-white disabled:opacity-50"
+                            className="flex-1"
                           >
                             {convirtiendo === p.id ? 'Cargando...' : 'Convertir en venta'}
-                          </button>
+                          </Button>
                           <button
                             onClick={() => abrirAnular(p)}
-                            className="flex-1 py-2.5 rounded-xl text-sm font-semibold bg-red-50 text-red-600"
+                            className="flex-1 h-[52px] rounded-[12px] text-sm font-semibold bg-negativo-fondo text-negativo"
                           >
                             Anular
                           </button>
@@ -383,47 +534,50 @@ export default function PresupuestosPage() {
       </div>
 
       {/* Anular presupuesto */}
-      {anulando && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div className="absolute inset-0 bg-black/40" onClick={() => { if (!guardandoAnulacion) setAnulando(null); }} />
-          <div className="relative bg-white dark:bg-slate-800 rounded-2xl w-full max-w-sm shadow-xl overflow-hidden">
-            <div className="p-5">
-              <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Anular presupuesto</h2>
-              <p className="text-sm text-gray-500 mb-4">
-                {anulando.cliente_nombre ? formatearNombre(anulando.cliente_nombre) : 'Sin nombre de cliente'} · {formatBS(anulando.total_bs_estimado)}
-              </p>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Motivo</label>
+      <BottomSheet
+        abierto={!!anulando}
+        onCerrar={() => { if (!guardandoAnulacion) setAnulando(null); }}
+        titulo="Anular presupuesto"
+      >
+        {anulando && (
+          <div className="space-y-4">
+            <p className="text-sm text-texto-3">
+              {anulando.cliente_nombre ? formatearNombre(anulando.cliente_nombre) : 'Sin nombre de cliente'} ·{' '}
+              {formatBS(anulando.total_bs_estimado)}
+            </p>
+            <div>
+              <label className="block text-sm text-texto-3 mb-1.5">Motivo</label>
               <textarea
                 value={motivoAnular}
                 onChange={e => setMotivoAnular(e.target.value)}
                 rows={3}
-                className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-3 py-2 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-400"
                 placeholder="Ej: El cliente ya no lo necesita"
+                className="font-caja w-full rounded-[12px] border bg-tarjeta text-texto text-base px-4 py-3 placeholder:text-texto-4 outline-none transition-colors duration-150 border-borde-campo focus:border-foco"
                 autoFocus
               />
-              <div className="flex gap-3 mt-4">
-                <button
-                  onClick={() => setAnulando(null)}
-                  disabled={guardandoAnulacion}
-                  className="flex-1 py-3 rounded-xl bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 font-semibold disabled:opacity-40"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={confirmarAnular}
-                  disabled={guardandoAnulacion || !motivoAnular.trim()}
-                  className="flex-1 py-3 rounded-xl bg-red-600 text-white font-bold disabled:opacity-40"
-                >
-                  {guardandoAnulacion ? 'Anulando...' : 'Anular'}
-                </button>
-              </div>
             </div>
+            <Button
+              variante="destructivo"
+              disabled={guardandoAnulacion || !motivoAnular.trim()}
+              onClick={confirmarAnular}
+              className="w-full"
+            >
+              {guardandoAnulacion ? 'Anulando...' : 'Anular'}
+            </Button>
+            <button
+              type="button"
+              onClick={() => setAnulando(null)}
+              disabled={guardandoAnulacion}
+              className="w-full h-[52px] rounded-[12px] border border-borde-tarjeta text-texto-3 font-semibold disabled:opacity-40"
+            >
+              Cancelar
+            </button>
           </div>
-        </div>
-      )}
+        )}
+      </BottomSheet>
 
       {toast && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-5 py-2.5 rounded-xl text-sm font-medium z-50 shadow-lg max-w-xs text-center">
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-toast-fondo text-toast-texto px-5 py-2.5 rounded-xl text-sm font-medium z-50 shadow-lg max-w-xs text-center">
           {toast}
         </div>
       )}
