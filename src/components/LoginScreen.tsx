@@ -69,7 +69,7 @@ export default function LoginScreen({ mensajeInicial, onMensajeVisto }: LoginScr
     <div className="min-h-screen relative overflow-hidden">
       {/* Split background */}
       <div className="absolute inset-0 flex flex-col pointer-events-none">
-        <div className="h-1/2 bg-emerald-600" />
+        <div className="h-1/2 bg-tinta" />
         <div className="h-1/2 bg-gray-50 dark:bg-slate-900" />
       </div>
 
@@ -84,18 +84,29 @@ export default function LoginScreen({ mensajeInicial, onMensajeVisto }: LoginScr
             </svg>
           </div>
           <h1 className="text-white text-5xl font-bold tracking-tight">Caja</h1>
-          <p className="text-emerald-200 text-sm mt-2">Sistema de punto de venta</p>
+          <p className="text-tinta-etiqueta text-sm mt-2">Sistema de punto de venta</p>
+
+          {/* Ilustración de ambientación: mostrador con terminal de cobro —
+              trazo simple, mismo color que el ícono del carrito de arriba,
+              para que ambos se lean como parte del mismo sistema. */}
+          <svg className="w-14 h-7 text-white mt-5" fill="none" viewBox="0 0 96 48" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" d="M8 30h80" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M14 30v12h68V30" />
+            <rect x="38" y="14" width="20" height="16" rx="2" />
+            <path strokeLinecap="round" d="M42 19h12" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M58 14v-6l3 2 3-2v6" />
+          </svg>
         </div>
 
         {/* Form card */}
-        <div className="bg-white dark:bg-slate-800 rounded-t-3xl shadow-2xl px-6 pt-8 pb-12">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6">
+        <div className="bg-tarjeta rounded-t-3xl shadow-2xl px-6 pt-8 pb-12">
+          <h2 className="text-xl font-bold text-texto mb-6">
             Iniciar sesión
           </h2>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+              <label className="block text-sm font-medium text-texto-2 mb-1.5">
                 Usuario
               </label>
               <input
@@ -106,12 +117,12 @@ export default function LoginScreen({ mensajeInicial, onMensajeVisto }: LoginScr
                 autoCorrect="off"
                 autoComplete="username"
                 placeholder="Tu usuario"
-                className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-3 text-base bg-white dark:bg-slate-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-emerald-400"
+                className="w-full border border-borde-campo rounded-xl px-4 py-3 text-base bg-tarjeta text-texto placeholder:text-texto-4 focus:outline-none focus:border-foco"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+              <label className="block text-sm font-medium text-texto-2 mb-1.5">
                 Contraseña
               </label>
               <input
@@ -120,12 +131,12 @@ export default function LoginScreen({ mensajeInicial, onMensajeVisto }: LoginScr
                 onChange={e => { setPassword(e.target.value); setError(''); }}
                 autoComplete="current-password"
                 placeholder="••••••••"
-                className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-3 text-base bg-white dark:bg-slate-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-emerald-400"
+                className="w-full border border-borde-campo rounded-xl px-4 py-3 text-base bg-tarjeta text-texto placeholder:text-texto-4 focus:outline-none focus:border-foco"
               />
             </div>
 
             {error && (
-              <div className="p-3 bg-red-50 dark:bg-red-900/30 border border-red-100 dark:border-red-800 rounded-xl text-red-600 dark:text-red-400 text-sm text-center">
+              <div className="p-3 bg-negativo-fondo border border-negativo-borde rounded-xl text-negativo text-sm text-center">
                 {error}
               </div>
             )}
@@ -133,7 +144,7 @@ export default function LoginScreen({ mensajeInicial, onMensajeVisto }: LoginScr
             <button
               type="submit"
               disabled={loading || !usuario.trim() || !password}
-              className="w-full bg-emerald-600 text-white py-4 rounded-xl text-base font-bold disabled:opacity-40 disabled:cursor-not-allowed mt-2"
+              className="w-full bg-marca active:bg-marca-presion text-texto-invertido py-4 rounded-xl text-base font-bold transition-colors duration-150 disabled:opacity-40 disabled:cursor-not-allowed mt-2"
             >
               {loading ? 'Ingresando...' : 'Ingresar'}
             </button>
