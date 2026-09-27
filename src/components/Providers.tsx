@@ -17,6 +17,8 @@ import {
   setCachedUsaCostos,
   getCachedUsaStock,
   setCachedUsaStock,
+  getCachedTutorialVisto,
+  setCachedTutorialVisto,
   getCachedEstado,
   setCachedEstado,
   getCachedFechaProximoPago,
@@ -59,6 +61,16 @@ interface AppContextType {
   // patrón que usaCostos.
   usaStock: boolean;
   setUsaStock: (v: boolean) => void;
+  // Si el usuario ya vio/cerró el checklist de bienvenida (columna
+  // perfiles.tutorial_visto). Default true mientras no resuelve — para no
+  // parpadear el checklist antes de tiempo (ver fetchPerfil).
+  tutorialVisto: boolean;
+  // Única forma de marcarlo visto: llama al RPC marcar_tutorial_visto (la
+  // policy de UPDATE de perfiles no deja a un cajero tocar su propia fila
+  // directo). Si falla (sin red), no actualiza nada — el checklist
+  // simplemente puede volver a aparecer la próxima vez que el perfil
+  // resuelva fresco con conexión.
+  marcarTutorialVisto: () => Promise<void>;
   // Estado de suscripción del negocio y fecha del próximo pago. El bloqueo
   // real ya está en Supabase (RLS + trigger) — esto es solo para que la UI
   // sepa qué explicarle al usuario. Cacheado igual que usaStock; default
@@ -135,6 +147,8 @@ const AppContext = createContext<AppContextType>({
   setUsaCostos: () => {},
   usaStock: false,
   setUsaStock: () => {},
+  tutorialVisto: true,
+  marcarTutorialVisto: async () => {},
   estado: 'activo',
   fechaProximoPago: null,
   limiteUsuarios: 2,
@@ -168,6 +182,7 @@ interface PerfilResuelto {
   userNombre: string;
   usaCostos: boolean;
   usaStock: boolean;
+  tutorialVisto: boolean;
   estado: EstadoNegocio;
   fechaProximoPago: string | null;
   limiteUsuarios: number;
@@ -178,7 +193,7 @@ async function fetchPerfil(uid: string): Promise<PerfilResuelto | 'desactivado' 
   try {
     const { data: perfil } = await supabase
       .from('perfiles')
-      .select('negocio_id, rol, nombre, activo')
+      .select('negocio_id, rol, nombre, activo, tutorial_visto')
       .eq('id', uid)
       .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS))
       .single();
@@ -202,6 +217,9 @@ async function fetchPerfil(uid: string): Promise<PerfilResuelto | 'desactivado' 
       userNombre: perfil.nombre ?? '',
       usaCostos: negocio.usa_costos ?? false,
       usaStock: negocio.usa_stock ?? false,
+      // Fallback seguro: si por lo que sea no resuelve, que NO aparezca el
+      // checklist en vez de aparecer de más.
+      tutorialVisto: perfil.tutorial_visto ?? true,
       // Default seguro: un negocio sin `estado` (no debería pasar, pero
       // cubre datos viejos o un select parcial) se trata como activo, nunca
       // como restringido/suspendido.
@@ -243,6 +261,7 @@ async function resolverPerfil(uid: string): Promise<PerfilResuelto | 'desactivad
     await setCachedUsuarioNombre(perfil.userNombre);
     await setCachedUsaCostos(perfil.usaCostos);
     await setCachedUsaStock(perfil.usaStock);
+    await setCachedTutorialVisto(perfil.tutorialVisto);
     await setCachedEstado(perfil.estado);
     await setCachedFechaProximoPago(perfil.fechaProximoPago);
     await setCachedLimiteUsuarios(perfil.limiteUsuarios);
@@ -252,13 +271,14 @@ async function resolverPerfil(uid: string): Promise<PerfilResuelto | 'desactivad
 
   const cachedId = await getCachedNegocioId();
   if (!cachedId) return null;
-  const [cachedNombre, cachedRol, cachedUserNombre, cachedUsaCostos, cachedUsaStock, cachedEstado, cachedFecha, cachedLimiteUsuarios, cachedDatosNegocio] =
+  const [cachedNombre, cachedRol, cachedUserNombre, cachedUsaCostos, cachedUsaStock, cachedTutorialVisto, cachedEstado, cachedFecha, cachedLimiteUsuarios, cachedDatosNegocio] =
     await Promise.all([
       getCachedNegocioNombre(),
       getCachedRol(),
       getCachedUsuarioNombre(),
       getCachedUsaCostos(),
       getCachedUsaStock(),
+      getCachedTutorialVisto(),
       getCachedEstado(),
       getCachedFechaProximoPago(),
       getCachedLimiteUsuarios(),
@@ -271,6 +291,7 @@ async function resolverPerfil(uid: string): Promise<PerfilResuelto | 'desactivad
     userNombre: cachedUserNombre ?? '',
     usaCostos: cachedUsaCostos,
     usaStock: cachedUsaStock,
+    tutorialVisto: cachedTutorialVisto,
     estado: cachedEstado,
     fechaProximoPago: cachedFecha,
     limiteUsuarios: cachedLimiteUsuarios,
@@ -290,6 +311,10 @@ export default function Providers({ children }: { children: ReactNode }) {
   const [userNombre, setUserNombre] = useState('');
   const [usaCostos, setUsaCostos] = useState(false);
   const [usaStock, setUsaStock] = useState(false);
+  // Default true (oculto) hasta que se resuelva el perfil — mismo criterio
+  // que el fallback de fetchPerfil: nunca parpadear el checklist antes de
+  // tiempo.
+  const [tutorialVisto, setTutorialVisto] = useState(true);
   // Default seguro: 'activo' hasta que se resuelva el perfil (fetch o
   // cache) — nunca arrancar mostrando restricciones que no corresponden.
   const [estado, setEstado] = useState<EstadoNegocio>('activo');
@@ -386,6 +411,7 @@ export default function Providers({ children }: { children: ReactNode }) {
     setUserNombre('');
     setUsaCostos(false);
     setUsaStock(false);
+    setTutorialVisto(true);
     setEstado('activo');
     setFechaProximoPago(null);
     setLimiteUsuarios(2);
@@ -418,6 +444,7 @@ export default function Providers({ children }: { children: ReactNode }) {
       setUserNombre('');
       setUsaCostos(false);
       setUsaStock(false);
+      setTutorialVisto(true);
       setEstado('activo');
       setFechaProximoPago(null);
       setLimiteUsuarios(2);
@@ -443,6 +470,7 @@ export default function Providers({ children }: { children: ReactNode }) {
         setUserNombre(perfil.userNombre);
         setUsaCostos(perfil.usaCostos);
         setUsaStock(perfil.usaStock);
+        setTutorialVisto(perfil.tutorialVisto);
         setEstado(perfil.estado);
         setFechaProximoPago(perfil.fechaProximoPago);
         setLimiteUsuarios(perfil.limiteUsuarios);
@@ -468,6 +496,7 @@ export default function Providers({ children }: { children: ReactNode }) {
         setUserNombre('');
         setUsaCostos(false);
         setUsaStock(false);
+        setTutorialVisto(true);
         setEstado('activo');
         setFechaProximoPago(null);
         setLimiteUsuarios(2);
@@ -594,6 +623,23 @@ export default function Providers({ children }: { children: ReactNode }) {
 
   const syncStatus: EstadoSync = !isOnline ? 'offline' : sincronizando ? 'syncing' : 'online';
 
+  // Única forma de marcar tutorial_visto=true (ver AppContextType). Si el
+  // RPC falla (sin red, el propio try/catch cubre que supabase.rpc() ni
+  // siquiera llegue a responder) no se toca nada local — el checklist queda
+  // igual de "no visto" y puede volver a mostrarse cuando el perfil
+  // resuelva fresco.
+  const marcarTutorialVisto = async () => {
+    try {
+      const { error } = await supabase.rpc('marcar_tutorial_visto');
+      if (error) return;
+      setTutorialVisto(true);
+      await setCachedTutorialVisto(true);
+    } catch {
+      // Sin red u otro fallo de transporte: no hace falta manejo visible,
+      // ver comentario arriba.
+    }
+  };
+
   // Revalida el estado de suscripción contra el servidor — lo usa el botón
   // "Reintentar" de la pantalla de suspendido. No fuerza cierre de sesión
   // ni nada más: si no hay red o el perfil no resuelve, simplemente no hay
@@ -635,7 +681,7 @@ export default function Providers({ children }: { children: ReactNode }) {
     <AppContext.Provider value={{
       tasa, setTasa, isOnline, configuracion, theme, toggleTheme,
       user, negocioId, negocioNombre, rol, userNombre, usaCostos, setUsaCostos,
-      usaStock, setUsaStock, estado, fechaProximoPago, limiteUsuarios, datosNegocio, setDatosNegocio, ultimaSincronizacion, authLoading, signOut,
+      usaStock, setUsaStock, tutorialVisto, marcarTutorialVisto, estado, fechaProximoPago, limiteUsuarios, datosNegocio, setDatosNegocio, ultimaSincronizacion, authLoading, signOut,
       pendientesCount, syncStatus, sincronizarAhora, productosVersion,
       carrito, setCarrito, showCarrito, setShowCarrito,
       presupuestoConvirtiendoId, setPresupuestoConvirtiendoId,

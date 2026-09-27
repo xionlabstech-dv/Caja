@@ -34,6 +34,7 @@ import { useApp } from '@/components/Providers';
 import Scanner from '@/components/Scanner';
 import ThemeToggle from '@/components/ThemeToggle';
 import StockBadge from '@/components/StockBadge';
+import ChecklistBienvenida from '@/components/ChecklistBienvenida';
 import Icon from '@/components/ui/Icon';
 import ChipFiltro from '@/components/ui/ChipFiltro';
 import Button from '@/components/ui/Button';
@@ -72,7 +73,7 @@ function reproducirBeep() {
 export default function CajaPage() {
   const {
     tasa, isOnline, negocioNombre, datosNegocio, user, pendientesCount, negocioId, rol, userNombre,
-    productosVersion, usaStock, ultimaSincronizacion,
+    productosVersion, usaStock, ultimaSincronizacion, tutorialVisto,
     carrito, setCarrito, showCarrito, setShowCarrito,
     presupuestoConvirtiendoId, setPresupuestoConvirtiendoId,
     presupuestoClienteNombre,
@@ -101,6 +102,17 @@ export default function CajaPage() {
   const [toast, setToast] = useState('');
   const [showConfirmVaciar, setShowConfirmVaciar] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+
+  // Checklist de bienvenida: la fuente de verdad de "hay que mostrarlo" es
+  // tutorialVisto (contexto), pero la visibilidad de la hoja vive en un
+  // estado local para poder cerrarla al toque aunque marcarTutorialVisto()
+  // falle por falta de red — si no, sin conexión la hoja nunca se cerraría
+  // porque tutorialVisto seguiría en false. Sin red, el checklist
+  // simplemente puede volver a aparecer en la próxima carga con conexión.
+  const [mostrarTutorial, setMostrarTutorial] = useState(false);
+  useEffect(() => {
+    if (tutorialVisto === false) setMostrarTutorial(true);
+  }, [tutorialVisto]);
 
   // Fiado: clientes del negocio, para elegir/crear al cobrar. Se recarga
   // junto con productos (mismo disparador productosVersion) porque viaja en
@@ -1518,6 +1530,11 @@ export default function CajaPage() {
         <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-toast-fondo text-toast-texto px-5 py-2.5 rounded-xl text-sm font-medium z-50 shadow-lg whitespace-nowrap">
           {toast}
         </div>
+      )}
+
+      {/* Checklist de bienvenida: primer login, una sola vez */}
+      {mostrarTutorial && (
+        <ChecklistBienvenida onCerrar={() => setMostrarTutorial(false)} />
       )}
     </div>
   );

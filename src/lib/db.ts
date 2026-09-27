@@ -317,6 +317,20 @@ export async function setCachedUsaStock(usaStock: boolean): Promise<void> {
   await db.put('meta', { key: 'usa_stock', value: String(usaStock) });
 }
 
+// Si el usuario ya vio/cerró el checklist de bienvenida. Default seguro sin
+// cache: true (que NO aparezca de más), al revés de usaCostos/usaStock —
+// ahí el default seguro es false.
+export async function getCachedTutorialVisto(): Promise<boolean> {
+  const db = await getDB();
+  const item = await db.get('meta', 'tutorial_visto');
+  return item?.value === undefined ? true : item.value === 'true';
+}
+
+export async function setCachedTutorialVisto(visto: boolean): Promise<void> {
+  const db = await getDB();
+  await db.put('meta', { key: 'tutorial_visto', value: String(visto) });
+}
+
 // Estado de suscripción del negocio y fecha de próximo pago — cacheados
 // igual que rol/usaStock para que la app sepa qué explicar sin conexión.
 // getCachedEstado nunca devuelve null: sin dato cacheado, el default es
