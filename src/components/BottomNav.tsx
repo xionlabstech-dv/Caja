@@ -65,7 +65,7 @@ export default function BottomNav() {
   const visibles = tabs.filter(tab => rutasPermitidas(rol, estado).includes(tab.href));
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-white dark:bg-slate-800 border-t border-gray-200 dark:border-slate-700 z-40 safe-area-bottom">
+    <nav className="fixed bottom-0 left-0 right-0 bg-superficie-barra border-t border-borde-divisor z-40 safe-area-bottom">
       <div className="max-w-lg mx-auto flex">
         {visibles.map(tab => {
           const isActive = tab.href === '/mas'
@@ -76,13 +76,13 @@ export default function BottomNav() {
               key={tab.href}
               href={tab.href}
               className={`flex-1 flex flex-col items-center py-2 px-1 text-xs transition-colors relative ${
-                isActive ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400 hover:text-gray-600 dark:text-slate-500 dark:hover:text-slate-300'
+                isActive ? 'text-marca' : 'text-texto-4'
               }`}
             >
               {tab.icon}
               <span className={`mt-0.5 ${isActive ? 'font-semibold' : ''}`}>{tab.label}</span>
               {isActive && (
-                <span className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-emerald-600 dark:bg-emerald-400 rounded-b" />
+                <span className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-marca rounded-b" />
               )}
             </Link>
           );

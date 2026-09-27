@@ -1391,39 +1391,38 @@ export default function CajaPage() {
       )}
 
       {/* Venta confirmada — momento natural para compartir el comprobante,
-          el cliente sigue ahí parado. */}
+          el cliente sigue ahí parado. Mismo lenguaje visual que "Presupuesto
+          guardado" (presupuestos/nuevo), pero como hoja inferior en vez de
+          pantalla completa, y con el orden de énfasis que ya tenía Caja:
+          "Nueva venta" primario, "Compartir comprobante" secundario. */}
       {ventaConfirmada && (
         <div className="fixed inset-0 z-50 flex items-end">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setVentaConfirmada(null)} />
-          <div className="relative w-full max-w-lg mx-auto bg-white rounded-t-2xl">
+          <div className="absolute inset-0 bg-overlay" onClick={() => setVentaConfirmada(null)} />
+          <div className="relative w-full max-w-lg mx-auto bg-tarjeta rounded-t-2xl">
             <div className="p-6 text-center">
-              <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                <svg className="w-8 h-8 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                </svg>
+              <div className="w-16 h-16 bg-marca-suave rounded-full flex items-center justify-center mx-auto mb-3">
+                <Icon nombre="confirmar" tamano={32} className="text-marca-suave-texto" />
               </div>
-              <h2 className="text-lg font-bold text-gray-900">Venta registrada</h2>
-              <p className="text-2xl font-bold text-emerald-700 mt-1">{formatBS(ventaConfirmada.venta.total_bs)}</p>
-              {tasa > 0 && <p className="text-gray-400 text-sm">{formatUSD(ventaConfirmada.venta.total_usd)}</p>}
+              <h2 className="text-lg font-bold text-texto">Venta registrada</h2>
+              <p className="text-2xl font-bold text-marca mt-1 tabular-nums">
+                {formatBS(ventaConfirmada.venta.total_bs)}
+              </p>
+              {tasa > 0 && (
+                <p className="text-texto-4 text-sm tabular-nums">{formatUSD(ventaConfirmada.venta.total_usd)}</p>
+              )}
             </div>
-            <div className="p-4 pt-0 space-y-2">
-              <button
-                onClick={() => setVentaConfirmada(null)}
-                className="w-full bg-emerald-600 text-white py-3.5 rounded-xl font-bold"
-              >
+            <div className="p-4 pt-0 flex flex-col gap-2">
+              <Button variante="primario" onClick={() => setVentaConfirmada(null)}>
                 Nueva venta
-              </button>
-              <button
+              </Button>
+              <Button
+                variante="secundario"
                 onClick={() => compartirComprobanteVenta(ventaConfirmada.venta, ventaConfirmada.numero)}
                 disabled={compartiendoComprobante}
-                className="w-full bg-gray-100 text-gray-700 py-3.5 rounded-xl font-semibold flex items-center justify-center gap-2 disabled:opacity-60"
               >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                    d="M8.684 13.342a3 3 0 100-2.684m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
-                </svg>
+                <Icon nombre="compartir" tamano={TAMANO_ICONO.secundario} />
                 {compartiendoComprobante ? 'Generando...' : 'Compartir comprobante'}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -1432,25 +1431,27 @@ export default function CajaPage() {
       {/* Weight input modal */}
       {showPeso && productoPeso && (
         <div className="fixed inset-0 z-50 flex items-end">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setShowPeso(false)} />
-          <div className="relative w-full max-w-lg mx-auto bg-white rounded-t-2xl">
-            <div className="flex items-center justify-between p-4 border-b border-gray-100">
-              <div>
-                <h2 className="text-lg font-bold">Pesar {productoPeso.nombre}</h2>
-                <p className="text-sm text-gray-400">
+          <div className="absolute inset-0 bg-overlay" onClick={() => setShowPeso(false)} />
+          <div className="relative w-full max-w-lg mx-auto bg-tarjeta rounded-t-2xl">
+            <div className="flex items-start justify-between gap-3 p-4 pb-2.5">
+              <div className="min-w-0">
+                <h2 className="text-lg font-bold text-texto leading-snug">Pesar {productoPeso.nombre}</h2>
+                <p className="text-sm text-texto-3 mt-0.5 tabular-nums">
                   {tasa > 0
                     ? `${formatBS(precioBS(productoPeso, tasa))} / kg`
                     : `${productoPeso.precio} ${productoPeso.moneda} / kg`}
                 </p>
               </div>
-              <button onClick={() => setShowPeso(false)} className="p-1 text-gray-400">
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+              <button
+                onClick={() => setShowPeso(false)}
+                aria-label="Cerrar"
+                className="flex-shrink-0 p-2.5 -mr-2.5 -mt-1 text-texto-3"
+              >
+                <Icon nombre="cerrar" tamano={22} />
               </button>
             </div>
 
-            <div className="p-4 space-y-4">
+            <div className="p-4 pt-1.5 flex flex-col gap-4">
               <input
                 type="number"
                 inputMode="numeric"
@@ -1460,32 +1461,28 @@ export default function CajaPage() {
                 onChange={e => setGramos(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && agregarPorPeso()}
                 placeholder="Gramos"
-                className="w-full border border-gray-200 rounded-xl px-4 py-4 text-3xl font-bold text-center focus:outline-none focus:border-emerald-400"
+                className="w-full h-[76px] rounded-2xl bg-tarjeta-hundida border border-borde-campo px-4 text-3xl font-bold text-texto text-center tabular-nums focus:outline-none focus:border-foco"
                 autoFocus
               />
 
               {pesoPreviewBS !== null || pesoPreviewUSD !== null ? (
-                <div className="text-center py-3 bg-emerald-50 rounded-xl">
+                <div className="text-center py-3 rounded-xl bg-tarjeta-hundida">
                   {pesoPreviewBS !== null && (
-                    <p className="text-2xl font-bold text-gray-900">{formatBS(pesoPreviewBS)}</p>
+                    <p className="text-2xl font-bold text-texto tabular-nums">{formatBS(pesoPreviewBS)}</p>
                   )}
                   {pesoPreviewUSD !== null && (
-                    <p className="text-sm text-gray-400 mt-0.5">{formatUSD(pesoPreviewUSD)}</p>
+                    <p className="text-sm text-texto-4 mt-0.5 tabular-nums">{formatUSD(pesoPreviewUSD)}</p>
                   )}
                 </div>
               ) : gramosNum > 0 ? (
-                <div className="text-center py-3 bg-gray-50 rounded-xl">
-                  <p className="text-sm text-gray-400">Configura la tasa BCV para ver precio en Bs</p>
+                <div className="text-center py-3 rounded-xl bg-tarjeta-hundida">
+                  <p className="text-sm text-texto-4">Configura la tasa BCV para ver precio en Bs</p>
                 </div>
               ) : null}
 
-              <button
-                onClick={agregarPorPeso}
-                disabled={!gramos || gramosNum <= 0}
-                className="w-full bg-emerald-600 text-white py-4 rounded-xl text-lg font-bold disabled:opacity-40"
-              >
+              <Button variante="primario" onClick={agregarPorPeso} disabled={!gramos || gramosNum <= 0}>
                 Agregar al carrito
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -1496,25 +1493,19 @@ export default function CajaPage() {
 
       {showConfirmVaciar && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setShowConfirmVaciar(false)} />
-          <div className="relative bg-white dark:bg-slate-800 rounded-2xl w-full max-w-sm shadow-xl p-5">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Vaciar carrito</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
+          <div className="absolute inset-0 bg-overlay" onClick={() => setShowConfirmVaciar(false)} />
+          <div className="relative bg-tarjeta rounded-2xl w-full max-w-sm shadow-xl p-6">
+            <h2 className="text-lg font-bold text-texto mb-2">Vaciar carrito</h2>
+            <p className="text-texto-3 mb-5">
               Se {carrito.length === 1 ? 'va a quitar' : 'van a quitar'} {carrito.length} producto{carrito.length === 1 ? '' : 's'} del carrito. Esta acción no se puede deshacer.
             </p>
             <div className="flex gap-3">
-              <button
-                onClick={() => setShowConfirmVaciar(false)}
-                className="flex-1 py-3 rounded-xl bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 font-semibold"
-              >
+              <Button variante="secundario" onClick={() => setShowConfirmVaciar(false)} className="flex-1">
                 Cancelar
-              </button>
-              <button
-                onClick={confirmarVaciarCarrito}
-                className="flex-1 py-3 rounded-xl bg-red-600 text-white font-bold"
-              >
+              </Button>
+              <Button variante="destructivo" onClick={confirmarVaciarCarrito} className="flex-1">
                 Vaciar
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -1522,7 +1513,7 @@ export default function CajaPage() {
 
       {/* Toast */}
       {toast && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-5 py-2.5 rounded-xl text-sm font-medium z-50 shadow-lg whitespace-nowrap">
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-toast-fondo text-toast-texto px-5 py-2.5 rounded-xl text-sm font-medium z-50 shadow-lg whitespace-nowrap">
           {toast}
         </div>
       )}
