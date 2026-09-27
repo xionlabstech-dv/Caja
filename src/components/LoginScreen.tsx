@@ -71,8 +71,8 @@ export default function LoginScreen({ mensajeInicial, onMensajeVisto }: LoginScr
     <div className="min-h-screen relative overflow-hidden">
       {/* Split background */}
       <div className="absolute inset-0 flex flex-col pointer-events-none">
-        <div className="h-[58%] bg-marca" />
-        <div className="h-[42%] bg-gray-50 dark:bg-slate-900" />
+        <div className="h-1/2 bg-marca" />
+        <div className="h-1/2 bg-gray-50 dark:bg-slate-900" />
       </div>
 
       {/* Content */}
@@ -90,80 +90,70 @@ export default function LoginScreen({ mensajeInicial, onMensajeVisto }: LoginScr
         </div>
 
         {/* Form card */}
-        <div className="relative">
-          <svg
-            className="absolute -top-16 left-0 w-full h-16 text-tarjeta"
-            viewBox="0 0 400 64"
-            preserveAspectRatio="none"
-            aria-hidden="true"
-          >
-            <path d="M0,64 C100,0 300,0 400,64 L400,64 L0,64 Z" fill="currentColor" />
-          </svg>
-          <div className="relative bg-tarjeta rounded-t-3xl shadow-2xl px-6 pt-8 pb-12">
-            <h2 className="text-xl font-bold text-texto mb-6">
-              Iniciar sesión
-            </h2>
+        <div className="bg-tarjeta rounded-t-3xl shadow-2xl px-6 pt-8 pb-12">
+          <h2 className="text-xl font-bold text-texto mb-6">
+            Iniciar sesión
+          </h2>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-texto-2 mb-1.5">
-                  Usuario
-                </label>
-                <div className="relative">
-                  <Icon nombre="campoUsuario" tamano={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-texto-4 pointer-events-none" />
-                  <input
-                    type="text"
-                    value={usuario}
-                    onChange={e => { setUsuario(e.target.value); setError(''); }}
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                    autoComplete="username"
-                    placeholder="Tu usuario"
-                    className="w-full border border-borde-campo rounded-xl pl-11 pr-4 py-3 text-base bg-tarjeta text-texto placeholder:text-texto-4 focus:outline-none focus:border-foco"
-                  />
-                </div>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-texto-2 mb-1.5">
+                Usuario
+              </label>
+              <div className="relative">
+                <Icon nombre="campoUsuario" tamano={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-texto-4 pointer-events-none" />
+                <input
+                  type="text"
+                  value={usuario}
+                  onChange={e => { setUsuario(e.target.value); setError(''); }}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  autoComplete="username"
+                  placeholder="Tu usuario"
+                  className="w-full border border-borde-campo rounded-xl pl-11 pr-4 py-3 text-base bg-tarjeta text-texto placeholder:text-texto-4 focus:outline-none focus:border-foco"
+                />
               </div>
+            </div>
 
-              <div>
-                <label className="block text-sm font-medium text-texto-2 mb-1.5">
-                  Contraseña
-                </label>
-                <div className="relative">
-                  <Icon nombre="candado" tamano={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-texto-4 pointer-events-none" />
-                  <input
-                    type={mostrarPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={e => { setPassword(e.target.value); setError(''); }}
-                    autoComplete="current-password"
-                    placeholder="••••••••"
-                    className="w-full border border-borde-campo rounded-xl pl-11 pr-11 py-3 text-base bg-tarjeta text-texto placeholder:text-texto-4 focus:outline-none focus:border-foco"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setMostrarPassword(v => !v)}
-                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-texto-4"
-                    aria-label={mostrarPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
-                  >
-                    <Icon nombre={mostrarPassword ? 'ocultarPassword' : 'mostrarPassword'} tamano={18} />
-                  </button>
-                </div>
+            <div>
+              <label className="block text-sm font-medium text-texto-2 mb-1.5">
+                Contraseña
+              </label>
+              <div className="relative">
+                <Icon nombre="candado" tamano={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-texto-4 pointer-events-none" />
+                <input
+                  type={mostrarPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={e => { setPassword(e.target.value); setError(''); }}
+                  autoComplete="current-password"
+                  placeholder="••••••••"
+                  className="w-full border border-borde-campo rounded-xl pl-11 pr-11 py-3 text-base bg-tarjeta text-texto placeholder:text-texto-4 focus:outline-none focus:border-foco"
+                />
+                <button
+                  type="button"
+                  onClick={() => setMostrarPassword(v => !v)}
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-texto-4"
+                  aria-label={mostrarPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                >
+                  <Icon nombre={mostrarPassword ? 'ocultarPassword' : 'mostrarPassword'} tamano={18} />
+                </button>
               </div>
+            </div>
 
-              {error && (
-                <div className="p-3 bg-negativo-fondo border border-negativo-borde rounded-xl text-negativo text-sm text-center">
-                  {error}
-                </div>
-              )}
+            {error && (
+              <div className="p-3 bg-negativo-fondo border border-negativo-borde rounded-xl text-negativo text-sm text-center">
+                {error}
+              </div>
+            )}
 
-              <button
-                type="submit"
-                disabled={loading || !usuario.trim() || !password}
-                className="w-full bg-marca active:bg-marca-presion text-texto-invertido py-4 rounded-xl text-base font-bold transition-colors duration-150 disabled:opacity-40 disabled:cursor-not-allowed mt-2"
-              >
-                {loading ? 'Ingresando...' : 'Ingresar'}
-              </button>
-            </form>
-          </div>
+            <button
+              type="submit"
+              disabled={loading || !usuario.trim() || !password}
+              className="w-full bg-marca active:bg-marca-presion text-texto-invertido py-4 rounded-xl text-base font-bold transition-colors duration-150 disabled:opacity-40 disabled:cursor-not-allowed mt-2"
+            >
+              {loading ? 'Ingresando...' : 'Ingresar'}
+            </button>
+          </form>
         </div>
       </div>
     </div>
