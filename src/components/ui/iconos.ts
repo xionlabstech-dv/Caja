@@ -65,6 +65,7 @@ import {
   Loader2,
   Scale,
   ArrowLeftRight,
+  Menu,
   type LucideIcon,
 } from 'lucide-react';
 import type { MetodoPago } from '@/types';
@@ -83,6 +84,7 @@ export const ICONOS = {
   usuarios: Users,
   datosDelNegocio: Building2,
   perfil: CircleUserRound,
+  mas: Menu,
 
   // Tema
   modoOscuro: Moon,
