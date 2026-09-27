@@ -36,6 +36,7 @@ import ThemeToggle from '@/components/ThemeToggle';
 import StockBadge from '@/components/StockBadge';
 import Icon from '@/components/ui/Icon';
 import ChipFiltro from '@/components/ui/ChipFiltro';
+import Button from '@/components/ui/Button';
 import { TAMANO_ICONO } from '@/components/ui/iconos';
 
 function formatearNombre(nombre: string): string {
@@ -959,89 +960,102 @@ export default function CajaPage() {
       {/* Cart bottom sheet */}
       {showCarrito && (
         <div className="fixed inset-0 z-50 flex items-end">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setShowCarrito(false)} />
-          <div className="relative w-full max-w-lg mx-auto bg-white rounded-t-2xl max-h-[80vh] flex flex-col">
-            <div className="flex items-center justify-between p-4 border-b border-gray-100">
-              <h2 className="text-lg font-bold">Tu carrito</h2>
-              <div className="flex items-center gap-3">
-                {carrito.length > 0 && (
-                  <button
-                    onClick={() => setShowConfirmVaciar(true)}
-                    className="text-xs text-red-400 font-medium"
-                  >
-                    Vaciar
-                  </button>
-                )}
-                <button onClick={() => setShowCarrito(false)} className="p-1 text-gray-400">
-                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
+          <div className="absolute inset-0 bg-overlay" onClick={() => setShowCarrito(false)} />
+          <div className="relative w-full max-w-lg mx-auto bg-tarjeta rounded-t-2xl max-h-[80vh] flex flex-col">
+            <div className="flex items-center gap-2 p-4 pb-2.5">
+              <h2 className="flex-1 text-lg font-bold text-texto tracking-tight">Carrito</h2>
+              {carrito.length > 0 && (
+                <button
+                  onClick={() => setShowConfirmVaciar(true)}
+                  className="h-[34px] px-3 rounded-full bg-negativo-fondo border border-negativo-borde text-negativo text-xs font-semibold"
+                >
+                  Vaciar
                 </button>
-              </div>
+              )}
+              <button onClick={() => setShowCarrito(false)} className="p-2.5 -mr-2.5 text-texto-3" aria-label="Cerrar">
+                <Icon nombre="cerrar" tamano={22} />
+              </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            <div className="flex-1 overflow-y-auto px-4 pb-2 space-y-2.5">
               {carrito.map(item => (
-                <div key={item.lineId} className="flex items-start gap-3">
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm">
+                <div
+                  key={item.lineId}
+                  className="bg-tarjeta border border-borde-tarjeta rounded-2xl p-3 flex flex-col gap-2.5"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="min-w-0 font-semibold text-[15px] leading-snug text-texto">
                       {formatearNombre(item.producto.nombre)}
                       {item.esPorPeso && item.gramos && (
-                        <span className="text-gray-400"> — {item.gramos}g</span>
+                        <span className="font-medium text-texto-3"> — {item.gramos}g</span>
                       )}
                     </p>
-                    <p className="text-emerald-700 font-bold">
+                    <p className="flex-shrink-0 font-bold text-texto tabular-nums">
                       {formatBS(itemPrecioBS(item))}
                     </p>
                   </div>
 
-                  {item.esPorPeso ? (
-                    // Weight items: just a remove button, no quantity stepper
-                    <button
-                      onClick={() => removerItem(item.lineId)}
-                      className="w-8 h-8 rounded-full bg-red-50 flex items-center justify-center text-red-400 flex-shrink-0"
-                      aria-label="Eliminar"
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  ) : (
-                    // Regular items: quantity stepper
-                    <div className="flex items-center gap-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm text-texto-2 tabular-nums">
+                      {formatBS(precioBS(item.producto, tasa))}
+                      {item.esPorPeso ? ' / kg' : ' c/u'}
+                    </p>
+
+                    {item.esPorPeso ? (
+                      // Weight items: just a remove button, no quantity stepper
                       <button
-                        onClick={() => actualizarCantidad(item.lineId, -1)}
-                        className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-lg font-bold text-gray-700"
+                        onClick={() => removerItem(item.lineId)}
+                        className="flex-shrink-0 h-11 px-3.5 flex items-center gap-1.5 rounded-[10px] bg-negativo-fondo border border-negativo-borde text-negativo text-sm font-semibold"
                       >
-                        −
+                        <Icon nombre="cerrar" tamano={16} />
+                        Quitar
                       </button>
-                      <span className="w-6 text-center font-semibold">{item.cantidad}</span>
-                      <button
-                        onClick={() => actualizarCantidad(item.lineId, 1)}
-                        className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-lg font-bold text-emerald-700"
-                      >
-                        +
-                      </button>
-                    </div>
-                  )}
+                    ) : (
+                      // Regular items: quantity stepper
+                      <div className="flex-shrink-0 flex items-center gap-1">
+                        <button
+                          onClick={() => actualizarCantidad(item.lineId, -1)}
+                          aria-label="Quitar uno"
+                          className="w-11 h-11 rounded-[10px] border border-borde-campo bg-tarjeta-hundida flex items-center justify-center text-lg font-bold text-texto"
+                        >
+                          −
+                        </button>
+                        <span className="min-w-[36px] text-center font-bold text-texto tabular-nums">
+                          {item.cantidad}
+                        </span>
+                        <button
+                          onClick={() => actualizarCantidad(item.lineId, 1)}
+                          aria-label="Agregar uno"
+                          className="w-11 h-11 rounded-[10px] border border-borde-campo bg-tarjeta-hundida flex items-center justify-center text-lg font-bold text-texto"
+                        >
+                          +
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
 
-            <div className="p-4 border-t border-gray-100">
-              <div className="flex justify-between items-center mb-3">
-                <span className="text-gray-600">Total</span>
-                <div className="text-right">
-                  <p className="text-2xl font-bold text-gray-900">{formatBS(totalBS)}</p>
-                  {tasa > 0 && <p className="text-sm text-gray-400">{formatUSD(totalUSD)}</p>}
-                </div>
+            <div className="flex-none p-4 pt-3 flex flex-col gap-3 border-t border-borde-divisor">
+              <div className="p-4 rounded-2xl bg-tinta">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-tinta-etiqueta">
+                  Total a cobrar
+                </p>
+                <p className="mt-1.5 text-[28px] leading-none font-extrabold tracking-tight text-tinta-texto tabular-nums">
+                  {formatBS(totalBS)}
+                </p>
+                {tasa > 0 && (
+                  <p className="mt-2 text-sm text-tinta-etiqueta tabular-nums">{formatUSD(totalUSD)}</p>
+                )}
               </div>
-              <button
+              <Button
+                variante="primario"
                 onClick={() => { setShowCarrito(false); setShowPago(true); }}
-                className="w-full bg-emerald-600 text-white py-4 rounded-xl text-lg font-bold"
+                className="w-full"
               >
                 Cobrar
-              </button>
+              </Button>
             </div>
           </div>
         </div>
