@@ -57,6 +57,9 @@ import {
   Check,
   Share2,
   Ban,
+  User,
+  Eye,
+  EyeOff,
   type LucideIcon,
 } from 'lucide-react';
 import type { MetodoPago } from '@/types';
@@ -120,6 +123,11 @@ export const ICONOS = {
   // Pantalla "Resumen" (rediseño)
   compartir: Share2,
   anular: Ban,
+
+  // Pantalla "Login" (rediseño)
+  campoUsuario: User,
+  mostrarPassword: Eye,
+  ocultarPassword: EyeOff,
 
   // Métodos de pago
   metodoEfectivoBs: Banknote,
