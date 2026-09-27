@@ -36,6 +36,7 @@ import ThemeToggle from '@/components/ThemeToggle';
 import StockBadge from '@/components/StockBadge';
 import Icon from '@/components/ui/Icon';
 import ChipFiltro from '@/components/ui/ChipFiltro';
+import { TAMANO_ICONO } from '@/components/ui/iconos';
 
 function avatarColor(nombre: string): string {
   const idx = nombre.charCodeAt(0) % 8;
@@ -710,42 +711,48 @@ export default function CajaPage() {
   return (
     <div className="flex flex-col h-screen max-h-screen">
       {/* Header */}
-      <header className="bg-marca text-texto-invertido px-4 pt-4 pb-3 flex items-center justify-between sticky top-0 z-30">
+      <header className="bg-superficie-barra border-b border-borde-divisor px-4 pt-3.5 pb-3 flex items-center gap-2.5 sticky top-0 z-30">
         <button
           onClick={() => router.push('/perfil')}
-          className="flex items-center gap-1.5 min-w-0 text-left"
+          className="flex-1 min-w-0 flex items-center gap-1 text-left"
           aria-label="Ver mi perfil"
         >
           <div className="min-w-0">
-            <h1 className="text-xl font-bold truncate">
+            <h1 className="text-base font-bold text-texto truncate">
               Caja
               {negocioNombre && (
-                <span className="font-normal text-texto-invertido"> · {negocioNombre}</span>
+                <span className="font-normal text-texto-3"> · {negocioNombre}</span>
               )}
             </h1>
             {userNombre && (
-              <p className="text-texto-invertido text-xs truncate leading-tight">{userNombre}</p>
+              <p className="text-[11px] font-medium text-texto-3 truncate">{userNombre}</p>
             )}
           </div>
-          <Icon nombre="flechaAbajo" tamano={16} className="text-texto-invertido flex-shrink-0" />
+          <Icon nombre="flechaAbajo" tamano={TAMANO_ICONO.chip} className="text-texto-3 flex-shrink-0" />
         </button>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <ThemeToggle />
-          <div className="flex items-center gap-1.5 text-sm">
-            <span
-              className={`w-2 h-2 rounded-full ${
-                !isOnline ? 'bg-white/40' : pendientesCount > 0 ? 'bg-aviso animate-pulse' : 'bg-texto-invertido'
-              }`}
-            />
-            <span className="text-white/80 text-xs hidden sm:inline">
-              {!isOnline
-                ? 'Sin conexión'
-                : pendientesCount > 0
-                  ? `Sincronizando… ${pendientesCount}`
-                  : 'En línea'}
-            </span>
-          </div>
+        <div
+          className={`flex-none flex items-center gap-1.5 h-7 px-2.5 rounded-full ${
+            !isOnline || pendientesCount > 0 ? 'bg-aviso-fondo' : 'bg-marca-suave'
+          }`}
+        >
+          <Icon
+            nombre={!isOnline ? 'sinConexion' : 'enLinea'}
+            tamano={TAMANO_ICONO.chip}
+            className={!isOnline || pendientesCount > 0 ? 'text-aviso' : 'text-marca-suave-texto'}
+          />
+          <span
+            className={`text-[11px] font-semibold whitespace-nowrap ${
+              !isOnline || pendientesCount > 0 ? 'text-aviso' : 'text-marca-suave-texto'
+            }`}
+          >
+            {!isOnline
+              ? 'Sin conexión'
+              : pendientesCount > 0
+                ? `Sincronizando… ${pendientesCount}`
+                : 'En línea'}
+          </span>
         </div>
+        <ThemeToggle variant="neutro" />
       </header>
 
       {!isOnline && pendientesCount > 0 && (
