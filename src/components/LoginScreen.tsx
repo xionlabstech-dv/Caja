@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { conCandado } from '@/lib/sync';
 import Icon from '@/components/ui/Icon';
+import { TAMANO_ICONO } from '@/components/ui/iconos';
 
 interface LoginScreenProps {
   // Mensaje a mostrar de entrada (ej. "tu usuario fue desactivado") — viene
@@ -80,10 +81,7 @@ export default function LoginScreen({ mensajeInicial, onMensajeVisto }: LoginScr
         {/* Logo area */}
         <div className="flex-1 flex flex-col items-center justify-end pb-10 pt-16 px-6">
           <div className="w-20 h-20 bg-white/15 rounded-3xl flex items-center justify-center mb-5 shadow-lg">
-            <svg className="w-11 h-11 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
-            </svg>
+            <Icon nombre="caja" tamano={TAMANO_ICONO.login} className="text-white" />
           </div>
           <h1 className="text-white text-5xl font-bold tracking-tight">Caja</h1>
           <p className="text-texto-invertido text-sm mt-2">Sistema de punto de venta</p>

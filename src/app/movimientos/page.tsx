@@ -10,6 +10,8 @@ import { useApp } from '@/components/Providers';
 import { useGuardarRuta } from '@/lib/useGuardarRuta';
 import Scanner from '@/components/Scanner';
 import ThemeToggle from '@/components/ThemeToggle';
+import Icon from '@/components/ui/Icon';
+import { TAMANO_ICONO } from '@/components/ui/iconos';
 
 function formatearNombre(nombre: string): string {
   return nombre
@@ -272,9 +274,7 @@ export default function MovimientosPage() {
           onClick={abrirForm}
           className="w-full bg-emerald-600 text-white py-3.5 rounded-xl font-bold flex items-center justify-center gap-2"
         >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
+          <Icon nombre="agregar" tamano={TAMANO_ICONO.buscarYToggle} />
           Registrar movimiento
         </button>
 
@@ -302,10 +302,7 @@ export default function MovimientosPage() {
 
         {cargando ? (
           <div className="text-center text-gray-400 py-16">
-            <svg className="w-8 h-8 mx-auto mb-3 text-emerald-400 animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
+            <Icon nombre="cargando" tamano={32} className="mx-auto mb-3 text-emerald-400 animate-spin" />
           </div>
         ) : movimientosFiltrados.length === 0 ? (
           <div className="text-center text-gray-400 py-12">
@@ -355,9 +352,7 @@ export default function MovimientosPage() {
             <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-slate-700">
               <h2 className="text-lg font-bold text-gray-900 dark:text-white">Registrar movimiento</h2>
               <button onClick={() => setShowForm(false)} className="p-1 text-gray-400">
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <Icon nombre="cerrar" />
               </button>
             </div>
 
@@ -399,11 +394,7 @@ export default function MovimientosPage() {
                         className="flex-shrink-0 px-3 py-3 rounded-xl bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 flex items-center justify-center"
                         aria-label="Escanear código"
                       >
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                            d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2" />
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8v8M12 8v8M17 8v8" />
-                        </svg>
+                        <Icon nombre="escanearCodigoBarras" tamano={TAMANO_ICONO.buscarYToggle} />
                       </button>
                     </div>
                     {productosFiltrados.length > 0 && (

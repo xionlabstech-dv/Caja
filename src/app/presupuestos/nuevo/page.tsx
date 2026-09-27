@@ -292,9 +292,7 @@ export default function NuevoPresupuestoPage() {
     <div className="flex flex-col h-screen max-h-screen">
       <header className="bg-superficie-barra border-b border-borde-divisor px-4 pt-3.5 pb-3 flex items-center gap-2.5 sticky top-0 z-30">
         <button onClick={() => router.back()} className="p-1 -ml-1 flex-shrink-0 text-texto-3" aria-label="Volver">
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
+          <Icon nombre="flechaAbajo" tamano={TAMANO_ICONO.buscarYToggle} className="rotate-90" />
         </button>
         <div className="flex-1 min-w-0">
           <h1 className="text-base font-bold text-texto truncate">Nuevo presupuesto</h1>
@@ -376,11 +374,7 @@ export default function NuevoPresupuestoPage() {
           onClick={() => setShowCarrito(true)}
           className="fixed bottom-20 right-4 bg-marca text-texto-invertido px-5 py-3 rounded-2xl shadow-[0_8px_24px_rgba(4,135,90,0.35)] flex items-center gap-2 z-30"
         >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"
-            />
-          </svg>
+          <Icon nombre="caja" tamano={TAMANO_ICONO.buscarYToggle} />
           <span key={items.length} className="font-bold animate-cart-pop">{items.length}</span>
           <span className="hidden sm:inline">·</span>
           <span className="font-semibold text-sm hidden sm:inline">{formatBS(totalBs)}</span>
@@ -421,9 +415,7 @@ export default function NuevoPresupuestoPage() {
                 </div>
               )}
               <button onClick={() => quitarItem(item.id)} className="text-texto-4 flex-shrink-0" aria-label="Quitar">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <Icon nombre="cerrar" tamano={TAMANO_ICONO.secundario} />
               </button>
             </div>
           ))}
