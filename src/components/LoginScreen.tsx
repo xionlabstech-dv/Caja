@@ -71,8 +71,8 @@ export default function LoginScreen({ mensajeInicial, onMensajeVisto }: LoginScr
     <div className="min-h-screen relative overflow-hidden">
       {/* Split background */}
       <div className="absolute inset-0 flex flex-col pointer-events-none">
-        <div className="h-1/2 bg-marca" />
-        <div className="h-1/2 bg-gray-50 dark:bg-slate-900" />
+        <div className="h-[58%] bg-marca" />
+        <div className="h-[42%] bg-gray-50 dark:bg-slate-900" />
       </div>
 
       {/* Content */}
@@ -86,18 +86,18 @@ export default function LoginScreen({ mensajeInicial, onMensajeVisto }: LoginScr
             </svg>
           </div>
           <h1 className="text-white text-5xl font-bold tracking-tight">Caja</h1>
-          <p className="text-texto-invertido/80 text-sm mt-2">Sistema de punto de venta</p>
+          <p className="text-texto-invertido text-sm mt-2">Sistema de punto de venta</p>
         </div>
 
         {/* Form card */}
         <div className="relative">
           <svg
-            className="absolute -top-6 left-0 w-full h-6 text-tarjeta"
-            viewBox="0 0 400 24"
+            className="absolute -top-16 left-0 w-full h-16 text-tarjeta"
+            viewBox="0 0 400 64"
             preserveAspectRatio="none"
             aria-hidden="true"
           >
-            <path d="M0,24 C100,0 300,0 400,24 L400,24 L0,24 Z" fill="currentColor" />
+            <path d="M0,64 C100,0 300,0 400,64 L400,64 L0,64 Z" fill="currentColor" />
           </svg>
           <div className="relative bg-tarjeta rounded-t-3xl shadow-2xl px-6 pt-8 pb-12">
             <h2 className="text-xl font-bold text-texto mb-6">
