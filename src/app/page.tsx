@@ -812,7 +812,7 @@ export default function CajaPage() {
       )}
 
       {/* Product list */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-2">
         {cargandoProductos ? (
           <div className="text-center text-texto-4 py-16">
             <Icon nombre="cargando" tamano={32} className="mx-auto mb-3 text-marca animate-spin" />
@@ -982,7 +982,7 @@ export default function CajaPage() {
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-4 pb-2 space-y-2.5">
+            <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-2 space-y-2.5">
               {carrito.map(item => (
                 <div
                   key={item.lineId}
@@ -1098,7 +1098,7 @@ export default function CajaPage() {
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-4">
               <div className="p-5 rounded-2xl bg-tinta">
                 {modoPagoMixto && pagosMixtos.length > 0 && !pagoMixtoCompleto ? (
                   <>
