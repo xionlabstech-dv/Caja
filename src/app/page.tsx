@@ -29,10 +29,13 @@ import {
 import { precioBS, precioUSD, costoUSD, formatBS, formatUSD } from '@/lib/precio';
 import { pareceCodigoBarra } from '@/lib/barcode';
 import { compartirComprobante } from '@/lib/comprobante';
+import { stockBajo, debeOcultarStock } from '@/lib/stock';
 import { useApp } from '@/components/Providers';
 import Scanner from '@/components/Scanner';
 import ThemeToggle from '@/components/ThemeToggle';
 import StockBadge from '@/components/StockBadge';
+import Icon from '@/components/ui/Icon';
+import ChipFiltro from '@/components/ui/ChipFiltro';
 
 function avatarColor(nombre: string): string {
   const idx = nombre.charCodeAt(0) % 8;
@@ -82,6 +85,7 @@ export default function CajaPage() {
   const [productos, setProductos] = useState<Producto[]>([]);
   const [cargandoProductos, setCargandoProductos] = useState(true);
   const [busqueda, setBusqueda] = useState('');
+  const [chip, setChip] = useState<'todos' | 'porPeso' | 'bajo' | 'sin'>('todos');
   const [showPago, setShowPago] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [showPeso, setShowPeso] = useState(false);
@@ -160,13 +164,21 @@ export default function CajaPage() {
     setTimeout(() => setToast(''), 2500);
   };
 
-  const productosFiltrados = busqueda
-    ? productos.filter(
-        p =>
-          p.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
-          (p.codigo_barra && p.codigo_barra.includes(busqueda))
-      )
-    : productos;
+  const productosFiltrados = productos.filter(p => {
+    const coincideBusqueda =
+      !busqueda ||
+      p.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
+      (p.codigo_barra && p.codigo_barra.includes(busqueda));
+    if (!coincideBusqueda) return false;
+    if (chip === 'porPeso') return !!p.por_peso;
+    if (chip === 'bajo') {
+      return usaStock && p.controla_stock !== false && stockBajo(p.stock, p.stock_minimo);
+    }
+    if (chip === 'sin') {
+      return usaStock && p.controla_stock !== false && p.stock != null && p.stock <= 0;
+    }
+    return true;
+  });
 
   // Returns the Bs price for a single cart line (handles both regular and weight items)
   const itemPrecioBS = useCallback((item: ItemCarrito): number => {
@@ -698,7 +710,7 @@ export default function CajaPage() {
   return (
     <div className="flex flex-col h-screen max-h-screen">
       {/* Header */}
-      <header className="bg-emerald-600 text-white px-4 pt-4 pb-3 flex items-center justify-between sticky top-0 z-30">
+      <header className="bg-marca text-texto-invertido px-4 pt-4 pb-3 flex items-center justify-between sticky top-0 z-30">
         <button
           onClick={() => router.push('/perfil')}
           className="flex items-center gap-1.5 min-w-0 text-left"
@@ -708,29 +720,24 @@ export default function CajaPage() {
             <h1 className="text-xl font-bold truncate">
               Caja
               {negocioNombre && (
-                <span className="font-normal text-emerald-200"> · {negocioNombre}</span>
+                <span className="font-normal text-texto-invertido"> · {negocioNombre}</span>
               )}
             </h1>
             {userNombre && (
-              <p className="text-emerald-200 text-xs truncate leading-tight">{userNombre}</p>
+              <p className="text-texto-invertido text-xs truncate leading-tight">{userNombre}</p>
             )}
           </div>
-          <svg
-            className="w-4 h-4 text-emerald-200 flex-shrink-0"
-            fill="none" viewBox="0 0 24 24" stroke="currentColor"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
+          <Icon nombre="flechaAbajo" tamano={16} className="text-texto-invertido flex-shrink-0" />
         </button>
         <div className="flex items-center gap-2 flex-shrink-0">
           <ThemeToggle />
           <div className="flex items-center gap-1.5 text-sm">
             <span
               className={`w-2 h-2 rounded-full ${
-                !isOnline ? 'bg-gray-300' : pendientesCount > 0 ? 'bg-amber-300 animate-pulse' : 'bg-emerald-300'
+                !isOnline ? 'bg-white/40' : pendientesCount > 0 ? 'bg-aviso animate-pulse' : 'bg-texto-invertido'
               }`}
             />
-            <span className="text-emerald-100 text-xs hidden sm:inline">
+            <span className="text-white/80 text-xs hidden sm:inline">
               {!isOnline
                 ? 'Sin conexión'
                 : pendientesCount > 0
@@ -742,27 +749,15 @@ export default function CajaPage() {
       </header>
 
       {!isOnline && pendientesCount > 0 && (
-        <div className="mx-4 mt-3 p-2.5 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl text-gray-600 dark:text-gray-300 text-xs text-center">
+        <div className="mx-4 mt-3 p-2.5 bg-tarjeta-hundida border border-borde-campo rounded-xl text-texto-2 text-xs text-center">
           {pendientesCount} cambio{pendientesCount === 1 ? '' : 's'} guardado{pendientesCount === 1 ? '' : 's'} en el dispositivo, pendiente{pendientesCount === 1 ? '' : 's'} de sincronizar
         </div>
       )}
 
       {/* Search */}
-      <div className="px-4 py-3 bg-white border-b border-gray-200 flex gap-2">
+      <div className="px-4 py-3 bg-superficie-barra border-b border-borde-divisor flex gap-2">
         <div className="flex-1 relative">
-          <svg
-            className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-            />
-          </svg>
+          <Icon nombre="buscar" tamano={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-texto-4" />
           <input
             ref={searchRef}
             type="text"
@@ -770,42 +765,39 @@ export default function CajaPage() {
             onChange={e => setBusqueda(e.target.value)}
             onKeyDown={handleBuscadorKeyDown}
             placeholder="Buscar producto..."
-            className="w-full pl-9 pr-8 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-emerald-400"
+            className="w-full pl-9 pr-8 py-2.5 border border-borde-campo rounded-xl text-sm bg-tarjeta text-texto placeholder:text-texto-4 focus:outline-none focus:border-foco"
           />
           {busqueda && (
             <button
               onClick={() => setBusqueda('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-texto-4"
             >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
+              <Icon nombre="cerrar" tamano={16} />
             </button>
           )}
         </div>
         <button
           onClick={() => setShowScanner(true)}
-          className="bg-emerald-600 text-white p-2.5 rounded-xl flex items-center justify-center"
+          className="bg-marca active:bg-marca-presion text-texto-invertido p-2.5 rounded-xl flex items-center justify-center"
           aria-label="Escanear código"
         >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"
-            />
-          </svg>
+          <Icon nombre="escanearCodigoBarras" tamano={20} />
         </button>
       </div>
 
+      <div className="flex gap-2 overflow-x-auto px-4 pb-3 -mt-1">
+        <ChipFiltro activo={chip === 'todos'} onClick={() => setChip('todos')}>Todos</ChipFiltro>
+        <ChipFiltro activo={chip === 'porPeso'} onClick={() => setChip('porPeso')}>Por peso</ChipFiltro>
+        {usaStock && (
+          <>
+            <ChipFiltro activo={chip === 'bajo'} onClick={() => setChip('bajo')}>Stock bajo</ChipFiltro>
+            <ChipFiltro activo={chip === 'sin'} onClick={() => setChip('sin')}>Sin stock</ChipFiltro>
+          </>
+        )}
+      </div>
+
       {tasa === 0 && (
-        <div className="mx-4 mt-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-sm text-center">
+        <div className="mx-4 mt-3 p-3 bg-aviso-fondo border border-aviso-borde rounded-xl text-aviso text-sm text-center">
           Configura la tasa BCV para ver precios en Bs
         </div>
       )}
@@ -813,25 +805,19 @@ export default function CajaPage() {
       {/* Product list */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
         {cargandoProductos ? (
-          <div className="text-center text-gray-400 py-16">
-            <svg className="w-8 h-8 mx-auto mb-3 text-emerald-400 animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
+          <div className="text-center text-texto-4 py-16">
+            <Icon nombre="cargando" tamano={32} className="mx-auto mb-3 text-marca animate-spin" />
             <p className="text-sm">Cargando productos...</p>
           </div>
         ) : productos.length === 0 ? (
-          <div className="text-center text-gray-400 py-16">
-            <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10" />
-            </svg>
+          <div className="text-center text-texto-4 py-16">
+            <Icon nombre="sinProductos" tamano={48} className="mx-auto mb-3 text-texto-4" />
             <p className="font-medium">Sin productos</p>
             <p className="text-sm mt-1">Agrega productos en Inventario</p>
           </div>
         ) : productosFiltrados.length === 0 ? (
-          <div className="text-center text-gray-400 py-12">
-            <p>No se encontró &ldquo;{busqueda}&rdquo;</p>
+          <div className="text-center text-texto-4 py-12">
+            <p>{busqueda ? `No se encontró "${busqueda}"` : 'No hay productos en este filtro'}</p>
           </div>
         ) : (
           productosFiltrados.map(producto => {
@@ -847,33 +833,33 @@ export default function CajaPage() {
             return (
               <div
                 key={producto.id}
-                className="bg-white rounded-xl p-4 flex items-start gap-3 shadow-sm border border-gray-100"
+                className="bg-tarjeta rounded-xl p-4 flex items-start gap-3 shadow-sm border border-borde-tarjeta"
               >
                 <div className={`w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center ${avatarColor(producto.nombre)}`}>
                   <span className="text-white font-bold text-sm">{producto.nombre.charAt(0).toUpperCase()}</span>
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
-                    <p className="font-medium text-gray-900">{formatearNombre(producto.nombre)}</p>
+                    <p className="font-medium text-texto">{formatearNombre(producto.nombre)}</p>
                     {producto.por_peso && (
-                      <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium flex-shrink-0">
+                      <span className="text-xs bg-informativo-fondo text-informativo px-1.5 py-0.5 rounded-full font-medium flex-shrink-0">
                         /kg
                       </span>
                     )}
                   </div>
                   {pbs !== null ? (
                     <>
-                      <p className="text-2xl font-bold text-gray-900 mt-0.5">
+                      <p className="text-2xl font-bold text-texto mt-0.5">
                         {formatBS(pbs)}
-                        {producto.por_peso && <span className="text-sm font-normal text-gray-400"> / kg</span>}
+                        {producto.por_peso && <span className="text-sm font-normal text-texto-4"> / kg</span>}
                       </p>
-                      <p className="text-sm text-gray-400">
+                      <p className="text-sm text-texto-4">
                         {pusd !== null ? formatUSD(pusd) : ''}
                         {producto.por_peso ? ' / kg' : ''}
                       </p>
                     </>
                   ) : (
-                    <p className="text-sm text-gray-400 mt-1">
+                    <p className="text-sm text-texto-4 mt-1">
                       {producto.precio.toLocaleString('es-VE')} {producto.moneda}
                       {producto.por_peso ? ' / kg' : ''} · tasa no configurada
                     </p>
@@ -888,6 +874,23 @@ export default function CajaPage() {
                         isOnline={isOnline}
                         ultimaSincronizacion={ultimaSincronizacion}
                       />
+                      {producto.controla_stock !== false && producto.stock != null && producto.stock_minimo != null &&
+                        !debeOcultarStock(producto.stock, producto.stock_minimo, isOnline, ultimaSincronizacion) && (
+                          <div className="mt-1.5 h-1 w-full max-w-[120px] rounded-full bg-tarjeta-hundida overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${
+                                producto.stock <= 0
+                                  ? 'bg-negativo'
+                                  : stockBajo(producto.stock, producto.stock_minimo)
+                                    ? 'bg-aviso'
+                                    : 'bg-marca'
+                              }`}
+                              style={{
+                                width: `${Math.min(100, (producto.stock / (producto.stock_minimo * 3)) * 100)}%`,
+                              }}
+                            />
+                          </div>
+                        )}
                     </div>
                   )}
                 </div>
@@ -895,38 +898,31 @@ export default function CajaPage() {
                 {producto.por_peso ? (
                   <button
                     onClick={() => agregarAlCarrito(producto)}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold bg-emerald-600 text-white"
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold bg-marca active:bg-marca-presion text-texto-invertido"
                   >
                     {pesoCount > 0 && (
-                      <span className="bg-white/30 text-white text-xs font-bold px-1.5 py-0.5 rounded-full">
+                      <span className="bg-white/30 text-texto-invertido text-xs font-bold px-1.5 py-0.5 rounded-full">
                         {pesoCount}
                       </span>
                     )}
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                        d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" />
-                    </svg>
+                    <Icon nombre="balanza" tamano={16} />
                   </button>
                 ) : (
                   <button
                     onClick={() => agregarAlCarrito(producto)}
                     className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold transition-colors ${
                       enCarrito
-                        ? 'bg-emerald-100 text-emerald-700'
-                        : 'bg-emerald-600 text-white'
+                        ? 'bg-marca-suave text-marca-suave-texto'
+                        : 'bg-marca active:bg-marca-presion text-texto-invertido'
                     }`}
                   >
                     {enCarrito ? (
                       <>
                         <span>{enCarrito.cantidad}</span>
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                        </svg>
+                        <Icon nombre="agregar" tamano={16} />
                       </>
                     ) : (
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                      </svg>
+                      <Icon nombre="agregar" tamano={20} />
                     )}
                   </button>
                 )}
@@ -940,13 +936,9 @@ export default function CajaPage() {
       {totalItems > 0 && !showCarrito && !showPago && (
         <button
           onClick={() => setShowCarrito(true)}
-          className="fixed bottom-20 right-4 bg-emerald-600 text-white px-5 py-3 rounded-2xl shadow-xl shadow-emerald-900/30 flex items-center gap-2 z-30"
+          className="fixed bottom-20 right-4 bg-marca active:bg-marca-presion text-texto-invertido px-5 py-3 rounded-2xl shadow-xl flex items-center gap-2 z-30"
         >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"
-            />
-          </svg>
+          <Icon nombre="caja" tamano={20} />
           <span key={totalItems} className="font-bold animate-cart-pop">{totalItems}</span>
           <span className="hidden sm:inline">·</span>
           <span className="font-semibold text-sm hidden sm:inline">{formatBS(totalBS)}</span>
