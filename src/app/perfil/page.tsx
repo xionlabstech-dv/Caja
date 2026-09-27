@@ -12,6 +12,7 @@ import { supabase } from '@/lib/supabase';
 import { DatosNegocio } from '@/types';
 import ThemeToggle from '@/components/ThemeToggle';
 import Icon from '@/components/ui/Icon';
+import { TAMANO_ICONO } from '@/components/ui/iconos';
 
 // Duplicado a propósito — mismo patrón ya usado en page.tsx y en
 // presupuestos/nuevo/page.tsx, ninguno de los dos lo comparte desde un lib.
@@ -235,9 +236,7 @@ export default function PerfilPage() {
     <div>
       <header className="bg-superficie-barra border-b border-borde-divisor px-4 pt-3.5 pb-3 flex items-center gap-2.5">
         <button onClick={() => router.back()} className="p-1 -ml-1 flex-shrink-0 text-texto-3" aria-label="Volver">
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
+          <Icon nombre="flechaAbajo" tamano={TAMANO_ICONO.buscarYToggle} className="rotate-90" />
         </button>
         <h1 className="flex-1 min-w-0 text-base font-bold text-texto truncate">Perfil</h1>
         <ThemeToggle variant="neutro" />
