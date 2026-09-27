@@ -706,7 +706,7 @@ export default function CajaPage() {
     : null;
 
   return (
-    <div className="flex flex-col h-screen max-h-screen">
+    <div className="flex flex-col h-dvh max-h-dvh">
       {/* Header */}
       <header className="bg-superficie-barra border-b border-borde-divisor px-4 pt-3.5 pb-3 flex items-center gap-2.5 sticky top-0 z-30">
         <button
