@@ -11,6 +11,7 @@ import { updateUsaCostos, updateUsaStock, solicitarEliminacionNegocio, cancelarE
 import { supabase } from '@/lib/supabase';
 import { DatosNegocio } from '@/types';
 import ThemeToggle from '@/components/ThemeToggle';
+import ChecklistBienvenida from '@/components/ChecklistBienvenida';
 import Icon from '@/components/ui/Icon';
 import { TAMANO_ICONO } from '@/components/ui/iconos';
 
@@ -54,6 +55,11 @@ export default function PerfilPage() {
   const [passCargando, setPassCargando] = useState(false);
 
   const [showConfirmStock, setShowConfirmStock] = useState(false);
+
+  // Reabrir el checklist de bienvenida a demanda — estado local propio de
+  // esta pantalla, no atado a tutorialVisto del contexto: debe poder abrirse
+  // aunque tutorialVisto ya sea true (el caso normal al reabrirlo).
+  const [showTutorial, setShowTutorial] = useState(false);
 
   const [showEliminar, setShowEliminar] = useState(false);
   const [confirmacionNombre, setConfirmacionNombre] = useState('');
@@ -273,6 +279,15 @@ export default function PerfilPage() {
               <span className="flex-1 min-w-0 flex flex-col gap-0.5">
                 <span className="text-[15px] font-semibold text-texto">Cambiar mi contraseña</span>
                 <span className="text-xs text-texto-3">Solo cambia la tuya, no la de los demás</span>
+              </span>
+              <Icon nombre="flechaDerecha" tamano={16} className="flex-none text-texto-4" />
+            </button>
+            <button onClick={() => setShowTutorial(true)} className="flex items-center gap-3 min-h-[56px] px-3.5 py-3 bg-tarjeta text-left">
+              <span className="flex-none w-9 h-9 rounded-[10px] bg-tarjeta-hundida text-texto-3 flex items-center justify-center">
+                <Icon nombre="info" tamano={18} />
+              </span>
+              <span className="flex-1 min-w-0 flex flex-col gap-0.5">
+                <span className="text-[15px] font-semibold text-texto">Ver tutorial de bienvenida</span>
               </span>
               <Icon nombre="flechaDerecha" tamano={16} className="flex-none text-texto-4" />
             </button>
@@ -523,6 +538,10 @@ export default function PerfilPage() {
         <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-toast-fondo text-toast-texto px-5 py-2.5 rounded-xl text-sm font-medium z-50 shadow-lg max-w-xs text-center">
           {toast}
         </div>
+      )}
+
+      {showTutorial && (
+        <ChecklistBienvenida onCerrar={() => setShowTutorial(false)} />
       )}
     </div>
   );
