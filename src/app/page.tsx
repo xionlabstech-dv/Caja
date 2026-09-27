@@ -38,12 +38,6 @@ import Icon from '@/components/ui/Icon';
 import ChipFiltro from '@/components/ui/ChipFiltro';
 import { TAMANO_ICONO } from '@/components/ui/iconos';
 
-function avatarColor(nombre: string): string {
-  const idx = nombre.charCodeAt(0) % 8;
-  return ['bg-violet-500', 'bg-blue-500', 'bg-cyan-500', 'bg-teal-500',
-    'bg-emerald-500', 'bg-amber-500', 'bg-orange-500', 'bg-pink-500'][idx];
-}
-
 function formatearNombre(nombre: string): string {
   return nombre
     .toLowerCase()
@@ -761,46 +755,48 @@ export default function CajaPage() {
         </div>
       )}
 
-      {/* Search */}
-      <div className="px-4 py-3 bg-superficie-barra border-b border-borde-divisor flex gap-2">
-        <div className="flex-1 relative">
-          <Icon nombre="buscar" tamano={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-texto-4" />
-          <input
-            ref={searchRef}
-            type="text"
-            value={busqueda}
-            onChange={e => setBusqueda(e.target.value)}
-            onKeyDown={handleBuscadorKeyDown}
-            placeholder="Buscar producto..."
-            className="w-full pl-9 pr-8 py-2.5 border border-borde-campo rounded-xl text-sm bg-tarjeta text-texto placeholder:text-texto-4 focus:outline-none focus:border-foco"
-          />
-          {busqueda && (
-            <button
-              onClick={() => setBusqueda('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-texto-4"
-            >
-              <Icon nombre="cerrar" tamano={16} />
-            </button>
+      {/* Search + filtros: un solo bloque visual */}
+      <div className="px-4 pt-3 pb-2 bg-superficie-barra border-b border-borde-divisor flex flex-col gap-2.5">
+        <div className="flex gap-2">
+          <div className="flex-1 relative">
+            <Icon nombre="buscar" tamano={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-texto-4" />
+            <input
+              ref={searchRef}
+              type="text"
+              value={busqueda}
+              onChange={e => setBusqueda(e.target.value)}
+              onKeyDown={handleBuscadorKeyDown}
+              placeholder="Buscar producto..."
+              className="w-full pl-9 pr-8 py-2.5 border border-borde-campo rounded-xl text-sm bg-tarjeta text-texto placeholder:text-texto-4 focus:outline-none focus:border-foco"
+            />
+            {busqueda && (
+              <button
+                onClick={() => setBusqueda('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-texto-4"
+              >
+                <Icon nombre="cerrar" tamano={16} />
+              </button>
+            )}
+          </div>
+          <button
+            onClick={() => setShowScanner(true)}
+            className="bg-marca active:bg-marca-presion text-texto-invertido p-2.5 rounded-xl flex items-center justify-center"
+            aria-label="Escanear código"
+          >
+            <Icon nombre="escanearCodigoBarras" tamano={20} />
+          </button>
+        </div>
+
+        <div className="flex gap-2 overflow-x-auto -mx-4 px-4">
+          <ChipFiltro activo={chip === 'todos'} onClick={() => setChip('todos')}>Todos</ChipFiltro>
+          <ChipFiltro activo={chip === 'porPeso'} onClick={() => setChip('porPeso')}>Por peso</ChipFiltro>
+          {usaStock && (
+            <>
+              <ChipFiltro activo={chip === 'bajo'} onClick={() => setChip('bajo')}>Stock bajo</ChipFiltro>
+              <ChipFiltro activo={chip === 'sin'} onClick={() => setChip('sin')}>Sin stock</ChipFiltro>
+            </>
           )}
         </div>
-        <button
-          onClick={() => setShowScanner(true)}
-          className="bg-marca active:bg-marca-presion text-texto-invertido p-2.5 rounded-xl flex items-center justify-center"
-          aria-label="Escanear código"
-        >
-          <Icon nombre="escanearCodigoBarras" tamano={20} />
-        </button>
-      </div>
-
-      <div className="flex gap-2 overflow-x-auto px-4 pb-3 -mt-1">
-        <ChipFiltro activo={chip === 'todos'} onClick={() => setChip('todos')}>Todos</ChipFiltro>
-        <ChipFiltro activo={chip === 'porPeso'} onClick={() => setChip('porPeso')}>Por peso</ChipFiltro>
-        {usaStock && (
-          <>
-            <ChipFiltro activo={chip === 'bajo'} onClick={() => setChip('bajo')}>Stock bajo</ChipFiltro>
-            <ChipFiltro activo={chip === 'sin'} onClick={() => setChip('sin')}>Sin stock</ChipFiltro>
-          </>
-        )}
       </div>
 
       {tasa === 0 && (
@@ -840,99 +836,107 @@ export default function CajaPage() {
             return (
               <div
                 key={producto.id}
-                className="bg-tarjeta rounded-xl p-4 flex items-start gap-3 shadow-sm border border-borde-tarjeta"
+                className="bg-tarjeta rounded-xl p-4 flex flex-col gap-2.5 shadow-sm border border-borde-tarjeta"
               >
-                <div className={`w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center ${avatarColor(producto.nombre)}`}>
-                  <span className="text-white font-bold text-sm">{producto.nombre.charAt(0).toUpperCase()}</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <p className="font-medium text-texto">{formatearNombre(producto.nombre)}</p>
-                    {producto.por_peso && (
-                      <span className="text-xs bg-informativo-fondo text-informativo px-1.5 py-0.5 rounded-full font-medium flex-shrink-0">
-                        /kg
-                      </span>
-                    )}
-                  </div>
-                  {pbs !== null ? (
-                    <>
-                      <p className="text-2xl font-bold text-texto mt-0.5">
-                        {formatBS(pbs)}
-                        {producto.por_peso && <span className="text-sm font-normal text-texto-4"> / kg</span>}
-                      </p>
-                      <p className="text-sm text-texto-4">
-                        {pusd !== null ? formatUSD(pusd) : ''}
-                        {producto.por_peso ? ' / kg' : ''}
-                      </p>
-                    </>
-                  ) : (
-                    <p className="text-sm text-texto-4 mt-1">
-                      {producto.precio.toLocaleString('es-VE')} {producto.moneda}
-                      {producto.por_peso ? ' / kg' : ''} · tasa no configurada
-                    </p>
-                  )}
-                  {usaStock && (
-                    <div className="mt-1">
-                      <StockBadge
-                        stock={producto.stock}
-                        stockMinimo={producto.stock_minimo}
-                        controlaStock={producto.controla_stock}
-                        esPorPeso={producto.por_peso}
-                        isOnline={isOnline}
-                        ultimaSincronizacion={ultimaSincronizacion}
-                      />
-                      {producto.controla_stock !== false && producto.stock != null && producto.stock_minimo != null &&
-                        !debeOcultarStock(producto.stock, producto.stock_minimo, isOnline, ultimaSincronizacion) && (
-                          <div className="mt-1.5 h-1 w-full max-w-[120px] rounded-full bg-tarjeta-hundida overflow-hidden">
-                            <div
-                              className={`h-full rounded-full ${
-                                producto.stock <= 0
-                                  ? 'bg-negativo'
-                                  : stockBajo(producto.stock, producto.stock_minimo)
-                                    ? 'bg-aviso'
-                                    : 'bg-marca'
-                              }`}
-                              style={{
-                                width: `${Math.min(100, (producto.stock / (producto.stock_minimo * 3)) * 100)}%`,
-                              }}
-                            />
-                          </div>
-                        )}
+                {/* Fila 1: nombre + precio */}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <p className="font-medium text-texto">{formatearNombre(producto.nombre)}</p>
+                      {producto.por_peso && (
+                        <span className="text-xs bg-informativo-fondo text-informativo px-1.5 py-0.5 rounded-full font-medium flex-shrink-0">
+                          /kg
+                        </span>
+                      )}
                     </div>
-                  )}
-                </div>
-
-                {producto.por_peso ? (
-                  <button
-                    onClick={() => agregarAlCarrito(producto)}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold bg-marca active:bg-marca-presion text-texto-invertido"
-                  >
-                    {pesoCount > 0 && (
-                      <span className="bg-white/30 text-texto-invertido text-xs font-bold px-1.5 py-0.5 rounded-full">
-                        {pesoCount}
-                      </span>
-                    )}
-                    <Icon nombre="balanza" tamano={16} />
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => agregarAlCarrito(producto)}
-                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold transition-colors ${
-                      enCarrito
-                        ? 'bg-marca-suave text-marca-suave-texto'
-                        : 'bg-marca active:bg-marca-presion text-texto-invertido'
-                    }`}
-                  >
-                    {enCarrito ? (
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    {pbs !== null ? (
                       <>
-                        <span>{enCarrito.cantidad}</span>
-                        <Icon nombre="agregar" tamano={16} />
+                        <p className="text-2xl font-bold text-texto">
+                          {formatBS(pbs)}
+                          {producto.por_peso && <span className="text-sm font-normal text-texto-4"> / kg</span>}
+                        </p>
+                        <p className="text-sm text-texto-4">
+                          {pusd !== null ? formatUSD(pusd) : ''}
+                          {producto.por_peso ? ' / kg' : ''}
+                        </p>
                       </>
                     ) : (
-                      <Icon nombre="agregar" tamano={20} />
+                      <p className="text-sm text-texto-4">
+                        {producto.precio.toLocaleString('es-VE')} {producto.moneda}
+                        {producto.por_peso ? ' / kg' : ''} · tasa no configurada
+                      </p>
                     )}
-                  </button>
-                )}
+                  </div>
+                </div>
+
+                {/* Fila 2: stock (izquierda) + botón agregar (derecha, abajo) */}
+                <div className="flex items-end justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    {usaStock && (
+                      <>
+                        <StockBadge
+                          stock={producto.stock}
+                          stockMinimo={producto.stock_minimo}
+                          controlaStock={producto.controla_stock}
+                          esPorPeso={producto.por_peso}
+                          isOnline={isOnline}
+                          ultimaSincronizacion={ultimaSincronizacion}
+                        />
+                        {producto.controla_stock !== false && producto.stock != null && producto.stock_minimo != null &&
+                          !debeOcultarStock(producto.stock, producto.stock_minimo, isOnline, ultimaSincronizacion) && (
+                            <div className="mt-1.5 h-1 w-full max-w-[120px] rounded-full bg-tarjeta-hundida overflow-hidden">
+                              <div
+                                className={`h-full rounded-full ${
+                                  producto.stock <= 0
+                                    ? 'bg-negativo'
+                                    : stockBajo(producto.stock, producto.stock_minimo)
+                                      ? 'bg-aviso'
+                                      : 'bg-marca'
+                                }`}
+                                style={{
+                                  width: `${Math.min(100, (producto.stock / (producto.stock_minimo * 3)) * 100)}%`,
+                                }}
+                              />
+                            </div>
+                          )}
+                      </>
+                    )}
+                  </div>
+
+                  {producto.por_peso ? (
+                    <button
+                      onClick={() => agregarAlCarrito(producto)}
+                      className="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold bg-marca active:bg-marca-presion text-texto-invertido"
+                    >
+                      {pesoCount > 0 && (
+                        <span className="bg-white/30 text-texto-invertido text-xs font-bold px-1.5 py-0.5 rounded-full">
+                          {pesoCount}
+                        </span>
+                      )}
+                      <Icon nombre="balanza" tamano={16} />
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => agregarAlCarrito(producto)}
+                      className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold transition-colors ${
+                        enCarrito
+                          ? 'bg-marca-suave text-marca-suave-texto'
+                          : 'bg-marca active:bg-marca-presion text-texto-invertido'
+                      }`}
+                    >
+                      {enCarrito ? (
+                        <>
+                          <span>{enCarrito.cantidad}</span>
+                          <Icon nombre="agregar" tamano={16} />
+                        </>
+                      ) : (
+                        <Icon nombre="agregar" tamano={20} />
+                      )}
+                    </button>
+                  )}
+                </div>
               </div>
             );
           })
