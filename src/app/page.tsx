@@ -790,10 +790,11 @@ export default function CajaPage() {
           </button>
         </div>
 
-        {/* pb-1 + overflow visible: deja aire para que la barra de scroll del
-            navegador no quede pegada/pisando los chips (mismo ajuste que en
-            Inventario y Fiado) */}
-        <div className="flex gap-2 overflow-x-auto -mx-4 px-4 pb-1">
+        {/* pb-2 + overflow visible: deja aire para que la barra de scroll del
+            navegador no quede pegada/pisando los chips (mismo criterio que en
+            Inventario y Fiado, que usan pb-1 — acá Juan pidió más separación
+            todavía) */}
+        <div className="flex gap-2 overflow-x-auto -mx-4 px-4 pb-2">
           <ChipFiltro activo={chip === 'todos'} onClick={() => setChip('todos')}>Todos</ChipFiltro>
           <ChipFiltro activo={chip === 'porPeso'} onClick={() => setChip('porPeso')}>Por peso</ChipFiltro>
           {usaStock && (
@@ -855,6 +856,9 @@ export default function CajaPage() {
                         </span>
                       )}
                     </div>
+                    <p className="text-sm text-texto-2 mt-0.5 tabular-nums">
+                      {producto.codigo_barra || 'Sin código'}
+                    </p>
                   </div>
                   <div className="text-right flex-shrink-0">
                     {pbs !== null ? (
@@ -1396,22 +1400,20 @@ export default function CajaPage() {
           pantalla completa, y con el orden de énfasis que ya tenía Caja:
           "Nueva venta" primario, "Compartir comprobante" secundario. */}
       {ventaConfirmada && (
-        <div className="fixed inset-0 z-50 flex items-end">
-          <div className="absolute inset-0 bg-overlay" onClick={() => setVentaConfirmada(null)} />
-          <div className="relative w-full max-w-lg mx-auto bg-tarjeta rounded-t-2xl">
-            <div className="p-6 text-center">
-              <div className="w-16 h-16 bg-marca-suave rounded-full flex items-center justify-center mx-auto mb-3">
-                <Icon nombre="confirmar" tamano={32} className="text-marca-suave-texto" />
-              </div>
-              <h2 className="text-lg font-bold text-texto">Venta registrada</h2>
-              <p className="text-2xl font-bold text-marca mt-1 tabular-nums">
-                {formatBS(ventaConfirmada.venta.total_bs)}
-              </p>
-              {tasa > 0 && (
-                <p className="text-texto-4 text-sm tabular-nums">{formatUSD(ventaConfirmada.venta.total_usd)}</p>
-              )}
+        <div className="fixed inset-0 z-50 bg-superficie flex flex-col items-center justify-center p-6 text-center">
+          <div className="w-full max-w-sm">
+            <div className="w-16 h-16 bg-marca-suave rounded-full flex items-center justify-center mx-auto mb-3">
+              <Icon nombre="confirmar" tamano={32} className="text-marca-suave-texto" />
             </div>
-            <div className="p-4 pt-0 flex flex-col gap-2">
+            <h2 className="text-lg font-bold text-texto">Venta registrada</h2>
+            <p className="text-2xl font-bold text-marca mt-1 tabular-nums">
+              {formatBS(ventaConfirmada.venta.total_bs)}
+            </p>
+            {tasa > 0 && (
+              <p className="text-texto-4 text-sm tabular-nums">{formatUSD(ventaConfirmada.venta.total_usd)}</p>
+            )}
+
+            <div className="mt-6 flex flex-col gap-2">
               <Button variante="primario" onClick={() => setVentaConfirmada(null)}>
                 Nueva venta
               </Button>
