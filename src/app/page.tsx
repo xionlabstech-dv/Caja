@@ -37,7 +37,7 @@ import StockBadge from '@/components/StockBadge';
 import Icon from '@/components/ui/Icon';
 import ChipFiltro from '@/components/ui/ChipFiltro';
 import Button from '@/components/ui/Button';
-import { TAMANO_ICONO } from '@/components/ui/iconos';
+import { TAMANO_ICONO, ICONO_METODO_PAGO } from '@/components/ui/iconos';
 
 function formatearNombre(nombre: string): string {
   return nombre
@@ -377,13 +377,15 @@ export default function CajaPage() {
     const existeExacto = clientesFiado.some(c => c.nombre.toLowerCase() === busqueda);
     return (
       <div>
-        <label className="block text-sm text-gray-500 mb-1">Cliente</label>
+        <label className="block text-[11px] font-bold uppercase tracking-wide text-texto-3 mb-1.5">
+          Cliente
+        </label>
         <input
           type="text"
           value={busquedaClienteFiado}
           onChange={e => setBusquedaClienteFiado(e.target.value)}
           placeholder="Buscar o escribir nombre nuevo"
-          className="w-full border border-gray-300 rounded-xl p-3 text-base focus:outline-none focus:border-emerald-400 mb-2"
+          className="w-full h-[52px] px-3.5 rounded-xl bg-tarjeta-hundida border border-borde-campo text-base text-texto focus:outline-none focus:border-foco mb-2"
           autoFocus
         />
         <div className="max-h-40 overflow-y-auto space-y-1.5">
@@ -391,11 +393,11 @@ export default function CajaPage() {
             <button
               key={c.id}
               onClick={() => onElegir(c)}
-              className="w-full text-left px-3 py-2.5 rounded-xl bg-gray-50 flex items-center justify-between"
+              className="w-full text-left px-3.5 py-2.5 rounded-xl bg-tarjeta-hundida flex items-center justify-between"
             >
-              <span className="font-medium text-gray-800">{c.nombre}</span>
+              <span className="font-medium text-texto">{c.nombre}</span>
               {c.saldo_usd > 0 && (
-                <span className="text-xs text-orange-600 font-semibold flex-shrink-0 ml-2">
+                <span className="text-xs text-deuda font-semibold flex-shrink-0 ml-2">
                   Debe {formatUSD(c.saldo_usd)}
                 </span>
               )}
@@ -410,13 +412,13 @@ export default function CajaPage() {
                 setCreandoClienteFiado(false);
                 onElegir(nuevo);
               }}
-              className="w-full text-left px-3 py-2.5 rounded-xl bg-emerald-50 text-emerald-700 font-semibold disabled:opacity-50"
+              className="w-full text-left px-3.5 py-2.5 rounded-xl bg-marca-suave text-marca-suave-texto font-semibold disabled:opacity-50"
             >
               + Crear &quot;{busquedaClienteFiado.trim()}&quot;
             </button>
           )}
           {filtrados.length === 0 && !busqueda && (
-            <p className="text-xs text-gray-400 text-center py-2">Escribe para buscar o crear un cliente</p>
+            <p className="text-xs text-texto-4 text-center py-2">Escribe para buscar o crear un cliente</p>
           )}
         </div>
       </div>
@@ -1067,61 +1069,88 @@ export default function CajaPage() {
       {/* Payment sheet */}
       {showPago && (
         <div className="fixed inset-0 z-50 flex items-end">
-          <div className="absolute inset-0 bg-black/40" onClick={() => { cerrarPago(); setShowCarrito(true); }} />
-          <div className="relative w-full max-w-lg mx-auto bg-white rounded-t-2xl max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between p-4 border-b border-gray-100">
-              <div>
-                <h2 className="text-lg font-bold">{modoPagoMixto ? 'Pago mixto' : 'Método de pago'}</h2>
+          <div className="absolute inset-0 bg-overlay" onClick={() => { cerrarPago(); setShowCarrito(true); }} />
+          <div className="relative w-full max-w-lg mx-auto bg-tarjeta rounded-t-2xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center gap-1 p-4 pb-2.5">
+              <button
+                onClick={() => { cerrarPago(); setShowCarrito(true); }}
+                aria-label="Volver al carrito"
+                className="flex-shrink-0 p-2.5 -ml-2.5 text-texto-2"
+              >
+                <Icon nombre="flechaAbajo" tamano={22} className="rotate-90" />
+              </button>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-lg font-bold text-texto tracking-tight">
+                  {modoPagoMixto ? 'Pago mixto' : 'Cobrar'}
+                </h2>
                 {modoPagoMixto && (
-                  <button onClick={salirPagoMixto} className="text-xs text-gray-400 font-medium">
+                  <button onClick={salirPagoMixto} className="text-xs font-medium text-texto-3">
                     Volver a un solo método
                   </button>
                 )}
               </div>
               <button
                 onClick={() => { cerrarPago(); setShowCarrito(true); }}
-                className="p-1 text-gray-400"
+                aria-label="Cerrar"
+                className="flex-shrink-0 p-2.5 -mr-2.5 text-texto-3"
               >
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                </svg>
+                <Icon nombre="cerrar" tamano={22} />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4">
-              <div className="text-center py-4 mb-4 bg-emerald-50 rounded-xl">
+            <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
+              <div className="p-5 rounded-2xl bg-tinta">
                 {modoPagoMixto && pagosMixtos.length > 0 && !pagoMixtoCompleto ? (
                   <>
-                    <p className="text-xs font-semibold text-emerald-600 uppercase tracking-wide mb-1">Falta</p>
-                    <p className="text-3xl font-bold text-emerald-700">{formatBS(residuoMixtoBs)}</p>
-                    {tasa > 0 && <p className="text-gray-500 text-sm mt-1">{formatUSD(residuoMixtoUsd)}</p>}
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-tinta-etiqueta">Falta</p>
+                    <p className="mt-1.5 text-[32px] leading-none font-extrabold tracking-tight text-tinta-texto tabular-nums">
+                      {formatBS(residuoMixtoBs)}
+                    </p>
+                    {tasa > 0 && (
+                      <p className="mt-2 text-sm text-tinta-etiqueta tabular-nums">{formatUSD(residuoMixtoUsd)}</p>
+                    )}
                   </>
                 ) : (
                   <>
-                    <p className="text-3xl font-bold text-emerald-700">{formatBS(totalBS)}</p>
-                    {tasa > 0 && <p className="text-gray-500 text-sm mt-1">{formatUSD(totalUSD)}</p>}
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-tinta-etiqueta">Total a cobrar</p>
+                    <p className="mt-1.5 text-[32px] leading-none font-extrabold tracking-tight text-tinta-texto tabular-nums">
+                      {formatBS(totalBS)}
+                    </p>
+                    {tasa > 0 && (
+                      <p className="mt-2 text-sm text-tinta-etiqueta tabular-nums">{formatUSD(totalUSD)}</p>
+                    )}
                   </>
                 )}
+                <div className="mt-4 pt-3.5 border-t border-white/10 grid grid-cols-2 gap-3">
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-tinta-etiqueta">Productos</p>
+                    <p className="mt-1 text-xl font-bold text-tinta-texto tabular-nums">{totalItems}</p>
+                  </div>
+                  <div className="pl-3 border-l border-white/10">
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-tinta-etiqueta">Tasa</p>
+                    <p className="mt-1 text-xl font-bold text-tinta-texto tabular-nums">
+                      {tasa > 0 ? tasa.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                    </p>
+                  </div>
+                </div>
               </div>
 
               {modoPagoMixto ? (
-                <div>
+                <div className="flex flex-col gap-4">
                   {pagosMixtos.length > 0 && (
-                    <div className="space-y-2 mb-4">
+                    <div className="flex flex-col gap-2">
                       {pagosMixtos.map((p, i) => {
                         const info = METODOS_PAGO.find(m => m.id === p.metodo);
                         return (
-                          <div key={i} className="flex items-center justify-between bg-gray-50 rounded-xl px-3 py-2.5">
-                            <span className="text-sm font-medium text-gray-700">{info?.label ?? p.metodo}</span>
+                          <div key={i} className="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-tarjeta-hundida">
+                            <span className="text-sm font-semibold text-texto-2">{info?.label ?? p.metodo}</span>
                             <div className="flex items-center gap-3">
                               <div className="text-right">
-                                <p className="font-bold text-gray-900 text-sm">{formatBS(p.monto_bs)}</p>
-                                <p className="text-xs text-gray-400">{formatUSD(p.monto_usd)}</p>
+                                <p className="font-bold text-sm text-texto tabular-nums">{formatBS(p.monto_bs)}</p>
+                                <p className="text-xs text-texto-4 tabular-nums">{formatUSD(p.monto_usd)}</p>
                               </div>
-                              <button onClick={() => quitarPagoMixto(i)} className="text-gray-300" aria-label="Quitar pago">
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                </svg>
+                              <button onClick={() => quitarPagoMixto(i)} className="text-texto-4" aria-label="Quitar pago">
+                                <Icon nombre="cerrar" tamano={16} />
                               </button>
                             </div>
                           </div>
@@ -1131,7 +1160,7 @@ export default function CajaPage() {
                   )}
 
                   {pagoMixtoCompleto && (
-                    <div className="text-center py-3 rounded-xl bg-green-50 text-green-700 font-bold mb-2">
+                    <div className="text-center py-3 rounded-xl bg-marca-suave text-marca-suave-texto font-bold">
                       Pago completo — listo para confirmar
                     </div>
                   )}
@@ -1139,7 +1168,7 @@ export default function CajaPage() {
                   {!pagoMixtoCompleto && (
                     seleccionandoClienteCalculado ? (
                       <div>
-                        <p className="text-sm text-gray-500 mb-2">Fiar el resto a:</p>
+                        <p className="text-sm text-texto-3 mb-2">Fiar el resto a:</p>
                         {renderSelectorClienteFiado(c => {
                           agregarPagoMixtoCalculado('fiado', c.id);
                           setSeleccionandoClienteCalculado(false);
@@ -1147,18 +1176,20 @@ export default function CajaPage() {
                         })}
                         <button
                           onClick={() => { setSeleccionandoClienteCalculado(false); setBusquedaClienteFiado(''); }}
-                          className="text-xs text-gray-400 font-medium mt-2"
+                          className="text-xs font-medium text-texto-3 mt-2"
                         >
                           Cancelar
                         </button>
                       </div>
                     ) : (
-                    <>
-                      <p className="text-sm text-gray-500 mb-2">
+                    <div className="flex flex-col gap-3">
+                      <p className="text-sm text-texto-3">
                         {pagosMixtos.length === 0 ? 'Elige el primer método' : 'Elige el método para el resto'}
                       </p>
-                      <div className="grid grid-cols-3 gap-2 mb-3">
-                        {METODOS_PAGO.filter(m => !pagosMixtos.some(p => p.metodo === m.id)).map(m => (
+                      <div className="flex flex-col gap-2">
+                        {METODOS_PAGO.filter(m => !pagosMixtos.some(p => p.metodo === m.id)).map(m => {
+                          const activo = metodoMixtoActual === m.id;
+                          return (
                           <button
                             key={m.id}
                             onClick={() => {
@@ -1177,20 +1208,29 @@ export default function CajaPage() {
                                 agregarPagoMixtoCalculado(m.id);
                               }
                             }}
-                            className={`py-3 px-2 rounded-xl text-sm font-medium transition-colors text-center ${
-                              metodoMixtoActual === m.id
-                                ? 'bg-emerald-600 text-white shadow-sm'
-                                : 'bg-gray-100 text-gray-700'
+                            className={`w-full flex items-center gap-3 h-[60px] px-3.5 rounded-2xl border text-left transition-colors ${
+                              activo ? 'bg-marca-suave border-marca' : 'bg-tarjeta border-borde-tarjeta'
                             }`}
                           >
-                            {m.label}
+                            <span className={`flex-shrink-0 w-9 h-9 rounded-[10px] flex items-center justify-center ${
+                              activo ? 'bg-marca text-texto-invertido' : 'bg-tarjeta-hundida text-texto-2'
+                            }`}>
+                              <Icon nombre={ICONO_METODO_PAGO[m.id]} tamano={20} />
+                            </span>
+                            <span className="flex-1 min-w-0 font-semibold text-[15px] text-texto">{m.label}</span>
+                            <span className={`flex-shrink-0 w-[22px] h-[22px] rounded-full border-2 flex items-center justify-center ${
+                              activo ? 'bg-marca border-marca' : 'border-borde-campo'
+                            }`}>
+                              {activo && <Icon nombre="confirmar" tamano={14} className="text-texto-invertido" />}
+                            </span>
                           </button>
-                        ))}
+                          );
+                        })}
                       </div>
 
                       {pagosMixtos.length === 0 && metodoMixtoActual && (
-                        <div>
-                          <label className="block text-sm text-gray-500 mb-1">
+                        <div className="flex flex-col gap-2">
+                          <label className="text-[11px] font-bold uppercase tracking-wide text-texto-3">
                             Monto ({metodoMixtoActual === 'efectivo_usd' ? '$' : 'Bs'})
                           </label>
                           <div className="flex gap-2">
@@ -1199,8 +1239,8 @@ export default function CajaPage() {
                               step="0.01"
                               value={montoMixtoInput}
                               onChange={e => setMontoMixtoInput(e.target.value)}
-                              className="flex-1 min-w-0 border border-gray-300 rounded-xl p-3 text-xl font-bold focus:outline-none focus:border-emerald-400"
-                              placeholder="0.00"
+                              className="flex-1 min-w-0 h-[52px] px-3.5 rounded-xl bg-tarjeta-hundida border border-borde-campo text-xl font-bold text-texto tabular-nums focus:outline-none focus:border-foco"
+                              placeholder="0,00"
                               autoFocus={metodoMixtoActual !== 'fiado'}
                             />
                             <button
@@ -1210,19 +1250,19 @@ export default function CajaPage() {
                                 parseFloat(montoMixtoInput) <= 0 ||
                                 (metodoMixtoActual === 'fiado' && !clienteFiadoElegido)
                               }
-                              className="px-4 rounded-xl bg-emerald-600 text-white font-semibold disabled:opacity-40"
+                              className="px-4 rounded-xl bg-marca active:bg-marca-presion text-texto-invertido font-semibold disabled:opacity-40"
                             >
                               Agregar
                             </button>
                           </div>
                           {metodoMixtoActual === 'fiado' && (
-                            <div className="mt-3">
+                            <div className="mt-1">
                               {clienteFiadoElegido ? (
-                                <div className="flex items-center justify-between bg-orange-50 rounded-xl px-3 py-2.5">
-                                  <p className="font-semibold text-gray-800 text-sm">{clienteFiadoElegido.nombre}</p>
+                                <div className="flex items-center justify-between px-3.5 py-3 rounded-xl bg-deuda-fondo">
+                                  <p className="font-semibold text-sm text-texto">{clienteFiadoElegido.nombre}</p>
                                   <button
                                     onClick={() => { setClienteFiadoElegido(null); setBusquedaClienteFiado(''); }}
-                                    className="text-xs text-gray-400 font-medium"
+                                    className="text-xs font-medium text-texto-3"
                                   >
                                     Cambiar
                                   </button>
@@ -1232,14 +1272,16 @@ export default function CajaPage() {
                           )}
                         </div>
                       )}
-                    </>
+                    </div>
                     )
                   )}
                 </div>
               ) : (
-                <>
-                  <div className="grid grid-cols-3 gap-2 mb-4">
-                    {METODOS_PAGO.map(m => (
+                <div className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-2">
+                    {METODOS_PAGO.map(m => {
+                      const activo = metodo === m.id;
+                      return (
                       <button
                         key={m.id}
                         onClick={() => {
@@ -1251,30 +1293,44 @@ export default function CajaPage() {
                           // escribirlo de nuevo, solo confirma o crea.
                           setBusquedaClienteFiado(m.id === 'fiado' ? (presupuestoClienteNombre || '') : '');
                         }}
-                        className={`py-3 px-2 rounded-xl text-sm font-medium transition-colors text-center ${
-                          metodo === m.id
-                            ? 'bg-emerald-600 text-white shadow-sm'
-                            : 'bg-gray-100 text-gray-700'
+                        className={`w-full flex items-center gap-3 h-[60px] px-3.5 rounded-2xl border text-left transition-colors ${
+                          activo ? 'bg-marca-suave border-marca' : 'bg-tarjeta border-borde-tarjeta'
                         }`}
                       >
-                        {m.label}
+                        <span className={`flex-shrink-0 w-9 h-9 rounded-[10px] flex items-center justify-center ${
+                          activo ? 'bg-marca text-texto-invertido' : 'bg-tarjeta-hundida text-texto-2'
+                        }`}>
+                          <Icon nombre={ICONO_METODO_PAGO[m.id]} tamano={20} />
+                        </span>
+                        <span className="flex-1 min-w-0 font-semibold text-[15px] text-texto">{m.label}</span>
+                        <span className={`flex-shrink-0 w-[22px] h-[22px] rounded-full border-2 flex items-center justify-center ${
+                          activo ? 'bg-marca border-marca' : 'border-borde-campo'
+                        }`}>
+                          {activo && <Icon nombre="confirmar" tamano={14} className="text-texto-invertido" />}
+                        </span>
                       </button>
-                    ))}
+                      );
+                    })}
+
                     <button
                       onClick={iniciarPagoMixto}
-                      className="py-3 px-2 rounded-xl text-sm font-medium transition-colors text-center bg-gray-100 text-gray-700 flex flex-col items-center justify-center gap-1"
+                      className="w-full flex items-center gap-3 h-14 px-3.5 rounded-2xl border border-dashed border-borde-tarjeta text-left"
                     >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                          d="M8 7h12m0 0l-4-4m4 4l-4 4M16 17H4m0 0l4 4m-4-4l4-4" />
-                      </svg>
-                      Pago mixto
+                      <span className="flex-shrink-0 w-9 h-9 rounded-[10px] bg-informativo-fondo text-informativo flex items-center justify-center">
+                        <Icon nombre="pagoMixto" tamano={20} />
+                      </span>
+                      <span className="flex-1 min-w-0">
+                        <span className="block font-semibold text-[15px] text-texto">Pago mixto</span>
+                        <span className="block mt-0.5 text-xs text-texto-3">
+                          Combinar dos métodos — el resto se calcula solo
+                        </span>
+                      </span>
                     </button>
                   </div>
 
                   {(metodo === 'efectivo_bs' || metodo === 'efectivo_usd') && (
-                    <div className="mb-4">
-                      <label className="block text-sm text-gray-500 mb-1">
+                    <div className="flex flex-col gap-2">
+                      <label className="text-[11px] font-bold uppercase tracking-wide text-texto-3">
                         Monto recibido ({metodo === 'efectivo_bs' ? 'Bs' : '$'})
                       </label>
                       <input
@@ -1282,35 +1338,38 @@ export default function CajaPage() {
                         step="0.01"
                         value={montoRecibido}
                         onChange={e => setMontoRecibido(e.target.value)}
-                        className="w-full border border-gray-300 rounded-xl p-3 text-xl font-bold focus:outline-none focus:border-emerald-400"
-                        placeholder="0.00"
+                        className="h-[52px] px-3.5 rounded-xl bg-tarjeta-hundida border border-borde-campo text-xl font-bold text-texto tabular-nums focus:outline-none focus:border-foco"
+                        placeholder="0,00"
                         autoFocus
                       />
                       {montoRecibido && cambio !== null && (
-                        <div
-                          className={`mt-3 text-center text-xl font-bold py-3 rounded-xl ${
-                            cambio >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'
-                          }`}
-                        >
-                          {cambio >= 0
-                            ? `Cambio: ${metodo === 'efectivo_bs' ? formatBS(cambio) : formatUSD(cambio)}`
-                            : `Faltan: ${metodo === 'efectivo_bs' ? formatBS(-cambio) : formatUSD(-cambio)}`}
+                        <div className={`flex items-center justify-between px-3.5 py-3 rounded-xl ${
+                          cambio >= 0 ? 'bg-tarjeta-hundida' : 'bg-negativo-fondo border border-negativo-borde'
+                        }`}>
+                          <span className={`text-sm font-semibold ${cambio >= 0 ? 'text-texto-2' : 'text-negativo'}`}>
+                            {cambio >= 0 ? 'Vuelto' : 'Falta'}
+                          </span>
+                          <span className={`text-xl font-bold tabular-nums ${cambio >= 0 ? 'text-texto' : 'text-negativo'}`}>
+                            {cambio >= 0
+                              ? (metodo === 'efectivo_bs' ? formatBS(cambio) : formatUSD(cambio))
+                              : (metodo === 'efectivo_bs' ? formatBS(-cambio) : formatUSD(-cambio))}
+                          </span>
                         </div>
                       )}
                     </div>
                   )}
 
                   {metodo === 'fiado' && (
-                    <div className="mb-4">
+                    <div>
                       {clienteFiadoElegido ? (
-                        <div className="flex items-center justify-between bg-orange-50 rounded-xl px-3 py-2.5">
+                        <div className="flex items-center justify-between px-3.5 py-3 rounded-xl bg-deuda-fondo">
                           <div>
-                            <p className="text-xs text-orange-500 font-semibold uppercase">Fiado a</p>
-                            <p className="font-bold text-gray-800">{clienteFiadoElegido.nombre}</p>
+                            <p className="text-[11px] font-bold uppercase tracking-wide text-deuda">Fiado a</p>
+                            <p className="font-bold text-texto">{clienteFiadoElegido.nombre}</p>
                           </div>
                           <button
                             onClick={() => { setClienteFiadoElegido(null); setBusquedaClienteFiado(''); }}
-                            className="text-xs text-gray-400 font-medium"
+                            className="text-xs font-medium text-texto-3"
                           >
                             Cambiar
                           </button>
@@ -1318,18 +1377,14 @@ export default function CajaPage() {
                       ) : renderSelectorClienteFiado(c => setClienteFiadoElegido(c))}
                     </div>
                   )}
-                </>
+                </div>
               )}
             </div>
 
-            <div className="p-4 border-t border-gray-100">
-              <button
-                onClick={confirmarVenta}
-                disabled={!puedeConfirmar}
-                className="w-full bg-emerald-600 text-white py-4 rounded-xl text-lg font-bold disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                Confirmar Venta
-              </button>
+            <div className="flex-none p-4 pt-3 border-t border-borde-divisor">
+              <Button variante="primario" onClick={confirmarVenta} disabled={!puedeConfirmar} className="w-full">
+                {puedeConfirmar ? 'Confirmar cobro' : 'Elige el método de pago'}
+              </Button>
             </div>
           </div>
         </div>

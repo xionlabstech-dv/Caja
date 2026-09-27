@@ -64,6 +64,7 @@ import {
   PackageX,
   Loader2,
   Scale,
+  ArrowLeftRight,
   type LucideIcon,
 } from 'lucide-react';
 import type { MetodoPago } from '@/types';
@@ -138,6 +139,7 @@ export const ICONOS = {
   sinProductos: PackageX,
   cargando: Loader2,
   balanza: Scale,
+  pagoMixto: ArrowLeftRight,
 
   // Métodos de pago
   metodoEfectivoBs: Banknote,
