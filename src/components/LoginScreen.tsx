@@ -69,7 +69,7 @@ export default function LoginScreen({ mensajeInicial, onMensajeVisto }: LoginScr
     <div className="min-h-screen relative overflow-hidden">
       {/* Split background */}
       <div className="absolute inset-0 flex flex-col pointer-events-none">
-        <div className="h-1/2 bg-tinta" />
+        <div className="h-1/2 bg-marca" />
         <div className="h-1/2 bg-gray-50 dark:bg-slate-900" />
       </div>
 
@@ -84,18 +84,7 @@ export default function LoginScreen({ mensajeInicial, onMensajeVisto }: LoginScr
             </svg>
           </div>
           <h1 className="text-white text-5xl font-bold tracking-tight">Caja</h1>
-          <p className="text-tinta-etiqueta text-sm mt-2">Sistema de punto de venta</p>
-
-          {/* Ilustración de ambientación: mostrador con terminal de cobro —
-              trazo simple, mismo color que el ícono del carrito de arriba,
-              para que ambos se lean como parte del mismo sistema. */}
-          <svg className="w-14 h-7 text-white mt-5" fill="none" viewBox="0 0 96 48" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" d="M8 30h80" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M14 30v12h68V30" />
-            <rect x="38" y="14" width="20" height="16" rx="2" />
-            <path strokeLinecap="round" d="M42 19h12" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M58 14v-6l3 2 3-2v6" />
-          </svg>
+          <p className="text-texto-invertido/80 text-sm mt-2">Sistema de punto de venta</p>
         </div>
 
         {/* Form card */}
