@@ -66,6 +66,8 @@ import {
   Scale,
   ArrowLeftRight,
   Menu,
+  RefreshCw,
+  AlertCircle,
   type LucideIcon,
 } from 'lucide-react';
 import type { MetodoPago } from '@/types';
@@ -101,6 +103,8 @@ export const ICONOS = {
   cerrarSesion: LogOut,
   cerrar: X, // no es un concepto de negocio del brief: cierre de hoja/modal/toast
   info: Info,
+  actualizarApp: RefreshCw,
+  suspendido: AlertCircle,
 
   // Conexión
   enLinea: Wifi,

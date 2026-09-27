@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useApp } from './Providers';
+import Icon from '@/components/ui/Icon';
 
 const DIAS_AVISO = 5;
 
@@ -55,9 +56,7 @@ export default function EstadoBanner() {
             className="p-0.5 text-blue-400 dark:text-blue-500 flex-shrink-0"
             aria-label="Cerrar aviso"
           >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <Icon nombre="cerrar" tamano={14} />
           </button>
         </div>
       );

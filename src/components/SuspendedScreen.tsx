@@ -1,6 +1,8 @@
 'use client';
 
 import { useState } from 'react';
+import Icon from '@/components/ui/Icon';
+import { TAMANO_ICONO } from '@/components/ui/iconos';
 
 interface SuspendedScreenProps {
   isOnline: boolean;
@@ -39,10 +41,7 @@ export default function SuspendedScreen({ isOnline, onReintentar, onSignOut }: S
       <div className="relative z-10 flex flex-col min-h-screen max-w-sm mx-auto">
         <div className="flex-1 flex flex-col items-center justify-end pb-10 pt-16 px-6">
           <div className="w-20 h-20 bg-white/15 rounded-3xl flex items-center justify-center mb-5 shadow-lg">
-            <svg className="w-11 h-11 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-            </svg>
+            <Icon nombre="suspendido" tamano={TAMANO_ICONO.login} className="text-white" />
           </div>
           <h1 className="text-white text-2xl font-bold text-center">Servicio pausado</h1>
         </div>
