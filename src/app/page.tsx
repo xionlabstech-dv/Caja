@@ -788,7 +788,10 @@ export default function CajaPage() {
           </button>
         </div>
 
-        <div className="flex gap-2 overflow-x-auto -mx-4 px-4">
+        {/* pb-1 + overflow visible: deja aire para que la barra de scroll del
+            navegador no quede pegada/pisando los chips (mismo ajuste que en
+            Inventario y Fiado) */}
+        <div className="flex gap-2 overflow-x-auto -mx-4 px-4 pb-1">
           <ChipFiltro activo={chip === 'todos'} onClick={() => setChip('todos')}>Todos</ChipFiltro>
           <ChipFiltro activo={chip === 'porPeso'} onClick={() => setChip('porPeso')}>Por peso</ChipFiltro>
           {usaStock && (
