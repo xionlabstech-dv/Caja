@@ -60,6 +60,11 @@ import {
   User,
   Eye,
   EyeOff,
+  ChevronDown,
+  PackageX,
+  Loader2,
+  Scale,
+  ArrowLeftRight,
   type LucideIcon,
 } from 'lucide-react';
 import type { MetodoPago } from '@/types';
@@ -128,6 +133,13 @@ export const ICONOS = {
   campoUsuario: User,
   mostrarPassword: Eye,
   ocultarPassword: EyeOff,
+
+  // Pantalla "Caja" (rediseño)
+  flechaAbajo: ChevronDown,
+  sinProductos: PackageX,
+  cargando: Loader2,
+  balanza: Scale,
+  pagoMixto: ArrowLeftRight,
 
   // Métodos de pago
   metodoEfectivoBs: Banknote,

@@ -29,16 +29,15 @@ import {
 import { precioBS, precioUSD, costoUSD, formatBS, formatUSD } from '@/lib/precio';
 import { pareceCodigoBarra } from '@/lib/barcode';
 import { compartirComprobante } from '@/lib/comprobante';
+import { stockBajo, debeOcultarStock } from '@/lib/stock';
 import { useApp } from '@/components/Providers';
 import Scanner from '@/components/Scanner';
 import ThemeToggle from '@/components/ThemeToggle';
 import StockBadge from '@/components/StockBadge';
-
-function avatarColor(nombre: string): string {
-  const idx = nombre.charCodeAt(0) % 8;
-  return ['bg-violet-500', 'bg-blue-500', 'bg-cyan-500', 'bg-teal-500',
-    'bg-emerald-500', 'bg-amber-500', 'bg-orange-500', 'bg-pink-500'][idx];
-}
+import Icon from '@/components/ui/Icon';
+import ChipFiltro from '@/components/ui/ChipFiltro';
+import Button from '@/components/ui/Button';
+import { TAMANO_ICONO, ICONO_METODO_PAGO } from '@/components/ui/iconos';
 
 function formatearNombre(nombre: string): string {
   return nombre
@@ -82,6 +81,7 @@ export default function CajaPage() {
   const [productos, setProductos] = useState<Producto[]>([]);
   const [cargandoProductos, setCargandoProductos] = useState(true);
   const [busqueda, setBusqueda] = useState('');
+  const [chip, setChip] = useState<'todos' | 'porPeso' | 'bajo' | 'sin'>('todos');
   const [showPago, setShowPago] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [showPeso, setShowPeso] = useState(false);
@@ -160,13 +160,21 @@ export default function CajaPage() {
     setTimeout(() => setToast(''), 2500);
   };
 
-  const productosFiltrados = busqueda
-    ? productos.filter(
-        p =>
-          p.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
-          (p.codigo_barra && p.codigo_barra.includes(busqueda))
-      )
-    : productos;
+  const productosFiltrados = productos.filter(p => {
+    const coincideBusqueda =
+      !busqueda ||
+      p.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
+      (p.codigo_barra && p.codigo_barra.includes(busqueda));
+    if (!coincideBusqueda) return false;
+    if (chip === 'porPeso') return !!p.por_peso;
+    if (chip === 'bajo') {
+      return usaStock && p.controla_stock !== false && stockBajo(p.stock, p.stock_minimo);
+    }
+    if (chip === 'sin') {
+      return usaStock && p.controla_stock !== false && p.stock != null && p.stock <= 0;
+    }
+    return true;
+  });
 
   // Returns the Bs price for a single cart line (handles both regular and weight items)
   const itemPrecioBS = useCallback((item: ItemCarrito): number => {
@@ -369,13 +377,15 @@ export default function CajaPage() {
     const existeExacto = clientesFiado.some(c => c.nombre.toLowerCase() === busqueda);
     return (
       <div>
-        <label className="block text-sm text-gray-500 mb-1">Cliente</label>
+        <label className="block text-[11px] font-bold uppercase tracking-wide text-texto-3 mb-1.5">
+          Cliente
+        </label>
         <input
           type="text"
           value={busquedaClienteFiado}
           onChange={e => setBusquedaClienteFiado(e.target.value)}
           placeholder="Buscar o escribir nombre nuevo"
-          className="w-full border border-gray-300 rounded-xl p-3 text-base focus:outline-none focus:border-emerald-400 mb-2"
+          className="w-full h-[52px] px-3.5 rounded-xl bg-tarjeta-hundida border border-borde-campo text-base text-texto focus:outline-none focus:border-foco mb-2"
           autoFocus
         />
         <div className="max-h-40 overflow-y-auto space-y-1.5">
@@ -383,11 +393,11 @@ export default function CajaPage() {
             <button
               key={c.id}
               onClick={() => onElegir(c)}
-              className="w-full text-left px-3 py-2.5 rounded-xl bg-gray-50 flex items-center justify-between"
+              className="w-full text-left px-3.5 py-2.5 rounded-xl bg-tarjeta-hundida flex items-center justify-between"
             >
-              <span className="font-medium text-gray-800">{c.nombre}</span>
+              <span className="font-medium text-texto">{c.nombre}</span>
               {c.saldo_usd > 0 && (
-                <span className="text-xs text-orange-600 font-semibold flex-shrink-0 ml-2">
+                <span className="text-xs text-deuda font-semibold flex-shrink-0 ml-2">
                   Debe {formatUSD(c.saldo_usd)}
                 </span>
               )}
@@ -402,13 +412,13 @@ export default function CajaPage() {
                 setCreandoClienteFiado(false);
                 onElegir(nuevo);
               }}
-              className="w-full text-left px-3 py-2.5 rounded-xl bg-emerald-50 text-emerald-700 font-semibold disabled:opacity-50"
+              className="w-full text-left px-3.5 py-2.5 rounded-xl bg-marca-suave text-marca-suave-texto font-semibold disabled:opacity-50"
             >
               + Crear &quot;{busquedaClienteFiado.trim()}&quot;
             </button>
           )}
           {filtrados.length === 0 && !busqueda && (
-            <p className="text-xs text-gray-400 text-center py-2">Escribe para buscar o crear un cliente</p>
+            <p className="text-xs text-texto-4 text-center py-2">Escribe para buscar o crear un cliente</p>
           )}
         </div>
       </div>
@@ -696,142 +706,128 @@ export default function CajaPage() {
     : null;
 
   return (
-    <div className="flex flex-col h-screen max-h-screen">
+    <div className="flex flex-col h-dvh max-h-dvh">
       {/* Header */}
-      <header className="bg-emerald-600 text-white px-4 pt-4 pb-3 flex items-center justify-between sticky top-0 z-30">
+      <header className="bg-superficie-barra border-b border-borde-divisor px-4 pt-3.5 pb-3 flex items-center gap-2.5 sticky top-0 z-30">
         <button
           onClick={() => router.push('/perfil')}
-          className="flex items-center gap-1.5 min-w-0 text-left"
+          className="flex-1 min-w-0 flex items-center gap-1 text-left"
           aria-label="Ver mi perfil"
         >
           <div className="min-w-0">
-            <h1 className="text-xl font-bold truncate">
+            <h1 className="text-base font-bold text-texto truncate">
               Caja
               {negocioNombre && (
-                <span className="font-normal text-emerald-200"> · {negocioNombre}</span>
+                <span className="font-normal text-texto-3"> · {negocioNombre}</span>
               )}
             </h1>
             {userNombre && (
-              <p className="text-emerald-200 text-xs truncate leading-tight">{userNombre}</p>
+              <p className="text-[11px] font-medium text-texto-3 truncate">{userNombre}</p>
             )}
           </div>
-          <svg
-            className="w-4 h-4 text-emerald-200 flex-shrink-0"
-            fill="none" viewBox="0 0 24 24" stroke="currentColor"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
+          <Icon nombre="flechaAbajo" tamano={TAMANO_ICONO.chip} className="text-texto-3 flex-shrink-0" />
         </button>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <ThemeToggle />
-          <div className="flex items-center gap-1.5 text-sm">
-            <span
-              className={`w-2 h-2 rounded-full ${
-                !isOnline ? 'bg-gray-300' : pendientesCount > 0 ? 'bg-amber-300 animate-pulse' : 'bg-emerald-300'
-              }`}
-            />
-            <span className="text-emerald-100 text-xs hidden sm:inline">
-              {!isOnline
-                ? 'Sin conexión'
-                : pendientesCount > 0
-                  ? `Sincronizando… ${pendientesCount}`
-                  : 'En línea'}
-            </span>
-          </div>
+        <div
+          className={`flex-none flex items-center gap-1.5 h-7 px-2.5 rounded-full ${
+            !isOnline || pendientesCount > 0 ? 'bg-aviso-fondo' : 'bg-marca-suave'
+          }`}
+        >
+          <Icon
+            nombre={!isOnline ? 'sinConexion' : 'enLinea'}
+            tamano={TAMANO_ICONO.chip}
+            className={!isOnline || pendientesCount > 0 ? 'text-aviso' : 'text-marca-suave-texto'}
+          />
+          <span
+            className={`text-[11px] font-semibold whitespace-nowrap ${
+              !isOnline || pendientesCount > 0 ? 'text-aviso' : 'text-marca-suave-texto'
+            }`}
+          >
+            {!isOnline
+              ? 'Sin conexión'
+              : pendientesCount > 0
+                ? `Sincronizando… ${pendientesCount}`
+                : 'En línea'}
+          </span>
         </div>
+        <ThemeToggle variant="neutro" />
       </header>
 
       {!isOnline && pendientesCount > 0 && (
-        <div className="mx-4 mt-3 p-2.5 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl text-gray-600 dark:text-gray-300 text-xs text-center">
+        <div className="mx-4 mt-3 p-2.5 bg-tarjeta-hundida border border-borde-campo rounded-xl text-texto-2 text-xs text-center">
           {pendientesCount} cambio{pendientesCount === 1 ? '' : 's'} guardado{pendientesCount === 1 ? '' : 's'} en el dispositivo, pendiente{pendientesCount === 1 ? '' : 's'} de sincronizar
         </div>
       )}
 
-      {/* Search */}
-      <div className="px-4 py-3 bg-white border-b border-gray-200 flex gap-2">
-        <div className="flex-1 relative">
-          <svg
-            className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+      {/* Search + filtros: un solo bloque visual */}
+      <div className="px-4 pt-3 pb-2 bg-superficie-barra border-b border-borde-divisor flex flex-col gap-2.5">
+        <div className="flex gap-2">
+          <div className="flex-1 relative">
+            <Icon nombre="buscar" tamano={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-texto-4" />
+            <input
+              ref={searchRef}
+              type="text"
+              value={busqueda}
+              onChange={e => setBusqueda(e.target.value)}
+              onKeyDown={handleBuscadorKeyDown}
+              placeholder="Buscar producto..."
+              className="w-full pl-9 pr-8 py-2.5 border border-borde-campo rounded-xl text-sm bg-tarjeta text-texto placeholder:text-texto-4 focus:outline-none focus:border-foco"
             />
-          </svg>
-          <input
-            ref={searchRef}
-            type="text"
-            value={busqueda}
-            onChange={e => setBusqueda(e.target.value)}
-            onKeyDown={handleBuscadorKeyDown}
-            placeholder="Buscar producto..."
-            className="w-full pl-9 pr-8 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-emerald-400"
-          />
-          {busqueda && (
-            <button
-              onClick={() => setBusqueda('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
+            {busqueda && (
+              <button
+                onClick={() => setBusqueda('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-texto-4"
+              >
+                <Icon nombre="cerrar" tamano={16} />
+              </button>
+            )}
+          </div>
+          <button
+            onClick={() => setShowScanner(true)}
+            className="bg-marca active:bg-marca-presion text-texto-invertido p-2.5 rounded-xl flex items-center justify-center"
+            aria-label="Escanear código"
+          >
+            <Icon nombre="escanearCodigoBarras" tamano={20} />
+          </button>
+        </div>
+
+        {/* pb-2 + overflow visible: deja aire para que la barra de scroll del
+            navegador no quede pegada/pisando los chips (mismo criterio que en
+            Inventario y Fiado, que usan pb-1 — acá Juan pidió más separación
+            todavía) */}
+        <div className="flex gap-2 overflow-x-auto -mx-4 px-4 pb-2">
+          <ChipFiltro activo={chip === 'todos'} onClick={() => setChip('todos')}>Todos</ChipFiltro>
+          <ChipFiltro activo={chip === 'porPeso'} onClick={() => setChip('porPeso')}>Por peso</ChipFiltro>
+          {usaStock && (
+            <>
+              <ChipFiltro activo={chip === 'bajo'} onClick={() => setChip('bajo')}>Stock bajo</ChipFiltro>
+              <ChipFiltro activo={chip === 'sin'} onClick={() => setChip('sin')}>Sin stock</ChipFiltro>
+            </>
           )}
         </div>
-        <button
-          onClick={() => setShowScanner(true)}
-          className="bg-emerald-600 text-white p-2.5 rounded-xl flex items-center justify-center"
-          aria-label="Escanear código"
-        >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"
-            />
-          </svg>
-        </button>
       </div>
 
       {tasa === 0 && (
-        <div className="mx-4 mt-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-sm text-center">
+        <div className="mx-4 mt-3 p-3 bg-aviso-fondo border border-aviso-borde rounded-xl text-aviso text-sm text-center">
           Configura la tasa BCV para ver precios en Bs
         </div>
       )}
 
       {/* Product list */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-2">
         {cargandoProductos ? (
-          <div className="text-center text-gray-400 py-16">
-            <svg className="w-8 h-8 mx-auto mb-3 text-emerald-400 animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
+          <div className="text-center text-texto-4 py-16">
+            <Icon nombre="cargando" tamano={32} className="mx-auto mb-3 text-marca animate-spin" />
             <p className="text-sm">Cargando productos...</p>
           </div>
         ) : productos.length === 0 ? (
-          <div className="text-center text-gray-400 py-16">
-            <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10" />
-            </svg>
+          <div className="text-center text-texto-4 py-16">
+            <Icon nombre="sinProductos" tamano={48} className="mx-auto mb-3 text-texto-4" />
             <p className="font-medium">Sin productos</p>
             <p className="text-sm mt-1">Agrega productos en Inventario</p>
           </div>
         ) : productosFiltrados.length === 0 ? (
-          <div className="text-center text-gray-400 py-12">
-            <p>No se encontró &ldquo;{busqueda}&rdquo;</p>
+          <div className="text-center text-texto-4 py-12">
+            <p>{busqueda ? `No se encontró "${busqueda}"` : 'No hay productos en este filtro'}</p>
           </div>
         ) : (
           productosFiltrados.map(producto => {
@@ -847,89 +843,110 @@ export default function CajaPage() {
             return (
               <div
                 key={producto.id}
-                className="bg-white rounded-xl p-4 flex items-start gap-3 shadow-sm border border-gray-100"
+                className="bg-tarjeta rounded-xl p-4 flex flex-col gap-2.5 shadow-sm border border-borde-tarjeta"
               >
-                <div className={`w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center ${avatarColor(producto.nombre)}`}>
-                  <span className="text-white font-bold text-sm">{producto.nombre.charAt(0).toUpperCase()}</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <p className="font-medium text-gray-900">{formatearNombre(producto.nombre)}</p>
-                    {producto.por_peso && (
-                      <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium flex-shrink-0">
-                        /kg
-                      </span>
-                    )}
-                  </div>
-                  {pbs !== null ? (
-                    <>
-                      <p className="text-2xl font-bold text-gray-900 mt-0.5">
-                        {formatBS(pbs)}
-                        {producto.por_peso && <span className="text-sm font-normal text-gray-400"> / kg</span>}
-                      </p>
-                      <p className="text-sm text-gray-400">
-                        {pusd !== null ? formatUSD(pusd) : ''}
-                        {producto.por_peso ? ' / kg' : ''}
-                      </p>
-                    </>
-                  ) : (
-                    <p className="text-sm text-gray-400 mt-1">
-                      {producto.precio.toLocaleString('es-VE')} {producto.moneda}
-                      {producto.por_peso ? ' / kg' : ''} · tasa no configurada
-                    </p>
-                  )}
-                  {usaStock && (
-                    <div className="mt-1">
-                      <StockBadge
-                        stock={producto.stock}
-                        stockMinimo={producto.stock_minimo}
-                        controlaStock={producto.controla_stock}
-                        esPorPeso={producto.por_peso}
-                        isOnline={isOnline}
-                        ultimaSincronizacion={ultimaSincronizacion}
-                      />
+                {/* Fila 1: nombre + precio */}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <p className="font-medium text-texto">{formatearNombre(producto.nombre)}</p>
+                      {producto.por_peso && (
+                        <span className="text-xs bg-informativo-fondo text-informativo px-1.5 py-0.5 rounded-full font-medium flex-shrink-0">
+                          /kg
+                        </span>
+                      )}
                     </div>
-                  )}
-                </div>
-
-                {producto.por_peso ? (
-                  <button
-                    onClick={() => agregarAlCarrito(producto)}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold bg-emerald-600 text-white"
-                  >
-                    {pesoCount > 0 && (
-                      <span className="bg-white/30 text-white text-xs font-bold px-1.5 py-0.5 rounded-full">
-                        {pesoCount}
-                      </span>
-                    )}
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                        d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" />
-                    </svg>
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => agregarAlCarrito(producto)}
-                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold transition-colors ${
-                      enCarrito
-                        ? 'bg-emerald-100 text-emerald-700'
-                        : 'bg-emerald-600 text-white'
-                    }`}
-                  >
-                    {enCarrito ? (
+                    <p className="text-sm text-texto-2 mt-0.5 tabular-nums">
+                      {producto.codigo_barra || 'Sin código'}
+                    </p>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    {pbs !== null ? (
                       <>
-                        <span>{enCarrito.cantidad}</span>
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                        </svg>
+                        <p className="text-2xl font-bold text-texto">
+                          {formatBS(pbs)}
+                          {producto.por_peso && <span className="text-sm font-normal text-texto-4"> / kg</span>}
+                        </p>
+                        <p className="text-sm text-texto-4">
+                          {pusd !== null ? formatUSD(pusd) : ''}
+                          {producto.por_peso ? ' / kg' : ''}
+                        </p>
                       </>
                     ) : (
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                      </svg>
+                      <p className="text-sm text-texto-4">
+                        {producto.precio.toLocaleString('es-VE')} {producto.moneda}
+                        {producto.por_peso ? ' / kg' : ''} · tasa no configurada
+                      </p>
                     )}
-                  </button>
-                )}
+                  </div>
+                </div>
+
+                {/* Fila 2: stock (izquierda) + botón agregar (derecha, abajo) */}
+                <div className="flex items-end justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    {usaStock && (
+                      <>
+                        <StockBadge
+                          stock={producto.stock}
+                          stockMinimo={producto.stock_minimo}
+                          controlaStock={producto.controla_stock}
+                          esPorPeso={producto.por_peso}
+                          isOnline={isOnline}
+                          ultimaSincronizacion={ultimaSincronizacion}
+                        />
+                        {producto.controla_stock !== false && producto.stock != null && producto.stock_minimo != null &&
+                          !debeOcultarStock(producto.stock, producto.stock_minimo, isOnline, ultimaSincronizacion) && (
+                            <div className="mt-1.5 h-1 w-full max-w-[120px] rounded-full bg-tarjeta-hundida overflow-hidden">
+                              <div
+                                className={`h-full rounded-full ${
+                                  producto.stock <= 0
+                                    ? 'bg-negativo'
+                                    : stockBajo(producto.stock, producto.stock_minimo)
+                                      ? 'bg-aviso'
+                                      : 'bg-marca'
+                                }`}
+                                style={{
+                                  width: `${Math.min(100, (producto.stock / (producto.stock_minimo * 3)) * 100)}%`,
+                                }}
+                              />
+                            </div>
+                          )}
+                      </>
+                    )}
+                  </div>
+
+                  {producto.por_peso ? (
+                    <button
+                      onClick={() => agregarAlCarrito(producto)}
+                      className="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold bg-marca active:bg-marca-presion text-texto-invertido"
+                    >
+                      {pesoCount > 0 && (
+                        <span className="bg-white/30 text-texto-invertido text-xs font-bold px-1.5 py-0.5 rounded-full">
+                          {pesoCount}
+                        </span>
+                      )}
+                      <Icon nombre="balanza" tamano={16} />
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => agregarAlCarrito(producto)}
+                      className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold transition-colors ${
+                        enCarrito
+                          ? 'bg-marca-suave text-marca-suave-texto'
+                          : 'bg-marca active:bg-marca-presion text-texto-invertido'
+                      }`}
+                    >
+                      {enCarrito ? (
+                        <>
+                          <span>{enCarrito.cantidad}</span>
+                          <Icon nombre="agregar" tamano={16} />
+                        </>
+                      ) : (
+                        <Icon nombre="agregar" tamano={20} />
+                      )}
+                    </button>
+                  )}
+                </div>
               </div>
             );
           })
@@ -940,13 +957,9 @@ export default function CajaPage() {
       {totalItems > 0 && !showCarrito && !showPago && (
         <button
           onClick={() => setShowCarrito(true)}
-          className="fixed bottom-20 right-4 bg-emerald-600 text-white px-5 py-3 rounded-2xl shadow-xl shadow-emerald-900/30 flex items-center gap-2 z-30"
+          className="fixed bottom-20 right-4 bg-marca active:bg-marca-presion text-texto-invertido px-5 py-3 rounded-2xl shadow-xl flex items-center gap-2 z-30"
         >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"
-            />
-          </svg>
+          <Icon nombre="caja" tamano={20} />
           <span key={totalItems} className="font-bold animate-cart-pop">{totalItems}</span>
           <span className="hidden sm:inline">·</span>
           <span className="font-semibold text-sm hidden sm:inline">{formatBS(totalBS)}</span>
@@ -956,89 +969,102 @@ export default function CajaPage() {
       {/* Cart bottom sheet */}
       {showCarrito && (
         <div className="fixed inset-0 z-50 flex items-end">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setShowCarrito(false)} />
-          <div className="relative w-full max-w-lg mx-auto bg-white rounded-t-2xl max-h-[80vh] flex flex-col">
-            <div className="flex items-center justify-between p-4 border-b border-gray-100">
-              <h2 className="text-lg font-bold">Tu carrito</h2>
-              <div className="flex items-center gap-3">
-                {carrito.length > 0 && (
-                  <button
-                    onClick={() => setShowConfirmVaciar(true)}
-                    className="text-xs text-red-400 font-medium"
-                  >
-                    Vaciar
-                  </button>
-                )}
-                <button onClick={() => setShowCarrito(false)} className="p-1 text-gray-400">
-                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
+          <div className="absolute inset-0 bg-overlay" onClick={() => setShowCarrito(false)} />
+          <div className="relative w-full max-w-lg mx-auto bg-tarjeta rounded-t-2xl max-h-[80vh] flex flex-col">
+            <div className="flex items-center gap-2 p-4 pb-2.5">
+              <h2 className="flex-1 text-lg font-bold text-texto tracking-tight">Carrito</h2>
+              {carrito.length > 0 && (
+                <button
+                  onClick={() => setShowConfirmVaciar(true)}
+                  className="h-[34px] px-3 rounded-full bg-negativo-fondo border border-negativo-borde text-negativo text-xs font-semibold"
+                >
+                  Vaciar
                 </button>
-              </div>
+              )}
+              <button onClick={() => setShowCarrito(false)} className="p-2.5 -mr-2.5 text-texto-3" aria-label="Cerrar">
+                <Icon nombre="cerrar" tamano={22} />
+              </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-2 space-y-2.5">
               {carrito.map(item => (
-                <div key={item.lineId} className="flex items-start gap-3">
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm">
+                <div
+                  key={item.lineId}
+                  className="bg-tarjeta border border-borde-tarjeta rounded-2xl p-3 flex flex-col gap-2.5"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="min-w-0 font-semibold text-[15px] leading-snug text-texto">
                       {formatearNombre(item.producto.nombre)}
                       {item.esPorPeso && item.gramos && (
-                        <span className="text-gray-400"> — {item.gramos}g</span>
+                        <span className="font-medium text-texto-3"> — {item.gramos}g</span>
                       )}
                     </p>
-                    <p className="text-emerald-700 font-bold">
+                    <p className="flex-shrink-0 font-bold text-texto tabular-nums">
                       {formatBS(itemPrecioBS(item))}
                     </p>
                   </div>
 
-                  {item.esPorPeso ? (
-                    // Weight items: just a remove button, no quantity stepper
-                    <button
-                      onClick={() => removerItem(item.lineId)}
-                      className="w-8 h-8 rounded-full bg-red-50 flex items-center justify-center text-red-400 flex-shrink-0"
-                      aria-label="Eliminar"
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  ) : (
-                    // Regular items: quantity stepper
-                    <div className="flex items-center gap-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm text-texto-2 tabular-nums">
+                      {formatBS(precioBS(item.producto, tasa))}
+                      {item.esPorPeso ? ' / kg' : ' c/u'}
+                    </p>
+
+                    {item.esPorPeso ? (
+                      // Weight items: just a remove button, no quantity stepper
                       <button
-                        onClick={() => actualizarCantidad(item.lineId, -1)}
-                        className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-lg font-bold text-gray-700"
+                        onClick={() => removerItem(item.lineId)}
+                        className="flex-shrink-0 h-11 px-3.5 flex items-center gap-1.5 rounded-[10px] bg-negativo-fondo border border-negativo-borde text-negativo text-sm font-semibold"
                       >
-                        −
+                        <Icon nombre="cerrar" tamano={16} />
+                        Quitar
                       </button>
-                      <span className="w-6 text-center font-semibold">{item.cantidad}</span>
-                      <button
-                        onClick={() => actualizarCantidad(item.lineId, 1)}
-                        className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-lg font-bold text-emerald-700"
-                      >
-                        +
-                      </button>
-                    </div>
-                  )}
+                    ) : (
+                      // Regular items: quantity stepper
+                      <div className="flex-shrink-0 flex items-center gap-1">
+                        <button
+                          onClick={() => actualizarCantidad(item.lineId, -1)}
+                          aria-label="Quitar uno"
+                          className="w-11 h-11 rounded-[10px] border border-borde-campo bg-tarjeta-hundida flex items-center justify-center text-lg font-bold text-texto"
+                        >
+                          −
+                        </button>
+                        <span className="min-w-[36px] text-center font-bold text-texto tabular-nums">
+                          {item.cantidad}
+                        </span>
+                        <button
+                          onClick={() => actualizarCantidad(item.lineId, 1)}
+                          aria-label="Agregar uno"
+                          className="w-11 h-11 rounded-[10px] border border-borde-campo bg-tarjeta-hundida flex items-center justify-center text-lg font-bold text-texto"
+                        >
+                          +
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
 
-            <div className="p-4 border-t border-gray-100">
-              <div className="flex justify-between items-center mb-3">
-                <span className="text-gray-600">Total</span>
-                <div className="text-right">
-                  <p className="text-2xl font-bold text-gray-900">{formatBS(totalBS)}</p>
-                  {tasa > 0 && <p className="text-sm text-gray-400">{formatUSD(totalUSD)}</p>}
-                </div>
+            <div className="flex-none p-4 pt-3 flex flex-col gap-3 border-t border-borde-divisor">
+              <div className="p-4 rounded-2xl bg-tinta">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-tinta-etiqueta">
+                  Total a cobrar
+                </p>
+                <p className="mt-1.5 text-[28px] leading-none font-extrabold tracking-tight text-tinta-texto tabular-nums">
+                  {formatBS(totalBS)}
+                </p>
+                {tasa > 0 && (
+                  <p className="mt-2 text-sm text-tinta-etiqueta tabular-nums">{formatUSD(totalUSD)}</p>
+                )}
               </div>
-              <button
+              <Button
+                variante="primario"
                 onClick={() => { setShowCarrito(false); setShowPago(true); }}
-                className="w-full bg-emerald-600 text-white py-4 rounded-xl text-lg font-bold"
+                className="w-full"
               >
                 Cobrar
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -1047,61 +1073,88 @@ export default function CajaPage() {
       {/* Payment sheet */}
       {showPago && (
         <div className="fixed inset-0 z-50 flex items-end">
-          <div className="absolute inset-0 bg-black/40" onClick={() => { cerrarPago(); setShowCarrito(true); }} />
-          <div className="relative w-full max-w-lg mx-auto bg-white rounded-t-2xl max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between p-4 border-b border-gray-100">
-              <div>
-                <h2 className="text-lg font-bold">{modoPagoMixto ? 'Pago mixto' : 'Método de pago'}</h2>
+          <div className="absolute inset-0 bg-overlay" onClick={() => { cerrarPago(); setShowCarrito(true); }} />
+          <div className="relative w-full max-w-lg mx-auto bg-tarjeta rounded-t-2xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center gap-1 p-4 pb-2.5">
+              <button
+                onClick={() => { cerrarPago(); setShowCarrito(true); }}
+                aria-label="Volver al carrito"
+                className="flex-shrink-0 p-2.5 -ml-2.5 text-texto-2"
+              >
+                <Icon nombre="flechaAbajo" tamano={22} className="rotate-90" />
+              </button>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-lg font-bold text-texto tracking-tight">
+                  {modoPagoMixto ? 'Pago mixto' : 'Cobrar'}
+                </h2>
                 {modoPagoMixto && (
-                  <button onClick={salirPagoMixto} className="text-xs text-gray-400 font-medium">
+                  <button onClick={salirPagoMixto} className="text-xs font-medium text-texto-3">
                     Volver a un solo método
                   </button>
                 )}
               </div>
               <button
                 onClick={() => { cerrarPago(); setShowCarrito(true); }}
-                className="p-1 text-gray-400"
+                aria-label="Cerrar"
+                className="flex-shrink-0 p-2.5 -mr-2.5 text-texto-3"
               >
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                </svg>
+                <Icon nombre="cerrar" tamano={22} />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4">
-              <div className="text-center py-4 mb-4 bg-emerald-50 rounded-xl">
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-4">
+              <div className="p-5 rounded-2xl bg-tinta">
                 {modoPagoMixto && pagosMixtos.length > 0 && !pagoMixtoCompleto ? (
                   <>
-                    <p className="text-xs font-semibold text-emerald-600 uppercase tracking-wide mb-1">Falta</p>
-                    <p className="text-3xl font-bold text-emerald-700">{formatBS(residuoMixtoBs)}</p>
-                    {tasa > 0 && <p className="text-gray-500 text-sm mt-1">{formatUSD(residuoMixtoUsd)}</p>}
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-tinta-etiqueta">Falta</p>
+                    <p className="mt-1.5 text-[32px] leading-none font-extrabold tracking-tight text-tinta-texto tabular-nums">
+                      {formatBS(residuoMixtoBs)}
+                    </p>
+                    {tasa > 0 && (
+                      <p className="mt-2 text-sm text-tinta-etiqueta tabular-nums">{formatUSD(residuoMixtoUsd)}</p>
+                    )}
                   </>
                 ) : (
                   <>
-                    <p className="text-3xl font-bold text-emerald-700">{formatBS(totalBS)}</p>
-                    {tasa > 0 && <p className="text-gray-500 text-sm mt-1">{formatUSD(totalUSD)}</p>}
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-tinta-etiqueta">Total a cobrar</p>
+                    <p className="mt-1.5 text-[32px] leading-none font-extrabold tracking-tight text-tinta-texto tabular-nums">
+                      {formatBS(totalBS)}
+                    </p>
+                    {tasa > 0 && (
+                      <p className="mt-2 text-sm text-tinta-etiqueta tabular-nums">{formatUSD(totalUSD)}</p>
+                    )}
                   </>
                 )}
+                <div className="mt-4 pt-3.5 border-t border-white/10 grid grid-cols-2 gap-3">
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-tinta-etiqueta">Productos</p>
+                    <p className="mt-1 text-xl font-bold text-tinta-texto tabular-nums">{totalItems}</p>
+                  </div>
+                  <div className="pl-3 border-l border-white/10">
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-tinta-etiqueta">Tasa</p>
+                    <p className="mt-1 text-xl font-bold text-tinta-texto tabular-nums">
+                      {tasa > 0 ? tasa.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                    </p>
+                  </div>
+                </div>
               </div>
 
               {modoPagoMixto ? (
-                <div>
+                <div className="flex flex-col gap-4">
                   {pagosMixtos.length > 0 && (
-                    <div className="space-y-2 mb-4">
+                    <div className="flex flex-col gap-2">
                       {pagosMixtos.map((p, i) => {
                         const info = METODOS_PAGO.find(m => m.id === p.metodo);
                         return (
-                          <div key={i} className="flex items-center justify-between bg-gray-50 rounded-xl px-3 py-2.5">
-                            <span className="text-sm font-medium text-gray-700">{info?.label ?? p.metodo}</span>
+                          <div key={i} className="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-tarjeta-hundida">
+                            <span className="text-sm font-semibold text-texto-2">{info?.label ?? p.metodo}</span>
                             <div className="flex items-center gap-3">
                               <div className="text-right">
-                                <p className="font-bold text-gray-900 text-sm">{formatBS(p.monto_bs)}</p>
-                                <p className="text-xs text-gray-400">{formatUSD(p.monto_usd)}</p>
+                                <p className="font-bold text-sm text-texto tabular-nums">{formatBS(p.monto_bs)}</p>
+                                <p className="text-xs text-texto-4 tabular-nums">{formatUSD(p.monto_usd)}</p>
                               </div>
-                              <button onClick={() => quitarPagoMixto(i)} className="text-gray-300" aria-label="Quitar pago">
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                </svg>
+                              <button onClick={() => quitarPagoMixto(i)} className="text-texto-4" aria-label="Quitar pago">
+                                <Icon nombre="cerrar" tamano={16} />
                               </button>
                             </div>
                           </div>
@@ -1111,7 +1164,7 @@ export default function CajaPage() {
                   )}
 
                   {pagoMixtoCompleto && (
-                    <div className="text-center py-3 rounded-xl bg-green-50 text-green-700 font-bold mb-2">
+                    <div className="text-center py-3 rounded-xl bg-marca-suave text-marca-suave-texto font-bold">
                       Pago completo — listo para confirmar
                     </div>
                   )}
@@ -1119,7 +1172,7 @@ export default function CajaPage() {
                   {!pagoMixtoCompleto && (
                     seleccionandoClienteCalculado ? (
                       <div>
-                        <p className="text-sm text-gray-500 mb-2">Fiar el resto a:</p>
+                        <p className="text-sm text-texto-3 mb-2">Fiar el resto a:</p>
                         {renderSelectorClienteFiado(c => {
                           agregarPagoMixtoCalculado('fiado', c.id);
                           setSeleccionandoClienteCalculado(false);
@@ -1127,18 +1180,20 @@ export default function CajaPage() {
                         })}
                         <button
                           onClick={() => { setSeleccionandoClienteCalculado(false); setBusquedaClienteFiado(''); }}
-                          className="text-xs text-gray-400 font-medium mt-2"
+                          className="text-xs font-medium text-texto-3 mt-2"
                         >
                           Cancelar
                         </button>
                       </div>
                     ) : (
-                    <>
-                      <p className="text-sm text-gray-500 mb-2">
+                    <div className="flex flex-col gap-3">
+                      <p className="text-sm text-texto-3">
                         {pagosMixtos.length === 0 ? 'Elige el primer método' : 'Elige el método para el resto'}
                       </p>
-                      <div className="grid grid-cols-3 gap-2 mb-3">
-                        {METODOS_PAGO.filter(m => !pagosMixtos.some(p => p.metodo === m.id)).map(m => (
+                      <div className="flex flex-col gap-2">
+                        {METODOS_PAGO.filter(m => !pagosMixtos.some(p => p.metodo === m.id)).map(m => {
+                          const activo = metodoMixtoActual === m.id;
+                          return (
                           <button
                             key={m.id}
                             onClick={() => {
@@ -1157,20 +1212,29 @@ export default function CajaPage() {
                                 agregarPagoMixtoCalculado(m.id);
                               }
                             }}
-                            className={`py-3 px-2 rounded-xl text-sm font-medium transition-colors text-center ${
-                              metodoMixtoActual === m.id
-                                ? 'bg-emerald-600 text-white shadow-sm'
-                                : 'bg-gray-100 text-gray-700'
+                            className={`w-full flex items-center gap-3 h-[60px] px-3.5 rounded-2xl border text-left transition-colors ${
+                              activo ? 'bg-marca-suave border-marca' : 'bg-tarjeta border-borde-tarjeta'
                             }`}
                           >
-                            {m.label}
+                            <span className={`flex-shrink-0 w-9 h-9 rounded-[10px] flex items-center justify-center ${
+                              activo ? 'bg-marca text-texto-invertido' : 'bg-tarjeta-hundida text-texto-2'
+                            }`}>
+                              <Icon nombre={ICONO_METODO_PAGO[m.id]} tamano={20} />
+                            </span>
+                            <span className="flex-1 min-w-0 font-semibold text-[15px] text-texto">{m.label}</span>
+                            <span className={`flex-shrink-0 w-[22px] h-[22px] rounded-full border-2 flex items-center justify-center ${
+                              activo ? 'bg-marca border-marca' : 'border-borde-campo'
+                            }`}>
+                              {activo && <Icon nombre="confirmar" tamano={14} className="text-texto-invertido" />}
+                            </span>
                           </button>
-                        ))}
+                          );
+                        })}
                       </div>
 
                       {pagosMixtos.length === 0 && metodoMixtoActual && (
-                        <div>
-                          <label className="block text-sm text-gray-500 mb-1">
+                        <div className="flex flex-col gap-2">
+                          <label className="text-[11px] font-bold uppercase tracking-wide text-texto-3">
                             Monto ({metodoMixtoActual === 'efectivo_usd' ? '$' : 'Bs'})
                           </label>
                           <div className="flex gap-2">
@@ -1179,8 +1243,8 @@ export default function CajaPage() {
                               step="0.01"
                               value={montoMixtoInput}
                               onChange={e => setMontoMixtoInput(e.target.value)}
-                              className="flex-1 min-w-0 border border-gray-300 rounded-xl p-3 text-xl font-bold focus:outline-none focus:border-emerald-400"
-                              placeholder="0.00"
+                              className="flex-1 min-w-0 h-[52px] px-3.5 rounded-xl bg-tarjeta-hundida border border-borde-campo text-xl font-bold text-texto tabular-nums focus:outline-none focus:border-foco"
+                              placeholder="0,00"
                               autoFocus={metodoMixtoActual !== 'fiado'}
                             />
                             <button
@@ -1190,19 +1254,19 @@ export default function CajaPage() {
                                 parseFloat(montoMixtoInput) <= 0 ||
                                 (metodoMixtoActual === 'fiado' && !clienteFiadoElegido)
                               }
-                              className="px-4 rounded-xl bg-emerald-600 text-white font-semibold disabled:opacity-40"
+                              className="px-4 rounded-xl bg-marca active:bg-marca-presion text-texto-invertido font-semibold disabled:opacity-40"
                             >
                               Agregar
                             </button>
                           </div>
                           {metodoMixtoActual === 'fiado' && (
-                            <div className="mt-3">
+                            <div className="mt-1">
                               {clienteFiadoElegido ? (
-                                <div className="flex items-center justify-between bg-orange-50 rounded-xl px-3 py-2.5">
-                                  <p className="font-semibold text-gray-800 text-sm">{clienteFiadoElegido.nombre}</p>
+                                <div className="flex items-center justify-between px-3.5 py-3 rounded-xl bg-deuda-fondo">
+                                  <p className="font-semibold text-sm text-texto">{clienteFiadoElegido.nombre}</p>
                                   <button
                                     onClick={() => { setClienteFiadoElegido(null); setBusquedaClienteFiado(''); }}
-                                    className="text-xs text-gray-400 font-medium"
+                                    className="text-xs font-medium text-texto-3"
                                   >
                                     Cambiar
                                   </button>
@@ -1212,14 +1276,16 @@ export default function CajaPage() {
                           )}
                         </div>
                       )}
-                    </>
+                    </div>
                     )
                   )}
                 </div>
               ) : (
-                <>
-                  <div className="grid grid-cols-3 gap-2 mb-4">
-                    {METODOS_PAGO.map(m => (
+                <div className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-2">
+                    {METODOS_PAGO.map(m => {
+                      const activo = metodo === m.id;
+                      return (
                       <button
                         key={m.id}
                         onClick={() => {
@@ -1231,30 +1297,44 @@ export default function CajaPage() {
                           // escribirlo de nuevo, solo confirma o crea.
                           setBusquedaClienteFiado(m.id === 'fiado' ? (presupuestoClienteNombre || '') : '');
                         }}
-                        className={`py-3 px-2 rounded-xl text-sm font-medium transition-colors text-center ${
-                          metodo === m.id
-                            ? 'bg-emerald-600 text-white shadow-sm'
-                            : 'bg-gray-100 text-gray-700'
+                        className={`w-full flex items-center gap-3 h-[60px] px-3.5 rounded-2xl border text-left transition-colors ${
+                          activo ? 'bg-marca-suave border-marca' : 'bg-tarjeta border-borde-tarjeta'
                         }`}
                       >
-                        {m.label}
+                        <span className={`flex-shrink-0 w-9 h-9 rounded-[10px] flex items-center justify-center ${
+                          activo ? 'bg-marca text-texto-invertido' : 'bg-tarjeta-hundida text-texto-2'
+                        }`}>
+                          <Icon nombre={ICONO_METODO_PAGO[m.id]} tamano={20} />
+                        </span>
+                        <span className="flex-1 min-w-0 font-semibold text-[15px] text-texto">{m.label}</span>
+                        <span className={`flex-shrink-0 w-[22px] h-[22px] rounded-full border-2 flex items-center justify-center ${
+                          activo ? 'bg-marca border-marca' : 'border-borde-campo'
+                        }`}>
+                          {activo && <Icon nombre="confirmar" tamano={14} className="text-texto-invertido" />}
+                        </span>
                       </button>
-                    ))}
+                      );
+                    })}
+
                     <button
                       onClick={iniciarPagoMixto}
-                      className="py-3 px-2 rounded-xl text-sm font-medium transition-colors text-center bg-gray-100 text-gray-700 flex flex-col items-center justify-center gap-1"
+                      className="w-full flex items-center gap-3 h-14 px-3.5 rounded-2xl border border-dashed border-borde-tarjeta text-left"
                     >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                          d="M8 7h12m0 0l-4-4m4 4l-4 4M16 17H4m0 0l4 4m-4-4l4-4" />
-                      </svg>
-                      Pago mixto
+                      <span className="flex-shrink-0 w-9 h-9 rounded-[10px] bg-informativo-fondo text-informativo flex items-center justify-center">
+                        <Icon nombre="pagoMixto" tamano={20} />
+                      </span>
+                      <span className="flex-1 min-w-0">
+                        <span className="block font-semibold text-[15px] text-texto">Pago mixto</span>
+                        <span className="block mt-0.5 text-xs text-texto-3">
+                          Combinar dos métodos — el resto se calcula solo
+                        </span>
+                      </span>
                     </button>
                   </div>
 
                   {(metodo === 'efectivo_bs' || metodo === 'efectivo_usd') && (
-                    <div className="mb-4">
-                      <label className="block text-sm text-gray-500 mb-1">
+                    <div className="flex flex-col gap-2">
+                      <label className="text-[11px] font-bold uppercase tracking-wide text-texto-3">
                         Monto recibido ({metodo === 'efectivo_bs' ? 'Bs' : '$'})
                       </label>
                       <input
@@ -1262,35 +1342,38 @@ export default function CajaPage() {
                         step="0.01"
                         value={montoRecibido}
                         onChange={e => setMontoRecibido(e.target.value)}
-                        className="w-full border border-gray-300 rounded-xl p-3 text-xl font-bold focus:outline-none focus:border-emerald-400"
-                        placeholder="0.00"
+                        className="h-[52px] px-3.5 rounded-xl bg-tarjeta-hundida border border-borde-campo text-xl font-bold text-texto tabular-nums focus:outline-none focus:border-foco"
+                        placeholder="0,00"
                         autoFocus
                       />
                       {montoRecibido && cambio !== null && (
-                        <div
-                          className={`mt-3 text-center text-xl font-bold py-3 rounded-xl ${
-                            cambio >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'
-                          }`}
-                        >
-                          {cambio >= 0
-                            ? `Cambio: ${metodo === 'efectivo_bs' ? formatBS(cambio) : formatUSD(cambio)}`
-                            : `Faltan: ${metodo === 'efectivo_bs' ? formatBS(-cambio) : formatUSD(-cambio)}`}
+                        <div className={`flex items-center justify-between px-3.5 py-3 rounded-xl ${
+                          cambio >= 0 ? 'bg-tarjeta-hundida' : 'bg-negativo-fondo border border-negativo-borde'
+                        }`}>
+                          <span className={`text-sm font-semibold ${cambio >= 0 ? 'text-texto-2' : 'text-negativo'}`}>
+                            {cambio >= 0 ? 'Vuelto' : 'Falta'}
+                          </span>
+                          <span className={`text-xl font-bold tabular-nums ${cambio >= 0 ? 'text-texto' : 'text-negativo'}`}>
+                            {cambio >= 0
+                              ? (metodo === 'efectivo_bs' ? formatBS(cambio) : formatUSD(cambio))
+                              : (metodo === 'efectivo_bs' ? formatBS(-cambio) : formatUSD(-cambio))}
+                          </span>
                         </div>
                       )}
                     </div>
                   )}
 
                   {metodo === 'fiado' && (
-                    <div className="mb-4">
+                    <div>
                       {clienteFiadoElegido ? (
-                        <div className="flex items-center justify-between bg-orange-50 rounded-xl px-3 py-2.5">
+                        <div className="flex items-center justify-between px-3.5 py-3 rounded-xl bg-deuda-fondo">
                           <div>
-                            <p className="text-xs text-orange-500 font-semibold uppercase">Fiado a</p>
-                            <p className="font-bold text-gray-800">{clienteFiadoElegido.nombre}</p>
+                            <p className="text-[11px] font-bold uppercase tracking-wide text-deuda">Fiado a</p>
+                            <p className="font-bold text-texto">{clienteFiadoElegido.nombre}</p>
                           </div>
                           <button
                             onClick={() => { setClienteFiadoElegido(null); setBusquedaClienteFiado(''); }}
-                            className="text-xs text-gray-400 font-medium"
+                            className="text-xs font-medium text-texto-3"
                           >
                             Cambiar
                           </button>
@@ -1298,57 +1381,50 @@ export default function CajaPage() {
                       ) : renderSelectorClienteFiado(c => setClienteFiadoElegido(c))}
                     </div>
                   )}
-                </>
+                </div>
               )}
             </div>
 
-            <div className="p-4 border-t border-gray-100">
-              <button
-                onClick={confirmarVenta}
-                disabled={!puedeConfirmar}
-                className="w-full bg-emerald-600 text-white py-4 rounded-xl text-lg font-bold disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                Confirmar Venta
-              </button>
+            <div className="flex-none p-4 pt-3 border-t border-borde-divisor">
+              <Button variante="primario" onClick={confirmarVenta} disabled={!puedeConfirmar} className="w-full">
+                {puedeConfirmar ? 'Confirmar cobro' : 'Elige el método de pago'}
+              </Button>
             </div>
           </div>
         </div>
       )}
 
       {/* Venta confirmada — momento natural para compartir el comprobante,
-          el cliente sigue ahí parado. */}
+          el cliente sigue ahí parado. Mismo lenguaje visual que "Presupuesto
+          guardado" (presupuestos/nuevo), pero como hoja inferior en vez de
+          pantalla completa, y con el orden de énfasis que ya tenía Caja:
+          "Nueva venta" primario, "Compartir comprobante" secundario. */}
       {ventaConfirmada && (
-        <div className="fixed inset-0 z-50 flex items-end">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setVentaConfirmada(null)} />
-          <div className="relative w-full max-w-lg mx-auto bg-white rounded-t-2xl">
-            <div className="p-6 text-center">
-              <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                <svg className="w-8 h-8 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                </svg>
-              </div>
-              <h2 className="text-lg font-bold text-gray-900">Venta registrada</h2>
-              <p className="text-2xl font-bold text-emerald-700 mt-1">{formatBS(ventaConfirmada.venta.total_bs)}</p>
-              {tasa > 0 && <p className="text-gray-400 text-sm">{formatUSD(ventaConfirmada.venta.total_usd)}</p>}
+        <div className="fixed inset-0 z-50 bg-superficie flex flex-col items-center justify-center p-6 text-center">
+          <div className="w-full max-w-sm">
+            <div className="w-16 h-16 bg-marca-suave rounded-full flex items-center justify-center mx-auto mb-3">
+              <Icon nombre="confirmar" tamano={32} className="text-marca-suave-texto" />
             </div>
-            <div className="p-4 pt-0 space-y-2">
-              <button
-                onClick={() => setVentaConfirmada(null)}
-                className="w-full bg-emerald-600 text-white py-3.5 rounded-xl font-bold"
-              >
+            <h2 className="text-lg font-bold text-texto">Venta registrada</h2>
+            <p className="text-2xl font-bold text-marca mt-1 tabular-nums">
+              {formatBS(ventaConfirmada.venta.total_bs)}
+            </p>
+            {tasa > 0 && (
+              <p className="text-texto-4 text-sm tabular-nums">{formatUSD(ventaConfirmada.venta.total_usd)}</p>
+            )}
+
+            <div className="mt-6 flex flex-col gap-2">
+              <Button variante="primario" onClick={() => setVentaConfirmada(null)}>
                 Nueva venta
-              </button>
-              <button
+              </Button>
+              <Button
+                variante="secundario"
                 onClick={() => compartirComprobanteVenta(ventaConfirmada.venta, ventaConfirmada.numero)}
                 disabled={compartiendoComprobante}
-                className="w-full bg-gray-100 text-gray-700 py-3.5 rounded-xl font-semibold flex items-center justify-center gap-2 disabled:opacity-60"
               >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                    d="M8.684 13.342a3 3 0 100-2.684m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
-                </svg>
+                <Icon nombre="compartir" tamano={TAMANO_ICONO.secundario} />
                 {compartiendoComprobante ? 'Generando...' : 'Compartir comprobante'}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -1357,25 +1433,27 @@ export default function CajaPage() {
       {/* Weight input modal */}
       {showPeso && productoPeso && (
         <div className="fixed inset-0 z-50 flex items-end">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setShowPeso(false)} />
-          <div className="relative w-full max-w-lg mx-auto bg-white rounded-t-2xl">
-            <div className="flex items-center justify-between p-4 border-b border-gray-100">
-              <div>
-                <h2 className="text-lg font-bold">Pesar {productoPeso.nombre}</h2>
-                <p className="text-sm text-gray-400">
+          <div className="absolute inset-0 bg-overlay" onClick={() => setShowPeso(false)} />
+          <div className="relative w-full max-w-lg mx-auto bg-tarjeta rounded-t-2xl">
+            <div className="flex items-start justify-between gap-3 p-4 pb-2.5">
+              <div className="min-w-0">
+                <h2 className="text-lg font-bold text-texto leading-snug">Pesar {productoPeso.nombre}</h2>
+                <p className="text-sm text-texto-3 mt-0.5 tabular-nums">
                   {tasa > 0
                     ? `${formatBS(precioBS(productoPeso, tasa))} / kg`
                     : `${productoPeso.precio} ${productoPeso.moneda} / kg`}
                 </p>
               </div>
-              <button onClick={() => setShowPeso(false)} className="p-1 text-gray-400">
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+              <button
+                onClick={() => setShowPeso(false)}
+                aria-label="Cerrar"
+                className="flex-shrink-0 p-2.5 -mr-2.5 -mt-1 text-texto-3"
+              >
+                <Icon nombre="cerrar" tamano={22} />
               </button>
             </div>
 
-            <div className="p-4 space-y-4">
+            <div className="p-4 pt-1.5 flex flex-col gap-4">
               <input
                 type="number"
                 inputMode="numeric"
@@ -1385,32 +1463,28 @@ export default function CajaPage() {
                 onChange={e => setGramos(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && agregarPorPeso()}
                 placeholder="Gramos"
-                className="w-full border border-gray-200 rounded-xl px-4 py-4 text-3xl font-bold text-center focus:outline-none focus:border-emerald-400"
+                className="w-full h-[76px] rounded-2xl bg-tarjeta-hundida border border-borde-campo px-4 text-3xl font-bold text-texto text-center tabular-nums focus:outline-none focus:border-foco"
                 autoFocus
               />
 
               {pesoPreviewBS !== null || pesoPreviewUSD !== null ? (
-                <div className="text-center py-3 bg-emerald-50 rounded-xl">
+                <div className="text-center py-3 rounded-xl bg-tarjeta-hundida">
                   {pesoPreviewBS !== null && (
-                    <p className="text-2xl font-bold text-gray-900">{formatBS(pesoPreviewBS)}</p>
+                    <p className="text-2xl font-bold text-texto tabular-nums">{formatBS(pesoPreviewBS)}</p>
                   )}
                   {pesoPreviewUSD !== null && (
-                    <p className="text-sm text-gray-400 mt-0.5">{formatUSD(pesoPreviewUSD)}</p>
+                    <p className="text-sm text-texto-4 mt-0.5 tabular-nums">{formatUSD(pesoPreviewUSD)}</p>
                   )}
                 </div>
               ) : gramosNum > 0 ? (
-                <div className="text-center py-3 bg-gray-50 rounded-xl">
-                  <p className="text-sm text-gray-400">Configura la tasa BCV para ver precio en Bs</p>
+                <div className="text-center py-3 rounded-xl bg-tarjeta-hundida">
+                  <p className="text-sm text-texto-4">Configura la tasa BCV para ver precio en Bs</p>
                 </div>
               ) : null}
 
-              <button
-                onClick={agregarPorPeso}
-                disabled={!gramos || gramosNum <= 0}
-                className="w-full bg-emerald-600 text-white py-4 rounded-xl text-lg font-bold disabled:opacity-40"
-              >
+              <Button variante="primario" onClick={agregarPorPeso} disabled={!gramos || gramosNum <= 0}>
                 Agregar al carrito
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -1421,25 +1495,19 @@ export default function CajaPage() {
 
       {showConfirmVaciar && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setShowConfirmVaciar(false)} />
-          <div className="relative bg-white dark:bg-slate-800 rounded-2xl w-full max-w-sm shadow-xl p-5">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Vaciar carrito</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
+          <div className="absolute inset-0 bg-overlay" onClick={() => setShowConfirmVaciar(false)} />
+          <div className="relative bg-tarjeta rounded-2xl w-full max-w-sm shadow-xl p-6">
+            <h2 className="text-lg font-bold text-texto mb-2">Vaciar carrito</h2>
+            <p className="text-texto-3 mb-5">
               Se {carrito.length === 1 ? 'va a quitar' : 'van a quitar'} {carrito.length} producto{carrito.length === 1 ? '' : 's'} del carrito. Esta acción no se puede deshacer.
             </p>
             <div className="flex gap-3">
-              <button
-                onClick={() => setShowConfirmVaciar(false)}
-                className="flex-1 py-3 rounded-xl bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 font-semibold"
-              >
+              <Button variante="secundario" onClick={() => setShowConfirmVaciar(false)} className="flex-1">
                 Cancelar
-              </button>
-              <button
-                onClick={confirmarVaciarCarrito}
-                className="flex-1 py-3 rounded-xl bg-red-600 text-white font-bold"
-              >
+              </Button>
+              <Button variante="destructivo" onClick={confirmarVaciarCarrito} className="flex-1">
                 Vaciar
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -1447,7 +1515,7 @@ export default function CajaPage() {
 
       {/* Toast */}
       {toast && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-5 py-2.5 rounded-xl text-sm font-medium z-50 shadow-lg whitespace-nowrap">
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-toast-fondo text-toast-texto px-5 py-2.5 rounded-xl text-sm font-medium z-50 shadow-lg whitespace-nowrap">
           {toast}
         </div>
       )}
