@@ -13,6 +13,10 @@ import {
   actualizarSaldoFiadoLocal,
   getPresupuesto,
   marcarPresupuestoSincronizado,
+  getMovimientoAcreedor,
+  saveMovimientoAcreedor,
+  eliminarMovimientoAcreedor,
+  actualizarSaldoAcreedorLocal,
 } from './db';
 import {
   createProductoSupabase,
@@ -31,6 +35,9 @@ import {
   sincronizarPresupuesto,
   actualizarPresupuestoSupabase,
   updateDatosNegocio,
+  createAcreedorSupabase,
+  aplicarMovimientoAcreedorRemoto,
+  getSaldoAcreedorRemoto,
   ResultadoEscritura,
 } from './sync';
 import {
@@ -52,11 +59,14 @@ import {
   PayloadCrearPresupuesto,
   PayloadActualizarPresupuesto,
   PayloadActualizarDatosNegocio,
+  PayloadCrearAcreedor,
+  PayloadAplicarMovimientoAcreedor,
   Producto,
   CierreCaja,
   ClienteFiado,
   Presupuesto,
   DatosNegocio,
+  Acreedor,
 } from '@/types';
 
 // Backoff exponencial por operación: 2s, 4s, 8s... tope 60s.
@@ -170,6 +180,17 @@ export async function encolarActualizarDatosNegocio(datos: DatosNegocio, negocio
   const payload: PayloadActualizarDatosNegocio = { datos, negocioId };
   // id fijo: varios guardados seguidos sin red dejan solo el último en cola.
   await encolar('actualizar_datos_negocio', payload, 'datos-negocio-pendiente');
+}
+
+export async function encolarCrearAcreedor(acreedor: Acreedor, negocioId: string): Promise<void> {
+  const payload: PayloadCrearAcreedor = { acreedor, negocioId };
+  await encolar('crear_acreedor', payload, acreedor.id);
+}
+
+export async function encolarAplicarMovimientoAcreedor(movimientoId: string, negocioId: string): Promise<void> {
+  const payload: PayloadAplicarMovimientoAcreedor = { movimientoId, negocioId };
+  // id fijo = id del movimiento: mismo criterio que aplicar_movimiento_fiado.
+  await encolar('aplicar_movimiento_acreedor', payload, movimientoId);
 }
 
 export async function encolarAplicarMovimientoStock(movimientoId: string, negocioId: string): Promise<void> {
@@ -354,6 +375,44 @@ async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
       });
       if (ok) await marcarPresupuestoSincronizado(presupuesto.id);
       return ok;
+    }
+    case 'crear_acreedor': {
+      const { acreedor, negocioId } = op.payload as PayloadCrearAcreedor;
+      const resultado = await createAcreedorSupabase(acreedor, negocioId);
+      // 'duplicate' en un reintento de cola = mismo id ya insertado antes → resuelto.
+      return resultado !== null;
+    }
+    case 'aplicar_movimiento_acreedor': {
+      const { movimientoId } = op.payload as PayloadAplicarMovimientoAcreedor;
+      // Se relee de IndexedDB en vez de guardar una copia congelada en el
+      // payload — mismo patrón que 'aplicar_movimiento_fiado'.
+      const movimiento = await getMovimientoAcreedor(movimientoId);
+      if (!movimiento) return true; // no hay nada que sincronizar
+      const resultado = await aplicarMovimientoAcreedorRemoto(movimiento);
+      if (resultado.ok) {
+        await saveMovimientoAcreedor({ ...movimiento, sincronizado: true });
+        return true;
+      }
+      if (resultado.permanente) {
+        // Ej. un pago mayor a la deuda real para cuando le toca subir (otro
+        // dispositivo pagó entre medio) — la RPC lo rechaza con un mensaje
+        // pensado para mostrarse tal cual.
+        //
+        // El movimiento nunca se aplicó de verdad, así que no puede quedar
+        // en IndexedDB con sincronizado: false para siempre —
+        // saveAcreedores() trata eso como "hay un cambio pendiente" y nunca
+        // deja que el sync periódico corrija el saldo. Se borra, y el saldo
+        // optimista (que quedó mal) se corrige ya mismo con el valor real
+        // de Supabase, sin esperar al próximo ciclo.
+        await eliminarMovimientoAcreedor(movimiento.id);
+        const saldoReal = await getSaldoAcreedorRemoto(movimiento.acreedor_id);
+        if (saldoReal !== null) await actualizarSaldoAcreedorLocal(movimiento.acreedor_id, saldoReal);
+        notificarFalloPermanente(
+          `No se pudo registrar un movimiento de cuentas por pagar: ${resultado.mensaje ?? 'el servidor lo rechazó'}`
+        );
+        return true;
+      }
+      return false;
     }
     default:
       return true;

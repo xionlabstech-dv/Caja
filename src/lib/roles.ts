@@ -18,6 +18,7 @@ const RUTAS_ADMIN = [
   '/', '/resumen', '/fiado', '/mas',
   '/reportes', '/tasa', '/inventario', '/usuarios', '/movimientos',
   '/presupuestos', '/presupuestos/nuevo', '/datos-negocio', '/perfil',
+  '/por-pagar',
 ];
 const RUTAS_CAJERO = ['/', '/resumen', '/fiado', '/mas', '/presupuestos', '/presupuestos/nuevo', '/perfil'];
 
@@ -29,7 +30,7 @@ const RUTAS_CAJERO = ['/', '/resumen', '/fiado', '/mas', '/presupuestos', '/pres
 // igual que Caja (mismo nivel de RLS que fiado: sin gate por estado). Datos
 // del negocio es administrativo, no de venta — mismo criterio que
 // Inventario/Reportes.
-const RUTAS_OCULTAS_RESTRINGIDO = ['/inventario', '/movimientos', '/reportes', '/datos-negocio'];
+const RUTAS_OCULTAS_RESTRINGIDO = ['/inventario', '/movimientos', '/reportes', '/datos-negocio', '/por-pagar'];
 
 export function rutasPermitidas(rol: Rol | null, estado?: EstadoNegocio): string[] {
   const base = rol === 'admin' ? RUTAS_ADMIN : RUTAS_CAJERO;

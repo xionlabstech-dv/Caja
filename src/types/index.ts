@@ -296,6 +296,58 @@ export interface MovimientoFiado {
   sincronizado?: boolean;
 }
 
+// Cuentas por pagar: a quién le debe el negocio (proveedores, servicios
+// recurrentes, personas) — espejo exacto del fiado, con los roles
+// invertidos. Solo admin, y solo si el negocio prendió usa_cuentas_pagar
+// (ver Providers.tsx). El id lo genera el dispositivo, igual que
+// ClienteFiado — crear un acreedor tiene que funcionar sin conexión.
+export type TipoAcreedor = 'proveedor' | 'servicio' | 'persona';
+export type TipoMovimientoAcreedor = 'deuda' | 'pago';
+
+export interface Acreedor {
+  id: string;
+  negocio_id: string;
+  nombre: string;
+  tipo: TipoAcreedor;
+  // Igual que ClienteFiado.saldo_usd: nunca se edita desde el cliente, solo
+  // a través de aplicar_movimiento_acreedor (deuda suma, pago resta).
+  saldo_usd: number;
+  nota: string | null;
+  activo: boolean;
+  creado_en: string;
+  // Derivados que trae acreedores_listar — a diferencia de fiado (que
+  // separa esto en ResumenClienteFiado/fiado_resumen), acá la RPC ya los
+  // devuelve en la misma consulta que el saldo, así que no hay nada que
+  // guardar aparte.
+  movimientos: number;
+  ultimo_movimiento_en: string | null;
+  proximo_vencimiento: string | null;
+  vencido: boolean;
+}
+
+// Ledger de cuentas por pagar, mismo patrón que MovimientoFiado: cada fila
+// es un evento inmutable (deuda o pago), nunca se edita ni se borra.
+export interface MovimientoAcreedor {
+  id: string;
+  negocio_id: string;
+  acreedor_id: string;
+  tipo: TipoMovimientoAcreedor;
+  monto_usd: number;
+  monto_bs: number;
+  tasa_usada: number;
+  // Solo en pagos — una deuda no lleva método propio. Reutiliza el tipo del
+  // abono de fiado: mismos métodos, nunca 'fiado'.
+  metodo_pago: MetodoAbono | null;
+  // Solo en deudas, null en pagos.
+  vence_el: string | null;
+  nota: string | null;
+  usuario_nombre: string | null;
+  saldo_resultante: number;
+  ocurrido_en: string;
+  // Marca si ya se respaldó en Supabase (mismo patrón que MovimientoFiado.sincronizado).
+  sincronizado?: boolean;
+}
+
 export type EstadoPresupuesto = 'vigente' | 'convertido' | 'anulado';
 
 // Foto congelada del producto al momento de cotizar — mismo patrón exacto
@@ -378,7 +430,9 @@ export type TipoPendiente =
   | 'aplicar_movimiento_fiado'
   | 'crear_presupuesto'
   | 'actualizar_presupuesto'
-  | 'actualizar_datos_negocio';
+  | 'actualizar_datos_negocio'
+  | 'crear_acreedor'
+  | 'aplicar_movimiento_acreedor';
 
 export interface PayloadCrearProducto {
   producto: Producto;
@@ -454,6 +508,16 @@ export interface PayloadActualizarDatosNegocio {
   negocioId: string;
 }
 
+export interface PayloadCrearAcreedor {
+  acreedor: Acreedor;
+  negocioId: string;
+}
+
+export interface PayloadAplicarMovimientoAcreedor {
+  movimientoId: string;
+  negocioId: string;
+}
+
 export type PayloadPendiente =
   | PayloadCrearProducto
   | PayloadEditarProducto
@@ -469,7 +533,9 @@ export type PayloadPendiente =
   | PayloadAplicarMovimientoFiado
   | PayloadCrearPresupuesto
   | PayloadActualizarPresupuesto
-  | PayloadActualizarDatosNegocio;
+  | PayloadActualizarDatosNegocio
+  | PayloadCrearAcreedor
+  | PayloadAplicarMovimientoAcreedor;
 
 export interface OperacionPendiente {
   id: string;

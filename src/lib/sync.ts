@@ -12,6 +12,9 @@ import {
   savePresupuestosResumen,
   saveResumenFiado,
   setCachedDatosNegocio,
+  getAcreedores,
+  saveAcreedores,
+  actualizarSaldoAcreedorLocal,
 } from './db';
 import {
   Producto,
@@ -28,6 +31,9 @@ import {
   EstadoPresupuesto,
   DatosNegocio,
   ResumenClienteFiado,
+  Acreedor,
+  TipoAcreedor,
+  MovimientoAcreedor,
 } from '@/types';
 
 // Límite de tiempo para llamadas RPC que no pueden quedarse esperando para
@@ -56,7 +62,11 @@ export async function conCandado<T>(promesa: Promise<T>, ms: number = TIMEOUT_RP
   return resultado;
 }
 
-export async function syncFromSupabase(negocioId: string): Promise<Configuracion | null> {
+export async function syncFromSupabase(
+  negocioId: string,
+  esAdmin: boolean,
+  usaCuentasPagar: boolean
+): Promise<Configuracion | null> {
   try {
     const PAGE_SIZE = 1000;
     let from = 0;
@@ -109,6 +119,19 @@ export async function syncFromSupabase(negocioId: string): Promise<Configuracion
     const resumenFiado = await getResumenFiadoRemoto(negocioId);
     if (resumenFiado) {
       await saveResumenFiado(resumenFiado);
+    }
+
+    // Cuentas por pagar: a diferencia de clientes_fiado, acreedores_listar ya
+    // trae el saldo junto con los derivados en una sola consulta, así que no
+    // hace falta el paginado aparte que sí necesita fiado. Solo se pide si
+    // el negocio prendió el módulo y el usuario es admin — si no, siempre
+    // va a volver vacía (RLS la bloquea para cajero) y no vale la pena
+    // pedirla en cada ciclo.
+    if (usaCuentasPagar && esAdmin) {
+      const acreedores = await getAcreedoresRemoto(negocioId);
+      if (acreedores) {
+        await saveAcreedores(acreedores);
+      }
     }
 
     // Presupuestos: mismo criterio, pero vía la función presupuestos_listar
@@ -466,6 +489,218 @@ export async function getSaldoFiadoRemoto(clienteId: string): Promise<number | n
     return data.saldo_usd as number;
   } catch {
     return null;
+  }
+}
+
+// --- Cuentas por pagar ---
+// Calcado del bloque de Fiado de arriba, roles invertidos.
+
+// A diferencia de fiado (que separa el saldo —tabla directa, paginada— del
+// resumen —RPC fiado_clientes_listar—), acreedores_listar ya devuelve todo
+// junto en una sola fila por acreedor: saldo y los derivados. No trae
+// negocio_id ni creado_en (no los necesita para calcular nada de la lista);
+// se completan acá con el negocio conocido y con lo que ya hubiera
+// cacheado localmente para ese id — mismo criterio que savePresupuestosResumen
+// preservando `items`: un acreedor creado en este dispositivo no debe perder
+// su creado_en real por sincronizar.
+export async function getAcreedoresRemoto(negocioId: string): Promise<Acreedor[] | null> {
+  try {
+    const { data, error } = await supabase
+      .rpc('acreedores_listar', { p_negocio_id: negocioId })
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
+    if (error) throw error;
+
+    interface FilaAcreedor {
+      id: string;
+      nombre: string;
+      tipo: TipoAcreedor;
+      saldo_usd: number;
+      nota: string | null;
+      activo: boolean;
+      movimientos: number;
+      ultimo_movimiento_en: string | null;
+      proximo_vencimiento: string | null;
+      vencido: boolean;
+    }
+
+    const locales = await getAcreedores();
+    const creadoEnLocal = new Map(locales.map(a => [a.id, a.creado_en]));
+
+    return ((data ?? []) as FilaAcreedor[]).map(r => ({
+      id: r.id,
+      negocio_id: negocioId,
+      nombre: r.nombre,
+      tipo: r.tipo,
+      saldo_usd: r.saldo_usd,
+      nota: r.nota,
+      activo: r.activo,
+      creado_en: creadoEnLocal.get(r.id) ?? new Date(0).toISOString(),
+      movimientos: r.movimientos,
+      ultimo_movimiento_en: r.ultimo_movimiento_en,
+      proximo_vencimiento: r.proximo_vencimiento,
+      vencido: r.vencido,
+    }));
+  } catch {
+    return null;
+  }
+}
+
+// Historial de movimientos de UN acreedor (deudas y pagos), para mostrar
+// "qué se le debe y cuándo" en su detalle. Se pide bajo demanda (no se
+// sincroniza periódicamente como acreedores) — el saldo ya está disponible
+// sin conexión, este detalle es un enriquecimiento que requiere red y se
+// degrada con gracia si no la hay. Mismo patrón exacto que
+// getMovimientosFiadoPorClienteRemoto.
+export async function getMovimientosAcreedorRemoto(
+  acreedorId: string,
+  limite = 20
+): Promise<MovimientoAcreedor[] | null> {
+  try {
+    const { data, error } = await supabase
+      .from('acreedor_movimientos')
+      .select(
+        'id, negocio_id, acreedor_id, tipo, monto_usd, monto_bs, tasa_usada, metodo_pago, vence_el, nota, usuario_nombre, saldo_resultante, ocurrido_en'
+      )
+      .eq('acreedor_id', acreedorId)
+      .order('ocurrido_en', { ascending: false })
+      .limit(limite);
+    if (error) throw error;
+
+    return (data ?? []).map(m => ({
+      id: m.id,
+      negocio_id: m.negocio_id,
+      acreedor_id: m.acreedor_id,
+      tipo: m.tipo,
+      monto_usd: m.monto_usd,
+      monto_bs: m.monto_bs,
+      tasa_usada: m.tasa_usada,
+      metodo_pago: m.metodo_pago ?? null,
+      vence_el: m.vence_el ?? null,
+      nota: m.nota ?? null,
+      usuario_nombre: m.usuario_nombre ?? null,
+      saldo_resultante: m.saldo_resultante,
+      ocurrido_en: m.ocurrido_en,
+      sincronizado: true,
+    } as MovimientoAcreedor));
+  } catch {
+    return null;
+  }
+}
+
+// Insert directo — la RLS lo permite, igual que createClienteFiadoSupabase.
+export async function createAcreedorSupabase(
+  acreedor: Acreedor,
+  negocioId: string
+): Promise<Acreedor | 'duplicate' | null> {
+  try {
+    const { data, error } = await supabase
+      .from('acreedores')
+      .insert({
+        id: acreedor.id,
+        negocio_id: negocioId,
+        nombre: acreedor.nombre,
+        tipo: acreedor.tipo,
+        nota: acreedor.nota,
+      })
+      .select()
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS))
+      .single();
+
+    if (error) throw error;
+    return data as Acreedor;
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    // 23505 con el mismo id (retry de la cola offline) = ya insertado antes, no error real.
+    if (code === '23505') return 'duplicate';
+    return null;
+  }
+}
+
+// Aplica una deuda o un pago vía la RPC atómica e idempotente — nunca un
+// UPDATE directo a saldo_usd (ni siquiera está permitido por RLS). Mismo
+// manejo que aplicarMovimientoFiadoRemoto: status 0 (nunca hubo respuesta)
+// es transitorio, cualquier rechazo del servidor (pago mayor a la deuda,
+// tipo inválido, cajero intentando registrar, módulo apagado, negocio
+// suspendido) es permanente y su mensaje se conserva tal cual.
+export interface ResultadoMovimientoAcreedor {
+  ok: boolean;
+  saldoNuevo?: number;
+  // error.message tal cual lo devolvió la RPC, solo presente cuando ok=false.
+  mensaje?: string;
+  permanente?: boolean;
+}
+
+export async function aplicarMovimientoAcreedorRemoto(m: MovimientoAcreedor): Promise<ResultadoMovimientoAcreedor> {
+  let data: unknown;
+  let error: { message?: string } | null;
+  let status: number;
+  try {
+    ({ data, error, status } = await supabase.rpc('aplicar_movimiento_acreedor', {
+      p_id: m.id,
+      p_acreedor_id: m.acreedor_id,
+      p_tipo: m.tipo,
+      p_monto_usd: m.monto_usd,
+      p_monto_bs: m.monto_bs,
+      p_tasa: m.tasa_usada,
+      p_metodo_pago: m.metodo_pago ?? null,
+      p_vence_el: m.vence_el ?? null,
+      p_nota: m.nota ?? null,
+      p_ocurrido_en: m.ocurrido_en,
+    }).abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS)));
+  } catch (err) {
+    // La llamada ni siquiera volvió con una respuesta — sin red, timeout.
+    return { ok: false, mensaje: (err as { message?: string }).message, permanente: false };
+  }
+  if (error) {
+    if (status === 0) {
+      // Nunca hubo respuesta HTTP real — sin señal, DNS caído, timeout
+      // propio, o cualquier otro fallo de conexión. Siempre transitorio.
+      return { ok: false, mensaje: error.message, permanente: false };
+    }
+    // El servidor respondió y rechazó la operación — definitivo.
+    return { ok: false, mensaje: error.message, permanente: true };
+  }
+  const nuevoSaldo = data as number;
+  // Igual que con fiado: el saldo local se corrige al valor autoritativo
+  // que devuelve la RPC, no al que se calculó de forma optimista al
+  // encolar — cubre que otro dispositivo haya aplicado movimientos propios
+  // sobre el mismo acreedor entre medio.
+  await actualizarSaldoAcreedorLocal(m.acreedor_id, nuevoSaldo);
+  return { ok: true, saldoNuevo: nuevoSaldo };
+}
+
+// Select puntual del saldo real de UN acreedor — se usa cuando un
+// movimiento quedó rechazado de forma definitiva y el saldo optimista que
+// se calculó al encolarlo quedó mal. Mismo patrón exacto que getSaldoFiadoRemoto.
+export async function getSaldoAcreedorRemoto(acreedorId: string): Promise<number | null> {
+  try {
+    const { data, error } = await supabase
+      .from('acreedores')
+      .select('saldo_usd')
+      .eq('id', acreedorId)
+      .single();
+    if (error) throw error;
+    return data.saldo_usd as number;
+  } catch {
+    return null;
+  }
+}
+
+export async function editarAcreedorRemoto(
+  id: string,
+  nombre: string,
+  tipo: TipoAcreedor,
+  nota: string | null,
+  activo: boolean
+): Promise<ResultadoEscritura> {
+  try {
+    const { error } = await supabase
+      .rpc('editar_acreedor', { p_id: id, p_nombre: nombre, p_tipo: tipo, p_nota: nota, p_activo: activo })
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
+    if (error) return { ok: false, permanente: true, mensaje: error.message };
+    return { ok: true };
+  } catch {
+    return { ok: false, permanente: false, mensaje: 'No se pudo conectar. Verifica tu conexión.' };
   }
 }
 

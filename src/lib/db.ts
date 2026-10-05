@@ -1,5 +1,5 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
-import { Producto, Configuracion, Venta, CierreCaja, OperacionPendiente, Rol, MovimientoStock, MetodoPago, EstadoNegocio, ClienteFiado, MovimientoFiado, Presupuesto, DatosNegocio, ResumenClienteFiado } from '@/types';
+import { Producto, Configuracion, Venta, CierreCaja, OperacionPendiente, Rol, MovimientoStock, MetodoPago, EstadoNegocio, ClienteFiado, MovimientoFiado, Presupuesto, DatosNegocio, ResumenClienteFiado, Acreedor, MovimientoAcreedor } from '@/types';
 
 interface MetaItem {
   key: string;
@@ -56,6 +56,15 @@ interface CajaDBSchema extends DBSchema {
     key: string;
     value: ResumenClienteFiado;
   };
+  acreedores: {
+    key: string;
+    value: Acreedor;
+  };
+  acreedor_movimientos: {
+    key: string;
+    value: MovimientoAcreedor;
+    indexes: { 'by-acreedor': string };
+  };
 }
 
 let dbPromise: Promise<IDBPDatabase<CajaDBSchema>> | null = null;
@@ -63,7 +72,7 @@ let dbPromise: Promise<IDBPDatabase<CajaDBSchema>> | null = null;
 function getDB() {
   if (typeof window === 'undefined') throw new Error('IDB solo disponible en el browser');
   if (!dbPromise) {
-    dbPromise = openDB<CajaDBSchema>('caja-db', 8, {
+    dbPromise = openDB<CajaDBSchema>('caja-db', 9, {
       async upgrade(db, oldVersion, _newVersion, transaction) {
         if (oldVersion < 1) {
           const productosStore = db.createObjectStore('productos', { keyPath: 'id' });
@@ -129,6 +138,13 @@ function getDB() {
           // entero en cualquier sync, así que no hay nada que migrar ni que
           // preservar.
           db.createObjectStore('fiado_resumen', { keyPath: 'cliente_id' });
+        }
+        if (oldVersion < 9) {
+          // Cuentas por pagar: funcionalidad enteramente nueva, no hay nada
+          // que migrar ni preservar.
+          db.createObjectStore('acreedores', { keyPath: 'id' });
+          const movAcreedorStore = db.createObjectStore('acreedor_movimientos', { keyPath: 'id' });
+          movAcreedorStore.createIndex('by-acreedor', 'acreedor_id');
         }
       },
     });
@@ -317,6 +333,22 @@ export async function setCachedUsaStock(usaStock: boolean): Promise<void> {
   await db.put('meta', { key: 'usa_stock', value: String(usaStock) });
 }
 
+// Cuentas por pagar: módulo opcional, apagado por defecto — a diferencia de
+// usaCostos/usaStock (que el propio cliente puede encender desde /perfil),
+// este interruptor solo lo prende un admin desde panel-caja, pero el default
+// seguro sin caché es el mismo: false, para que un negocio que todavía no lo
+// tiene encendido no vea nada.
+export async function getCachedUsaCuentasPagar(): Promise<boolean> {
+  const db = await getDB();
+  const item = await db.get('meta', 'usa_cuentas_pagar');
+  return item?.value === 'true';
+}
+
+export async function setCachedUsaCuentasPagar(usaCuentasPagar: boolean): Promise<void> {
+  const db = await getDB();
+  await db.put('meta', { key: 'usa_cuentas_pagar', value: String(usaCuentasPagar) });
+}
+
 // Si el usuario ya vio/cerró el checklist de bienvenida. Default seguro sin
 // cache: true (que NO aparezca de más), al revés de usaCostos/usaStock —
 // ahí el default seguro es false.
@@ -444,7 +476,7 @@ export async function actualizarStockLocal(productoId: string, nuevoStock: numbe
 export async function clearTenantData(): Promise<void> {
   const db = await getDB();
   const tx = db.transaction(
-    ['productos', 'configuracion', 'ventas', 'cierres', 'meta', 'pendientes', 'movimientos', 'clientes_fiado', 'fiado_movimientos', 'presupuestos', 'fiado_resumen'],
+    ['productos', 'configuracion', 'ventas', 'cierres', 'meta', 'pendientes', 'movimientos', 'clientes_fiado', 'fiado_movimientos', 'presupuestos', 'fiado_resumen', 'acreedores', 'acreedor_movimientos'],
     'readwrite',
   );
   await Promise.all([
@@ -459,6 +491,8 @@ export async function clearTenantData(): Promise<void> {
     tx.objectStore('fiado_movimientos').clear(),
     tx.objectStore('presupuestos').clear(),
     tx.objectStore('fiado_resumen').clear(),
+    tx.objectStore('acreedores').clear(),
+    tx.objectStore('acreedor_movimientos').clear(),
     tx.done,
   ]);
 }
@@ -567,6 +601,80 @@ export async function getMovimientosFiado(): Promise<MovimientoFiado[]> {
 export async function getMovimientosFiadoPorCliente(clienteId: string): Promise<MovimientoFiado[]> {
   const db = await getDB();
   const all = await db.getAllFromIndex('fiado_movimientos', 'by-cliente', clienteId);
+  return all.sort((a, b) => b.ocurrido_en.localeCompare(a.ocurrido_en));
+}
+
+// --- Cuentas por pagar ---
+// Calcado del bloque de Fiado de arriba, roles invertidos: acá es el
+// negocio el que debe.
+
+export async function saveAcreedor(a: Acreedor): Promise<void> {
+  const db = await getDB();
+  await db.put('acreedores', a);
+}
+
+export async function saveAcreedores(acreedores: Acreedor[]): Promise<void> {
+  const db = await getDB();
+
+  // Mismo criterio que saveClientesFiado: si hay un movimiento local sin
+  // sincronizar para ese acreedor, el saldo que viene del servidor no debe
+  // pisar el saldo optimista local — si no, un acreedor que ya se le pagó
+  // del todo "reaparece" debiéndole al negocio hasta que el outbox corrija
+  // de nuevo.
+  const movimientos = await db.getAll('acreedor_movimientos');
+  const conMovimientoPendiente = new Set(
+    movimientos.filter(m => m.sincronizado === false).map(m => m.acreedor_id)
+  );
+
+  const tx = db.transaction('acreedores', 'readwrite');
+  for (const a of acreedores) {
+    if (conMovimientoPendiente.has(a.id)) {
+      const local = await tx.store.get(a.id);
+      if (local) {
+        await tx.store.put({ ...a, saldo_usd: local.saldo_usd });
+        continue;
+      }
+    }
+    await tx.store.put(a);
+  }
+  await tx.done;
+}
+
+export async function getAcreedores(): Promise<Acreedor[]> {
+  const db = await getDB();
+  return db.getAll('acreedores');
+}
+
+// Aplica el saldo autoritativo que devuelve la RPC al acreedor cacheado —
+// mismo patrón que actualizarSaldoFiadoLocal.
+export async function actualizarSaldoAcreedorLocal(acreedorId: string, nuevoSaldo: number): Promise<void> {
+  const db = await getDB();
+  const acreedor = await db.get('acreedores', acreedorId);
+  if (acreedor) await db.put('acreedores', { ...acreedor, saldo_usd: nuevoSaldo });
+}
+
+export async function saveMovimientoAcreedor(m: MovimientoAcreedor): Promise<void> {
+  const db = await getDB();
+  await db.put('acreedor_movimientos', m);
+}
+
+export async function getMovimientoAcreedor(id: string): Promise<MovimientoAcreedor | undefined> {
+  const db = await getDB();
+  return db.get('acreedor_movimientos', id);
+}
+
+// Se usa cuando el servidor rechazó el movimiento de forma definitiva: nunca
+// se aplicó de verdad, así que no puede quedar en IndexedDB marcado como
+// sincronizado: false para siempre — saveAcreedores() trata eso como "hay un
+// cambio pendiente" y nunca deja que el sync periódico corrija el saldo.
+export async function eliminarMovimientoAcreedor(id: string): Promise<void> {
+  const db = await getDB();
+  await db.delete('acreedor_movimientos', id);
+}
+
+export async function getMovimientosAcreedorPorAcreedor(acreedorId: string): Promise<MovimientoAcreedor[]> {
+  const db = await getDB();
+  const all = await db.getAllFromIndex('acreedor_movimientos', 'by-acreedor', acreedorId);
   return all.sort((a, b) => b.ocurrido_en.localeCompare(a.ocurrido_en));
 }
 
