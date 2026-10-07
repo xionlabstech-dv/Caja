@@ -463,6 +463,27 @@ export async function clearTenantData(): Promise<void> {
   ]);
 }
 
+// Borra solo lo que identifica A LA PERSONA que tenía la sesión — nunca los
+// datos del negocio ni la cola pendiente de sincronizar. Se usa al cerrar
+// sesión (manual o forzado por desactivación): cerrar sesión nunca borra
+// datos locales, pero si quedara `rol` cacheado, alguien distinto del mismo
+// negocio que entre después sin conexión heredaría ese rol vía el fallback
+// de resolverPerfil — un cajero vería la interfaz de admin (el servidor le
+// seguiría rechazando las escrituras por RLS, pero no corresponde mostrarle
+// esa interfaz). Todo lo demás en `meta` (negocioId, usaCostos, usaStock,
+// limiteUsuarios, datosNegocio, estado, ultimaSincronizacion) describe al
+// negocio, no a la persona, y se conserva.
+export async function limpiarIdentidadUsuario(): Promise<void> {
+  const db = await getDB();
+  const tx = db.transaction('meta', 'readwrite');
+  await Promise.all([
+    tx.store.delete('rol'),
+    tx.store.delete('usuario_nombre'),
+    tx.store.delete('tutorial_visto'),
+    tx.done,
+  ]);
+}
+
 // --- Fiado ---
 
 export async function saveClienteFiado(c: ClienteFiado): Promise<void> {

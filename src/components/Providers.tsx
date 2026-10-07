@@ -29,6 +29,7 @@ import {
   getCachedDatosNegocio,
   setCachedDatosNegocio,
   clearTenantData,
+  limpiarIdentidadUsuario,
   contarPendientes,
 } from '@/lib/db';
 import { procesarCola, onFalloPermanente, getDiagnosticoCola } from '@/lib/outbox';
@@ -409,17 +410,17 @@ export default function Providers({ children }: { children: ReactNode }) {
     });
   };
 
+  // Cerrar sesión nunca borra datos locales — la cola pendiente (ventas,
+  // fiado, stock, presupuestos...) es la única copia que existe de ese
+  // trabajo hasta que suba sola. Solo se borra lo que identifica a esta
+  // persona (limpiarIdentidadUsuario) para que la próxima que entre en este
+  // teléfono sin conexión no herede su rol. Si queda algo sin enviar, se
+  // avisa por mensajeInicial de LoginScreen en vez de preguntar con un
+  // confirm — ya no hay nada destructivo que confirmar.
   const signOut = async () => {
     const pendientes = await contarPendientes();
-    if (pendientes > 0) {
-      const confirmar = window.confirm(
-        `Tienes ${pendientes} cambio${pendientes === 1 ? '' : 's'} sin sincronizar. ` +
-        'Si cierras sesión ahora se perderán. ¿Cerrar sesión de todas formas?'
-      );
-      if (!confirmar) return;
-    }
     await supabase.auth.signOut();
-    await clearTenantData();
+    await limpiarIdentidadUsuario();
     setUser(null);
     setNegocioId(null);
     setNegocioNombre('');
@@ -440,6 +441,11 @@ export default function Providers({ children }: { children: ReactNode }) {
     setShowCarrito(false);
     setPresupuestoConvirtiendoId(null);
     setPresupuestoClienteNombre(null);
+    setMotivoDeslogueo(
+      pendientes > 0
+        ? `Quedan ${pendientes} cambio${pendientes === 1 ? '' : 's'} sin enviar guardados en este teléfono. Vuelve a entrar con una cuenta de este mismo negocio y se enviarán solos cuando haya internet.`
+        : null
+    );
   };
 
   // Auth: revisa la sesión al montar y escucha cambios. La sesión NUNCA se
@@ -452,8 +458,12 @@ export default function Providers({ children }: { children: ReactNode }) {
     // detectarse con red (fetchPerfil trajo el perfil fresco y activo=false);
     // sin conexión, resolverPerfil cae al cache y nunca llega a este caso.
     const forzarDeslogueoPorInactivo = async () => {
+      // Mismo criterio que signOut: un admin desactivando al cajero no
+      // puede ser la forma en que ese cajero pierde sus ventas sin
+      // enterarse — se borra solo la identidad, nunca los datos.
+      const pendientes = await contarPendientes();
       await supabase.auth.signOut();
-      await clearTenantData();
+      await limpiarIdentidadUsuario();
       setUser(null);
       setNegocioId(null);
       setNegocioNombre('');
@@ -470,7 +480,12 @@ export default function Providers({ children }: { children: ReactNode }) {
       setShowCarrito(false);
       setPresupuestoConvirtiendoId(null);
       setPresupuestoClienteNombre(null);
-      setMotivoDeslogueo('Tu usuario fue desactivado. Contacta al administrador de tu negocio.');
+      setMotivoDeslogueo(
+        'Tu usuario fue desactivado. Contacta al administrador de tu negocio.' +
+        (pendientes > 0
+          ? ` Quedan ${pendientes} cambio${pendientes === 1 ? '' : 's'} sin enviar guardados en este teléfono. Vuelve a entrar con una cuenta de este mismo negocio y se enviarán solos cuando haya internet.`
+          : '')
+      );
     };
 
     const aplicarPerfil = async (u: User) => {
