@@ -30,6 +30,65 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="es">
       <head>
+        {/*
+          Next.js (App Router, output:'export') siempre emite sus propios
+          <script src="/_next/..."> de framework al principio del <head>,
+          antes de cualquier JSX que esta misma pantalla ponga ahí — ocurre
+          incluso usando next/script con strategy="beforeInteractive" (en
+          una exportación 100% estática, ese script queda como payload RSC
+          diferido, no como un <script> ejecutable en el HTML inicial; se
+          probó y confirmó con el build real antes de descartarlo). Por eso
+          el build de este proyecto corre scripts/mover-polyfill-al-frente.mjs
+          después de `next build`: reordena el HTML ya exportado para que
+          este script quede siendo el primer hijo de <head>, antes de
+          cualquier script de Next — ver ese archivo para el detalle. Este
+          <script> de acá sigue haciendo falta igual: es lo que ese postbuild
+          reubica, y es también lo único que corre en `next dev` (ahí no hay
+          /out ni postbuild).
+        */}
+        <script
+          id="polyfills-navegadores-viejos"
+          dangerouslySetInnerHTML={{
+            __html: `
+(function(){
+  // Caja corre en teléfonos con navegadores viejos. Estas dos funciones no
+  // existen antes de Chrome 103 y 92 respectivamente, y sin ellas la app
+  // falla EN SILENCIO: AbortSignal.timeout revienta antes de hacer la
+  // petición, el error queda atrapado en el catch de quien la llama, y la
+  // cola reintenta para siempre sin que salga nada del teléfono. Pasó en
+  // producción con un Chrome 94: 8 ventas trabadas horas sin ningún aviso.
+  // Va como script inline en el head, no como módulo importado, para que
+  // corra antes de que se evalúe cualquier bundle.
+  try {
+    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout !== 'function') {
+      AbortSignal.timeout = function (ms) {
+        var c = new AbortController();
+        setTimeout(function () { c.abort(); }, ms);
+        return c.signal;
+      };
+    }
+  } catch (e) {}
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function'
+        && typeof crypto.randomUUID !== 'function') {
+      crypto.randomUUID = function () {
+        var b = new Uint8Array(16);
+        crypto.getRandomValues(b);
+        b[6] = (b[6] & 0x0f) | 0x40;  // versión 4
+        b[8] = (b[8] & 0x3f) | 0x80;  // variante RFC 4122
+        var h = '';
+        for (var i = 0; i < 16; i++) {
+          h += (b[i] + 0x100).toString(16).slice(1);
+          if (i === 3 || i === 5 || i === 7 || i === 9) h += '-';
+        }
+        return h;
+      };
+    }
+  } catch (e) {}
+})();
+            `,
+          }}
+        />
         <script dangerouslySetInnerHTML={{
           __html: `(function(){try{var t=localStorage.getItem('theme');if(t==='dark')document.documentElement.classList.add('dark');}catch(e){}})();`
         }} />
