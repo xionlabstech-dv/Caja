@@ -441,6 +441,14 @@ export default function Providers({ children }: { children: ReactNode }) {
     const pendientes = await contarPendientes();
     await supabase.auth.signOut();
     await limpiarIdentidadUsuario();
+    // La regla nunca fue "cerrar sesión no borra datos" a secas — es "no
+    // borra datos SIN SINCRONIZAR". Con la cola vacía no hay nada que
+    // proteger: todo lo local ya está en el servidor y se vuelve a bajar
+    // solo. contarPendientes()===0 no es garantía absoluta (un rechazo
+    // definitivo del servidor sale de la cola sin dejar la venta
+    // "sincronizada", ver resolverResultadoEscritura en outbox.ts) — ese
+    // caso ya existía desde siempre, no es nuevo de este fix.
+    if (pendientes === 0) await clearTenantData();
     setUser(null);
     setNegocioId(null);
     setNegocioNombre('');
@@ -481,10 +489,12 @@ export default function Providers({ children }: { children: ReactNode }) {
     const forzarDeslogueoPorInactivo = async () => {
       // Mismo criterio que signOut: un admin desactivando al cajero no
       // puede ser la forma en que ese cajero pierde sus ventas sin
-      // enterarse — se borra solo la identidad, nunca los datos.
+      // enterarse — se borra solo la identidad, nunca los datos sin
+      // sincronizar. Con la cola vacía no hay nada que proteger.
       const pendientes = await contarPendientes();
       await supabase.auth.signOut();
       await limpiarIdentidadUsuario();
+      if (pendientes === 0) await clearTenantData();
       setUser(null);
       setNegocioId(null);
       setNegocioNombre('');
