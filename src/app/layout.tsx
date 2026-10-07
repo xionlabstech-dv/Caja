@@ -61,6 +61,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   // corra antes de que se evalúe cualquier bundle.
   try {
     if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout !== 'function') {
+      // Marca para que React (AvisoNavegadorViejo.tsx) sepa, una sola vez
+      // después de montar, que este navegador necesitó de verdad el
+      // polyfill — no es una sospecha por User-Agent (que se puede
+      // falsificar, y Venezuela tiene navegadores raros que ni se
+      // identifican como "Chrome N"), es el hecho concreto de que acá
+      // faltaba la función.
+      try { window.__cajaNavegadorViejo = true; } catch (e) {}
       AbortSignal.timeout = function (ms) {
         var c = new AbortController();
         setTimeout(function () { c.abort(); }, ms);
@@ -71,6 +78,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   try {
     if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function'
         && typeof crypto.randomUUID !== 'function') {
+      try { window.__cajaNavegadorViejo = true; } catch (e) {}
       crypto.randomUUID = function () {
         var b = new Uint8Array(16);
         crypto.getRandomValues(b);

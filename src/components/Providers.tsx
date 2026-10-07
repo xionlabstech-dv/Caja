@@ -36,6 +36,7 @@ import { procesarCola, onFalloPermanente, getDiagnosticoCola } from '@/lib/outbo
 import { Configuracion, Rol, EstadoNegocio, ItemCarrito, DatosNegocio } from '@/types';
 import LoginScreen from './LoginScreen';
 import SuspendedScreen from './SuspendedScreen';
+import AvisoNavegadorViejo from './AvisoNavegadorViejo';
 import Icon from '@/components/ui/Icon';
 import { TAMANO_ICONO } from '@/components/ui/iconos';
 
@@ -849,6 +850,7 @@ export default function Providers({ children }: { children: ReactNode }) {
       {estado === 'suspendido'
         ? <SuspendedScreen isOnline={isOnline} onReintentar={revalidarEstado} onSignOut={signOut} />
         : children}
+      <AvisoNavegadorViejo />
       {updateDisponible && (
         <button
           onClick={() => window.location.reload()}
