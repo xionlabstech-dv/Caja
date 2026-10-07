@@ -68,6 +68,7 @@ import {
   Menu,
   RefreshCw,
   AlertCircle,
+  ReceiptText,
   type LucideIcon,
 } from 'lucide-react';
 import type { MetodoPago } from '@/types';
@@ -78,6 +79,7 @@ export const ICONOS = {
   inicio: House,
   resumen: ClipboardList,
   fiado: HandCoins,
+  porPagar: ReceiptText,
   inventario: Package,
   movimientos: History,
   reportes: BarChart3,

@@ -17,16 +17,26 @@ const ITEMS: { href: string; label: string; icono: NombreIcono }[] = [
   { href: '/tasa', label: 'Tasa', icono: 'tasaDelDia' },
   { href: '/inventario', label: 'Inventario', icono: 'inventario' },
   { href: '/presupuestos', label: 'Presupuestos', icono: 'presupuestos' },
+  { href: '/por-pagar', label: 'Por pagar', icono: 'porPagar' },
   { href: '/datos-negocio', label: 'Datos del negocio', icono: 'datosDelNegocio' },
 ];
 
 export default function MasPage() {
   const permitida = useGuardarRuta();
-  const { rol, estado } = useApp();
+  const { rol, estado, usaCuentasPagar } = useApp();
   const permitidas = rutasPermitidas(rol, estado);
 
   if (!permitida) return null;
-  const visibles = ITEMS.filter(item => permitidas.includes(item.href));
+  const visibles = ITEMS.filter(item => {
+    if (!permitidas.includes(item.href)) return false;
+    // Módulo opcional: a diferencia del resto de la grilla, que solo
+    // depende de rol/estado, /por-pagar también depende de si el negocio
+    // prendió usa_cuentas_pagar (apagado por default) — sin este filtro
+    // extra, rutasPermitidas ya la deja pasar para cualquier admin aunque
+    // su negocio nunca haya activado el módulo.
+    if (item.href === '/por-pagar' && !usaCuentasPagar) return false;
+    return true;
+  });
 
   return (
     <div>
