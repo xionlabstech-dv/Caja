@@ -554,6 +554,19 @@ export default function Providers({ children }: { children: ReactNode }) {
         setFechaProximoPago(perfil.fechaProximoPago);
         setLimiteUsuarios(perfil.limiteUsuarios);
         setDatosNegocio(perfil.datosNegocio);
+      } else {
+        // No se pudo resolver el negocio ni por red ni por cache. No hay
+        // nada que mostrar, pero tampoco hay que dejar a nadie encerrado
+        // en el splash: el gate !datosVerificados solo lo abre init(), y
+        // init() no corre sin negocioId. Al login con mensaje, que es un
+        // estado del que el usuario sí puede salir solo.
+        await supabase.auth.signOut().catch(() => {});
+        setUser(null);
+        setDatosVerificados(false);
+        setMotivoDeslogueo(
+          'No se pudo cargar la información de tu negocio en este teléfono. ' +
+          'Conéctate a internet y vuelve a entrar.'
+        );
       }
     };
 
