@@ -593,6 +593,11 @@ export default function Providers({ children }: { children: ReactNode }) {
         setFechaProximoPago(null);
         setLimiteUsuarios(2);
         setDatosNegocio({});
+        // Sin esto, un SIGNED_OUT que no pase por signOut() (token
+        // revocado por el servidor) deja el gate abierto con el valor
+        // viejo, y el próximo login de otro negocio alcanza a renderizar
+        // el catálogo ajeno antes de que init() lo limpie.
+        setDatosVerificados(false);
       }
       // Otros eventos con session null (ej. refresh fallido sin red) se
       // ignoran a propósito: mantenemos la sesión local intacta.
