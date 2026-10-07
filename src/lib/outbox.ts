@@ -458,3 +458,31 @@ export async function procesarCola(): Promise<{ procesados: number; pendientes: 
   corridaActual = null;
   return resultado;
 }
+
+// Diagnóstico de la cola para distinguir "sin conexión" (progreso normal) de
+// "con conexión pero algo bloquea las escrituras" (roto) — ver colaAtascada
+// en Providers.tsx. Los datos ya existen en cada OperacionPendiente, solo
+// hay que leerlos: no agrega ningún estado nuevo.
+export interface DiagnosticoCola {
+  pendientes: number;
+  // El mayor `intentos` de toda la cola — una operación que lleva muchos
+  // intentos con el teléfono reportando conexión ya no es una señal mala
+  // normal, es algo roto (ver el caso real del polyfill de AbortSignal.timeout).
+  maxIntentos: number;
+  // `timestamp` (no `ultimoIntento`) de la operación más vieja en cola —
+  // getPendientes() ya la trae ordenada ascendente por ese campo (el índice
+  // 'by-timestamp'), así que la primera de la lista es la más antigua.
+  masAntiguoEn: string | null;
+}
+
+export async function getDiagnosticoCola(): Promise<DiagnosticoCola> {
+  const cola = await getPendientes();
+  if (cola.length === 0) {
+    return { pendientes: 0, maxIntentos: 0, masAntiguoEn: null };
+  }
+  return {
+    pendientes: cola.length,
+    maxIntentos: Math.max(...cola.map(op => op.intentos)),
+    masAntiguoEn: cola[0].timestamp,
+  };
+}

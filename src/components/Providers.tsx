@@ -31,7 +31,7 @@ import {
   clearTenantData,
   contarPendientes,
 } from '@/lib/db';
-import { procesarCola, onFalloPermanente } from '@/lib/outbox';
+import { procesarCola, onFalloPermanente, getDiagnosticoCola } from '@/lib/outbox';
 import { Configuracion, Rol, EstadoNegocio, ItemCarrito, DatosNegocio } from '@/types';
 import LoginScreen from './LoginScreen';
 import SuspendedScreen from './SuspendedScreen';
@@ -39,6 +39,12 @@ import Icon from '@/components/ui/Icon';
 import { TAMANO_ICONO } from '@/components/ui/iconos';
 
 type EstadoSync = 'online' | 'offline' | 'syncing';
+
+// Con el backoff de outbox.ts (2^intentos segundos, tope 60s), 10 intentos
+// son del orden de 10 minutos reintentando. Con conexión real, eso ya no es
+// una cola lenta: es una operación que nunca puede completarse (ver
+// colaAtascada en AppContextType).
+const UMBRAL_INTENTOS_COLA_ATASCADA = 10;
 
 interface AppContextType {
   tasa: number;
@@ -98,6 +104,14 @@ interface AppContextType {
   pendientesCount: number;
   syncStatus: EstadoSync;
   sincronizarAhora: () => void;
+  // true cuando hay conexión Y la cola lleva 10+ intentos sin lograr
+  // sincronizar ninguna operación — con el backoff actual (tope 60s) son
+  // ~10 minutos reintentando con el teléfono reportando conexión. Eso ya no
+  // es "sin señal" (el chip ámbar normal), es algo roto: ver el caso real
+  // de AbortSignal.timeout en Chrome 94 (ventas trabadas horas sin ningún
+  // aviso, porque offline y "con señal pero no puede" se veían exactamente
+  // igual). Se recalcula después de cada corrida de sincronizar().
+  colaAtascada: boolean;
   // Se incrementa cada vez que Providers termina de escribir productos
   // frescos en IndexedDB. Las pantallas que leen productos (Caja,
   // Inventario) dependen de este valor para volver a leer cuando los datos
@@ -160,6 +174,7 @@ const AppContext = createContext<AppContextType>({
   pendientesCount: 0,
   syncStatus: 'online',
   sincronizarAhora: () => {},
+  colaAtascada: false,
   productosVersion: 0,
   carrito: [],
   setCarrito: () => {},
@@ -324,6 +339,7 @@ export default function Providers({ children }: { children: ReactNode }) {
   const [ultimaSincronizacion, setUltimaSincronizacion] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [pendientesCount, setPendientesCount] = useState(0);
+  const [colaAtascada, setColaAtascada] = useState(false);
   const [sincronizando, setSincronizando] = useState(false);
   const [productosVersion, setProductosVersion] = useState(0);
   const [motivoDeslogueo, setMotivoDeslogueo] = useState<string | null>(null);
@@ -419,6 +435,7 @@ export default function Providers({ children }: { children: ReactNode }) {
     setTasaState(0);
     setConfiguracion(null);
     setPendientesCount(0);
+    setColaAtascada(false);
     setCarrito([]);
     setShowCarrito(false);
     setPresupuestoConvirtiendoId(null);
@@ -542,6 +559,12 @@ export default function Providers({ children }: { children: ReactNode }) {
         await refrescarConfig();
       } finally {
         setPendientesCount(await contarPendientes());
+        // Se relee navigator.onLine acá (no el isOnline de arriba, que
+        // puede estar un tick viejo): colaAtascada solo tiene sentido con
+        // conexión real — sin ella, intentos altos son el comportamiento
+        // esperado de la cola, no una falla.
+        const diagnostico = await getDiagnosticoCola();
+        setColaAtascada(navigator.onLine && diagnostico.maxIntentos >= UMBRAL_INTENTOS_COLA_ATASCADA);
         setSincronizando(false);
       }
     };
@@ -550,7 +573,12 @@ export default function Providers({ children }: { children: ReactNode }) {
       setIsOnline(true);
       await sincronizar();
     };
-    const handleOffline = () => setIsOnline(false);
+    const handleOffline = () => {
+      setIsOnline(false);
+      // Sin conexión real, el chip normal de "sin conexión" es el correcto
+      // — nunca mostrar el aviso rojo de cola atascada mientras está offline.
+      setColaAtascada(false);
+    };
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
@@ -682,7 +710,7 @@ export default function Providers({ children }: { children: ReactNode }) {
       tasa, setTasa, isOnline, configuracion, theme, toggleTheme,
       user, negocioId, negocioNombre, rol, userNombre, usaCostos, setUsaCostos,
       usaStock, setUsaStock, tutorialVisto, marcarTutorialVisto, estado, fechaProximoPago, limiteUsuarios, datosNegocio, setDatosNegocio, ultimaSincronizacion, authLoading, signOut,
-      pendientesCount, syncStatus, sincronizarAhora, productosVersion,
+      pendientesCount, syncStatus, sincronizarAhora, colaAtascada, productosVersion,
       carrito, setCarrito, showCarrito, setShowCarrito,
       presupuestoConvirtiendoId, setPresupuestoConvirtiendoId,
       presupuestoClienteNombre, setPresupuestoClienteNombre,

@@ -72,7 +72,7 @@ function reproducirBeep() {
 
 export default function CajaPage() {
   const {
-    tasa, isOnline, negocioNombre, datosNegocio, user, pendientesCount, negocioId, rol, userNombre,
+    tasa, isOnline, negocioNombre, datosNegocio, user, pendientesCount, colaAtascada, negocioId, rol, userNombre,
     productosVersion, usaStock, ultimaSincronizacion, tutorialVisto,
     carrito, setCarrito, showCarrito, setShowCarrito,
     presupuestoConvirtiendoId, setPresupuestoConvirtiendoId,
@@ -767,6 +767,24 @@ export default function CajaPage() {
       {!isOnline && pendientesCount > 0 && (
         <div className="mx-4 mt-3 p-2.5 bg-tarjeta-hundida border border-borde-campo rounded-xl text-texto-2 text-xs text-center">
           {pendientesCount} cambio{pendientesCount === 1 ? '' : 's'} guardado{pendientesCount === 1 ? '' : 's'} en el dispositivo, pendiente{pendientesCount === 1 ? '' : 's'} de sincronizar
+        </div>
+      )}
+
+      {/* Distinto a propósito del chip ámbar de "sin conexión" — tokens de
+          negativo, no de aviso, para que no se confunda con el estado
+          normal de offline. Esto es "tengo señal y aun así no puedo
+          enviar", que es mucho más grave: ver el caso real de
+          AbortSignal.timeout en Chrome 94 (brief de compatibilidad con
+          navegadores viejos) — ventas trabadas horas sin ningún aviso
+          porque este caso se veía idéntico al offline normal. */}
+      {colaAtascada && (
+        <div className="mx-4 mt-3 p-3 bg-negativo-fondo border border-negativo-borde rounded-xl text-negativo text-xs text-center space-y-0.5">
+          <p className="font-bold">
+            No se {pendientesCount === 1 ? 'está pudiendo enviar' : 'están pudiendo enviar'} {pendientesCount} cambio{pendientesCount === 1 ? '' : 's'}.
+          </p>
+          <p>
+            Tienes conexión, pero algo está bloqueando el envío desde hace varios minutos. Avísale a soporte antes de cerrar sesión.
+          </p>
         </div>
       )}
 
