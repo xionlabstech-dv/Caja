@@ -607,6 +607,40 @@ export default function Providers({ children }: { children: ReactNode }) {
     async function init() {
       const cachedNegocioId = await getCachedNegocioId();
       if (cachedNegocioId !== null && cachedNegocioId !== id) {
+        // El teléfono tenía datos de OTRO negocio. Si no hay nada sin
+        // enviar, es un cambio de negocio limpio — se borra todo como
+        // siempre. Si hay algo en cola, borrar ahora destruiría plata
+        // registrada de ese otro negocio (las operaciones en cola son
+        // punteros a ventas/movimientos/presupuestos, no copias — ver el
+        // brief de este fix): se rechaza la sesión que recién se abrió, en
+        // vez de arrasar con los datos. En la práctica esto solo le pasa a
+        // un teléfono de prueba compartido entre negocios, nunca a un
+        // cliente real.
+        const pendientes = await contarPendientes();
+        if (pendientes > 0) {
+          await supabase.auth.signOut();
+          setUser(null);
+          setNegocioId(null);
+          setNegocioNombre('');
+          setRol(null);
+          setUserNombre('');
+          setUsaCostos(false);
+          setUsaStock(false);
+          setTutorialVisto(true);
+          setEstado('activo');
+          setFechaProximoPago(null);
+          setLimiteUsuarios(2);
+          setDatosNegocio({});
+          setCarrito([]);
+          setShowCarrito(false);
+          setPresupuestoConvirtiendoId(null);
+          setPresupuestoClienteNombre(null);
+          setMotivoDeslogueo(
+            `Este teléfono tiene ${pendientes} cambio${pendientes === 1 ? '' : 's'} sin enviar de otro negocio. ` +
+            'Conéctate a internet y vuelve a entrar con la cuenta anterior para enviarlos. Después podrás entrar con esta.'
+          );
+          return;
+        }
         await clearTenantData();
         setCarrito([]);
         setShowCarrito(false);
