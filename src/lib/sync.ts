@@ -12,7 +12,6 @@ import {
   savePresupuestosResumen,
   saveResumenFiado,
   setCachedDatosNegocio,
-  getAcreedores,
   saveAcreedores,
   actualizarSaldoAcreedorLocal,
 } from './db';
@@ -497,12 +496,8 @@ export async function getSaldoFiadoRemoto(clienteId: string): Promise<number | n
 
 // A diferencia de fiado (que separa el saldo —tabla directa, paginada— del
 // resumen —RPC fiado_clientes_listar—), acreedores_listar ya devuelve todo
-// junto en una sola fila por acreedor: saldo y los derivados. No trae
-// negocio_id ni creado_en (no los necesita para calcular nada de la lista);
-// se completan acá con el negocio conocido y con lo que ya hubiera
-// cacheado localmente para ese id — mismo criterio que savePresupuestosResumen
-// preservando `items`: un acreedor creado en este dispositivo no debe perder
-// su creado_en real por sincronizar.
+// junto en una sola fila por acreedor: saldo, los derivados, y también
+// negocio_id y creado_en. No hace falta reconstruir nada en el cliente.
 export async function getAcreedoresRemoto(negocioId: string): Promise<Acreedor[] | null> {
   try {
     const { data, error } = await supabase
@@ -521,20 +516,19 @@ export async function getAcreedoresRemoto(negocioId: string): Promise<Acreedor[]
       ultimo_movimiento_en: string | null;
       proximo_vencimiento: string | null;
       vencido: boolean;
+      negocio_id: string;
+      creado_en: string;
     }
-
-    const locales = await getAcreedores();
-    const creadoEnLocal = new Map(locales.map(a => [a.id, a.creado_en]));
 
     return ((data ?? []) as FilaAcreedor[]).map(r => ({
       id: r.id,
-      negocio_id: negocioId,
+      negocio_id: r.negocio_id,
       nombre: r.nombre,
       tipo: r.tipo,
       saldo_usd: r.saldo_usd,
       nota: r.nota,
       activo: r.activo,
-      creado_en: creadoEnLocal.get(r.id) ?? new Date(0).toISOString(),
+      creado_en: r.creado_en,
       movimientos: r.movimientos,
       ultimo_movimiento_en: r.ultimo_movimiento_en,
       proximo_vencimiento: r.proximo_vencimiento,
