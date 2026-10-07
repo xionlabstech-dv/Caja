@@ -37,6 +37,7 @@ import { Configuracion, Rol, EstadoNegocio, ItemCarrito, DatosNegocio } from '@/
 import LoginScreen from './LoginScreen';
 import SuspendedScreen from './SuspendedScreen';
 import AvisoNavegadorViejo from './AvisoNavegadorViejo';
+import NavegadorNoSoportado from './NavegadorNoSoportado';
 import Icon from '@/components/ui/Icon';
 import { TAMANO_ICONO } from '@/components/ui/iconos';
 
@@ -339,6 +340,12 @@ export default function Providers({ children }: { children: ReactNode }) {
   const [limiteUsuarios, setLimiteUsuarios] = useState(2);
   const [datosNegocio, setDatosNegocio] = useState<DatosNegocio>({});
   const [ultimaSincronizacion, setUltimaSincronizacion] = useState<string | null>(null);
+  // Default true y se corrige en un efecto, no al revés: esto es un
+  // componente cliente dentro de una exportación estática (output:'export')
+  // — asumir soporte y corregir apenas el navegador real responda evita
+  // cualquier lío con cómo se generó el HTML estático. Solo cubre que
+  // indexedDB no exista como función (ver NavegadorNoSoportado.tsx).
+  const [soportado, setSoportado] = useState(true);
   const [authLoading, setAuthLoading] = useState(true);
   // Los datos locales (productos, ventas, fiado...) son del negocio que
   // quedó cacheado en el teléfono, que puede NO ser el que acaba de entrar.
@@ -381,6 +388,10 @@ export default function Providers({ children }: { children: ReactNode }) {
   const [avisoFalloPermanente, setAvisoFalloPermanente] = useState<string | null>(null);
 
   useEffect(() => onFalloPermanente(mensaje => setAvisoFalloPermanente(mensaje)), []);
+
+  useEffect(() => {
+    if (typeof indexedDB === 'undefined') setSoportado(false);
+  }, []);
 
   useEffect(() => {
     const saved = localStorage.getItem('theme') as 'light' | 'dark' | null;
@@ -806,6 +817,12 @@ export default function Providers({ children }: { children: ReactNode }) {
       await setCachedFechaProximoPago(perfil.fechaProximoPago);
     }
   };
+
+  // Antes que cualquier otra cosa: si no hay dónde guardar nada, ni
+  // siquiera tiene sentido intentar cargar la sesión.
+  if (!soportado) {
+    return <NavegadorNoSoportado />;
+  }
 
   // Mismo bloque visual para los dos casos en que todavía no hay nada que
   // mostrar con seguridad: la sesión no resolvió (authLoading), o sí
