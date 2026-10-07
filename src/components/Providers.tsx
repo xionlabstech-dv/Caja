@@ -727,6 +727,11 @@ export default function Providers({ children }: { children: ReactNode }) {
           setPresupuestoClienteNombre(null);
         }
         await setCachedNegocioId(id);
+        // El ref queda al día apenas la verificación pasa: si este efecto
+        // vuelve a correr sin un login nuevo (por ejemplo porque cambió
+        // `rol`), la comparación tiene que dar "mismo negocio" y no
+        // volver a disparar el borrado ni el rechazo por cola pendiente.
+        negocioIdPrevioRef.current = id;
         setDatosVerificados(true);
       } catch {
         // No se pudo confirmar de quién son los datos locales — no abrir
