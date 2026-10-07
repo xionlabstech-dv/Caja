@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, Dispatch, SetStateAction, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, Dispatch, SetStateAction, ReactNode } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { syncFromSupabase, getConfiguracion, TIMEOUT_RPC_MS } from '@/lib/sync';
@@ -339,6 +339,26 @@ export default function Providers({ children }: { children: ReactNode }) {
   const [datosNegocio, setDatosNegocio] = useState<DatosNegocio>({});
   const [ultimaSincronizacion, setUltimaSincronizacion] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  // Los datos locales (productos, ventas, fiado...) son del negocio que
+  // quedó cacheado en el teléfono, que puede NO ser el que acaba de entrar.
+  // Desde que signOut dejó de borrarlos (correcto: ahí se perdían las
+  // ventas sin sincronizar), esto dejó de ser hipotético — ver el brief de
+  // este fix. Hasta que init() confirme que lo local es de este negocio (o
+  // lo borre), no se renderiza ninguna pantalla que lea datos.
+  const [datosVerificados, setDatosVerificados] = useState(false);
+  // El negocio que estaba cacheado en el teléfono ANTES de este login,
+  // capturado al principio de aplicarPerfil (ver más abajo) — antes de que
+  // resolverPerfil pueda sobrescribirlo. Probado con un test real: si
+  // init() reintentara leer getCachedNegocioId() en vez de este ref,
+  // siempre lee el valor YA sobrescrito por resolverPerfil (que lo graba
+  // como parte de resolver el perfil, antes de que setNegocioId() dispare
+  // el efecto que corre init()) — la comparación "cachedNegocioId !== id"
+  // nunca daría distinto, y clearTenantData()/el rechazo por cola pendiente
+  // nunca se ejecutarían para un login online con otro negocio. Un ref (no
+  // useState) porque no debe disparar un render propio, solo tiene que
+  // sobrevivir el salto entre el efecto de auth (que llama aplicarPerfil) y
+  // el efecto de datos (que llama init()).
+  const negocioIdPrevioRef = useRef<string | null>(null);
   const [pendientesCount, setPendientesCount] = useState(0);
   const [colaAtascada, setColaAtascada] = useState(false);
   const [sincronizando, setSincronizando] = useState(false);
@@ -441,6 +461,7 @@ export default function Providers({ children }: { children: ReactNode }) {
     setShowCarrito(false);
     setPresupuestoConvirtiendoId(null);
     setPresupuestoClienteNombre(null);
+    setDatosVerificados(false);
     setMotivoDeslogueo(
       pendientes > 0
         ? `Quedan ${pendientes} cambio${pendientes === 1 ? '' : 's'} sin enviar guardados en este teléfono. Vuelve a entrar con una cuenta de este mismo negocio y se enviarán solos cuando haya internet.`
@@ -480,6 +501,7 @@ export default function Providers({ children }: { children: ReactNode }) {
       setShowCarrito(false);
       setPresupuestoConvirtiendoId(null);
       setPresupuestoClienteNombre(null);
+      setDatosVerificados(false);
       setMotivoDeslogueo(
         'Tu usuario fue desactivado. Contacta al administrador de tu negocio.' +
         (pendientes > 0
@@ -490,6 +512,9 @@ export default function Providers({ children }: { children: ReactNode }) {
 
     const aplicarPerfil = async (u: User) => {
       setUser(u);
+      // Se captura ANTES de resolverPerfil a propósito — ver el comentario
+      // en la declaración de negocioIdPrevioRef más arriba.
+      negocioIdPrevioRef.current = await getCachedNegocioId();
       const perfil = await resolverPerfil(u.id);
       if (perfil === 'desactivado') {
         await forzarDeslogueoPorInactivo();
@@ -605,49 +630,88 @@ export default function Providers({ children }: { children: ReactNode }) {
     }, 30000);
 
     async function init() {
-      const cachedNegocioId = await getCachedNegocioId();
-      if (cachedNegocioId !== null && cachedNegocioId !== id) {
-        // El teléfono tenía datos de OTRO negocio. Si no hay nada sin
-        // enviar, es un cambio de negocio limpio — se borra todo como
-        // siempre. Si hay algo en cola, borrar ahora destruiría plata
-        // registrada de ese otro negocio (las operaciones en cola son
-        // punteros a ventas/movimientos/presupuestos, no copias — ver el
-        // brief de este fix): se rechaza la sesión que recién se abrió, en
-        // vez de arrasar con los datos. En la práctica esto solo le pasa a
-        // un teléfono de prueba compartido entre negocios, nunca a un
-        // cliente real.
-        const pendientes = await contarPendientes();
-        if (pendientes > 0) {
-          await supabase.auth.signOut();
-          setUser(null);
-          setNegocioId(null);
-          setNegocioNombre('');
-          setRol(null);
-          setUserNombre('');
-          setUsaCostos(false);
-          setUsaStock(false);
-          setTutorialVisto(true);
-          setEstado('activo');
-          setFechaProximoPago(null);
-          setLimiteUsuarios(2);
-          setDatosNegocio({});
+      // Hasta acá no se renderiza ninguna pantalla que lea datos locales
+      // (ver el gate !datosVerificados más abajo) — por eso este bloque va
+      // en try/catch: si algo revienta antes de llegar a
+      // setDatosVerificados(true), la salida segura es cerrar sesión y
+      // mandar al login, nunca dejar a alguien atrapado en el splash ni
+      // abrir el gate sin haber confirmado de quién son los datos.
+      try {
+        // No se relee getCachedNegocioId() acá: para este punto,
+        // resolverPerfil (si el login fue online) ya lo sobrescribió con
+        // el negocio NUEVO — comparar contra una relectura siempre daría
+        // "igual", así que la detección de negocio distinto jamás
+        // dispararía. negocioIdPrevioRef guarda el valor de ANTES de este
+        // login (ver su declaración más arriba).
+        const cachedNegocioId = negocioIdPrevioRef.current;
+        if (cachedNegocioId !== null && cachedNegocioId !== id) {
+          // El teléfono tenía datos de OTRO negocio. Si no hay nada sin
+          // enviar, es un cambio de negocio limpio — se borra todo como
+          // siempre. Si hay algo en cola, borrar ahora destruiría plata
+          // registrada de ese otro negocio (las operaciones en cola son
+          // punteros a ventas/movimientos/presupuestos, no copias — ver el
+          // brief de este fix): se rechaza la sesión que recién se abrió, en
+          // vez de arrasar con los datos. En la práctica esto solo le pasa a
+          // un teléfono de prueba compartido entre negocios, nunca a un
+          // cliente real.
+          const pendientes = await contarPendientes();
+          if (pendientes > 0) {
+            await supabase.auth.signOut();
+            setUser(null);
+            setNegocioId(null);
+            setNegocioNombre('');
+            setRol(null);
+            setUserNombre('');
+            setUsaCostos(false);
+            setUsaStock(false);
+            setTutorialVisto(true);
+            setEstado('activo');
+            setFechaProximoPago(null);
+            setLimiteUsuarios(2);
+            setDatosNegocio({});
+            setCarrito([]);
+            setShowCarrito(false);
+            setPresupuestoConvirtiendoId(null);
+            setPresupuestoClienteNombre(null);
+            setDatosVerificados(false);
+            setMotivoDeslogueo(
+              `Este teléfono tiene ${pendientes} cambio${pendientes === 1 ? '' : 's'} sin enviar de otro negocio. ` +
+              'Conéctate a internet y vuelve a entrar con la cuenta anterior para enviarlos. Después podrás entrar con esta.'
+            );
+            return;
+          }
+          await clearTenantData();
           setCarrito([]);
           setShowCarrito(false);
           setPresupuestoConvirtiendoId(null);
           setPresupuestoClienteNombre(null);
-          setMotivoDeslogueo(
-            `Este teléfono tiene ${pendientes} cambio${pendientes === 1 ? '' : 's'} sin enviar de otro negocio. ` +
-            'Conéctate a internet y vuelve a entrar con la cuenta anterior para enviarlos. Después podrás entrar con esta.'
-          );
-          return;
         }
-        await clearTenantData();
+        await setCachedNegocioId(id);
+        setDatosVerificados(true);
+      } catch {
+        // No se pudo confirmar de quién son los datos locales — no abrir
+        // el gate nunca. Mismo reset que el camino de rechazo de arriba.
+        await supabase.auth.signOut().catch(() => {});
+        setUser(null);
+        setNegocioId(null);
+        setNegocioNombre('');
+        setRol(null);
+        setUserNombre('');
+        setUsaCostos(false);
+        setUsaStock(false);
+        setTutorialVisto(true);
+        setEstado('activo');
+        setFechaProximoPago(null);
+        setLimiteUsuarios(2);
+        setDatosNegocio({});
         setCarrito([]);
         setShowCarrito(false);
         setPresupuestoConvirtiendoId(null);
         setPresupuestoClienteNombre(null);
+        setDatosVerificados(false);
+        setMotivoDeslogueo('No se pudieron preparar los datos de este negocio en el teléfono. Vuelve a entrar.');
+        return;
       }
-      await setCachedNegocioId(id);
 
       const localConfig = await getConfiguracion();
       if (localConfig) {
@@ -732,18 +796,24 @@ export default function Providers({ children }: { children: ReactNode }) {
     }
   };
 
-  if (authLoading) {
-    return (
-      <div className="min-h-screen bg-emerald-600 flex items-center justify-center">
-        <div className="text-white text-center">
-          <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <Icon nombre="caja" tamano={36} className="text-white" />
-          </div>
-          <p className="text-2xl font-bold">Caja</p>
+  // Mismo bloque visual para los dos casos en que todavía no hay nada que
+  // mostrar con seguridad: la sesión no resolvió (authLoading), o sí
+  // resolvió pero todavía no se confirmó de quién son los datos locales
+  // (!datosVerificados) — ver el estado y el comentario en init(). El
+  // orden de los tres chequeos importa: sin sesión se quiere el login, no
+  // un spinner, así que !user va en el medio.
+  const splash = (
+    <div className="min-h-screen bg-emerald-600 flex items-center justify-center">
+      <div className="text-white text-center">
+        <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
+          <Icon nombre="caja" tamano={36} className="text-white" />
         </div>
+        <p className="text-2xl font-bold">Caja</p>
       </div>
-    );
-  }
+    </div>
+  );
+
+  if (authLoading) return splash;
 
   if (!user) {
     return (
@@ -753,6 +823,8 @@ export default function Providers({ children }: { children: ReactNode }) {
       />
     );
   }
+
+  if (!datosVerificados) return splash;
 
   return (
     <AppContext.Provider value={{
