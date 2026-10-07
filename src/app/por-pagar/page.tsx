@@ -3,11 +3,14 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Acreedor, TipoAcreedor } from '@/types';
-import { getAcreedores } from '@/lib/db';
+import { getAcreedores, saveAcreedor } from '@/lib/db';
+import { encolarCrearAcreedor } from '@/lib/outbox';
 import { formatBS, formatUSD } from '@/lib/precio';
 import { useApp } from '@/components/Providers';
 import { useGuardarRuta } from '@/lib/useGuardarRuta';
 import ThemeToggle from '@/components/ThemeToggle';
+import Button from '@/components/ui/Button';
+import BottomSheet from '@/components/ui/BottomSheet';
 import ChipFiltro from '@/components/ui/ChipFiltro';
 import Icon from '@/components/ui/Icon';
 import { TAMANO_ICONO } from '@/components/ui/iconos';
@@ -38,12 +41,25 @@ function fmtVencimiento(fecha: string): string {
 
 export default function PorPagarPage() {
   const permitida = useGuardarRuta();
-  const { tasa, isOnline, usaCuentasPagar, productosVersion } = useApp();
+  const { tasa, isOnline, negocioId, usaCuentasPagar, productosVersion } = useApp();
   const router = useRouter();
 
   const [acreedores, setAcreedores] = useState<Acreedor[]>([]);
   const [cargando, setCargando] = useState(true);
   const [chip, setChip] = useState<'todos' | TipoAcreedor>('todos');
+
+  const [creando, setCreando] = useState(false);
+  const [nombreNuevo, setNombreNuevo] = useState('');
+  const [tipoNuevo, setTipoNuevo] = useState<TipoAcreedor | null>(null);
+  const [notaNuevo, setNotaNuevo] = useState('');
+  const [guardando, setGuardando] = useState(false);
+  const [errorNuevo, setErrorNuevo] = useState('');
+  const [toast, setToast] = useState('');
+
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(''), 3000);
+  };
 
   // Módulo opcional apagado por default: useGuardarRuta ya cubre rol/estado
   // (la ruta vive en RUTAS_ADMIN/RUTAS_OCULTAS_RESTRINGIDO), pero no sabe de
@@ -87,6 +103,59 @@ export default function PorPagarPage() {
     .filter(a => (chip === 'todos' ? true : a.tipo === chip))
     .sort((a, b) => b.saldo_usd - a.saldo_usd || a.nombre.localeCompare(b.nombre, 'es'));
 
+  const abrirCrear = () => {
+    setNombreNuevo('');
+    setTipoNuevo(null);
+    setNotaNuevo('');
+    setErrorNuevo('');
+    setCreando(true);
+  };
+
+  const cerrarCrear = () => {
+    if (guardando) return;
+    setCreando(false);
+  };
+
+  const confirmarCrear = async () => {
+    if (!negocioId) return;
+    const nombre = nombreNuevo.trim();
+    if (!nombre) {
+      setErrorNuevo('Ingresa un nombre');
+      return;
+    }
+    if (!tipoNuevo) {
+      setErrorNuevo('Elige un tipo');
+      return;
+    }
+
+    setGuardando(true);
+    const nuevo: Acreedor = {
+      id: crypto.randomUUID(),
+      negocio_id: negocioId,
+      nombre,
+      tipo: tipoNuevo,
+      saldo_usd: 0,
+      nota: notaNuevo.trim() || null,
+      activo: true,
+      creado_en: new Date().toISOString(),
+      movimientos: 0,
+      ultimo_movimiento_en: null,
+      proximo_vencimiento: null,
+      vencido: false,
+    };
+
+    // Offline-first: igual que crearClienteFiado (src/app/page.tsx) — se
+    // guarda local primero y se encola, nunca se espera al servidor para
+    // mostrarlo.
+    await saveAcreedor(nuevo);
+    setAcreedores(prev => [...prev, nuevo]);
+    await encolarCrearAcreedor(nuevo, negocioId);
+
+    setGuardando(false);
+    setCreando(false);
+    showToast('Acreedor agregado');
+  };
+
   return (
     <div>
       <header className="bg-superficie-barra border-b border-borde-divisor px-4 pt-3.5 pb-3 flex items-center gap-2.5">
@@ -108,6 +177,13 @@ export default function PorPagarPage() {
           </span>
         </div>
         <ThemeToggle variant="neutro" />
+        <button
+          onClick={abrirCrear}
+          className="flex-none h-11 px-4 rounded-xl bg-marca text-texto-invertido font-semibold text-sm flex items-center gap-1.5 active:bg-marca-presion"
+        >
+          <Icon nombre="agregar" tamano={TAMANO_ICONO.secundario} />
+          Agregar
+        </button>
       </header>
 
       {/* pb-1 + overflow visible: mismo arreglo que Fiado/Inventario para
@@ -213,6 +289,67 @@ export default function PorPagarPage() {
           </div>
         )}
       </div>
+
+      {/* Crear acreedor */}
+      <BottomSheet abierto={creando} onCerrar={cerrarCrear} titulo="Nuevo acreedor">
+        <div className="space-y-5">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wide text-texto-3 mb-2">Nombre</p>
+            <input
+              type="text"
+              value={nombreNuevo}
+              onChange={e => { setNombreNuevo(e.target.value); setErrorNuevo(''); }}
+              placeholder="Ej. Distribuidora La Central"
+              className="w-full h-[52px] px-3.5 rounded-[12px] bg-tarjeta border border-borde-campo focus:outline-none focus:border-foco text-base text-texto"
+              autoFocus
+            />
+          </div>
+
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wide text-texto-3 mb-2">Tipo</p>
+            <div className="grid grid-cols-3 gap-2">
+              {TIPOS.map(t => {
+                const activo = tipoNuevo === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => { setTipoNuevo(t.id); setErrorNuevo(''); }}
+                    className={`h-[52px] rounded-[12px] border flex items-center justify-center text-sm font-semibold ${
+                      activo ? 'bg-marca-suave text-marca-suave-texto border-marca' : 'bg-tarjeta-hundida text-texto-2 border-borde-campo'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wide text-texto-3 mb-2">Nota (opcional)</p>
+            <input
+              type="text"
+              value={notaNuevo}
+              onChange={e => setNotaNuevo(e.target.value)}
+              placeholder="Ej. Pago los días 15 y 30"
+              className="w-full h-[52px] px-3.5 rounded-[12px] bg-tarjeta border border-borde-campo focus:outline-none focus:border-foco text-base text-texto"
+            />
+          </div>
+
+          {errorNuevo && <p className="text-sm text-negativo">{errorNuevo}</p>}
+
+          <Button variante="primario" disabled={guardando} onClick={confirmarCrear} className="w-full">
+            {guardando ? 'Guardando...' : 'Agregar acreedor'}
+          </Button>
+        </div>
+      </BottomSheet>
+
+      {toast && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-toast-fondo text-toast-texto px-5 py-2.5 rounded-xl text-sm font-medium z-50 shadow-lg max-w-xs text-center">
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
