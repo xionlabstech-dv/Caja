@@ -2,10 +2,18 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Acreedor, TipoAcreedor } from '@/types';
-import { getAcreedores, saveAcreedor } from '@/lib/db';
-import { encolarCrearAcreedor } from '@/lib/outbox';
+import { Acreedor, TipoAcreedor, MovimientoAcreedor, MetodoAbono } from '@/types';
+import {
+  getAcreedores,
+  saveAcreedor,
+  getMovimientosAcreedorPorAcreedor,
+  saveMovimientoAcreedor,
+  actualizarSaldoAcreedorLocal,
+} from '@/lib/db';
+import { getMovimientosAcreedorRemoto } from '@/lib/sync';
+import { encolarCrearAcreedor, encolarAplicarMovimientoAcreedor, onFalloPermanente } from '@/lib/outbox';
 import { formatBS, formatUSD } from '@/lib/precio';
+import { METODOS_PAGO } from '@/lib/metodos';
 import { useApp } from '@/components/Providers';
 import { useGuardarRuta } from '@/lib/useGuardarRuta';
 import ThemeToggle from '@/components/ThemeToggle';
@@ -13,7 +21,7 @@ import Button from '@/components/ui/Button';
 import BottomSheet from '@/components/ui/BottomSheet';
 import ChipFiltro from '@/components/ui/ChipFiltro';
 import Icon from '@/components/ui/Icon';
-import { TAMANO_ICONO } from '@/components/ui/iconos';
+import { ICONO_METODO_PAGO, TAMANO_ICONO } from '@/components/ui/iconos';
 
 const TIPOS: { id: TipoAcreedor; label: string; labelPlural: string }[] = [
   { id: 'proveedor', label: 'Proveedor', labelPlural: 'Proveedores' },
@@ -25,13 +33,19 @@ function labelTipo(tipo: TipoAcreedor): string {
   return TIPOS.find(t => t.id === tipo)?.label ?? tipo;
 }
 
+// Un pago nunca es 'fiado' — ese método no tiene sentido para pagarle a un
+// acreedor. Mismo filtro que METODOS_ABONO en fiado/page.tsx.
+const METODOS_ABONO = METODOS_PAGO.filter(
+  (m): m is { id: MetodoAbono; label: string } => m.id !== 'fiado'
+);
+
 // Saldos que quedaron en centavos de nada por redondeo no cuentan como
 // deuda real — mismo margen que usa Fiado, y el mismo que acreedores_listar
 // usa internamente para decidir `vencido`: tienen que coincidir.
 const EPSILON_SALDO = 0.005;
 
-// proximo_vencimiento es un 'date' puro de Postgres ('YYYY-MM-DD'):
-// parsearlo con `new Date(iso)` a secas lo interpreta en UTC y puede
+// proximo_vencimiento y vence_el son 'date' puros de Postgres ('YYYY-MM-DD'):
+// parsearlos con `new Date(iso)` a secas los interpreta en UTC y puede
 // mostrar el día anterior según la zona horaria (mismo cuidado que
 // fmtFechaCorta en presupuestos/page.tsx).
 function fmtVencimiento(fecha: string): string {
@@ -39,14 +53,31 @@ function fmtVencimiento(fecha: string): string {
   return new Date(anio, mes - 1, dia).toLocaleDateString('es-VE', { day: 'numeric', month: 'long' });
 }
 
+// Relativa ("hace 3 d") + exacta (día y mes corto) — mismo criterio que
+// fmtFechaRelativa/fmtFechaExacta en fiado/page.tsx. A diferencia de
+// fmtVencimiento, ocurrido_en es un timestamp real (new Date().toISOString()),
+// así que acá sí corresponde `new Date(iso)` directo.
+function fmtFechaRelativa(iso: string): string {
+  const dias = Math.floor((Date.now() - new Date(iso).getTime()) / (24 * 60 * 60 * 1000));
+  if (dias <= 0) return 'hoy';
+  if (dias < 30) return `hace ${dias} d`;
+  return `hace ${Math.floor(dias / 30)} m`;
+}
+
+function fmtFechaExacta(iso: string): string {
+  return new Date(iso).toLocaleDateString('es-VE', { day: '2-digit', month: 'short' });
+}
+
 export default function PorPagarPage() {
   const permitida = useGuardarRuta();
-  const { tasa, isOnline, negocioId, usaCuentasPagar, productosVersion } = useApp();
+  const { tasa, isOnline, negocioId, userNombre, usaCuentasPagar, productosVersion } = useApp();
   const router = useRouter();
 
   const [acreedores, setAcreedores] = useState<Acreedor[]>([]);
   const [cargando, setCargando] = useState(true);
   const [chip, setChip] = useState<'todos' | TipoAcreedor>('todos');
+  const [expandido, setExpandido] = useState<string | null>(null);
+  const [detalleMovimientos, setDetalleMovimientos] = useState<Record<string, MovimientoAcreedor[]>>({});
 
   const [creando, setCreando] = useState(false);
   const [nombreNuevo, setNombreNuevo] = useState('');
@@ -54,6 +85,24 @@ export default function PorPagarPage() {
   const [notaNuevo, setNotaNuevo] = useState('');
   const [guardando, setGuardando] = useState(false);
   const [errorNuevo, setErrorNuevo] = useState('');
+
+  // Registrar deuda
+  const [registrandoDeuda, setRegistrandoDeuda] = useState<Acreedor | null>(null);
+  const [monedaDeuda, setMonedaDeuda] = useState<'usd' | 'bs'>('usd');
+  const [montoDeuda, setMontoDeuda] = useState('');
+  const [venceElDeuda, setVenceElDeuda] = useState('');
+  const [notaDeuda, setNotaDeuda] = useState('');
+  const [guardandoDeuda, setGuardandoDeuda] = useState(false);
+  const [errorDeuda, setErrorDeuda] = useState('');
+
+  // Registrar pago
+  const [pagando, setPagando] = useState<Acreedor | null>(null);
+  const [metodoPago, setMetodoPago] = useState<MetodoAbono | null>(null);
+  const [montoPago, setMontoPago] = useState('');
+  const [notaPago, setNotaPago] = useState('');
+  const [guardandoPago, setGuardandoPago] = useState(false);
+  const [errorPago, setErrorPago] = useState('');
+
   const [toast, setToast] = useState('');
 
   const showToast = (msg: string) => {
@@ -84,6 +133,14 @@ export default function PorPagarPage() {
     return () => { cancelado = true; };
   }, [productosVersion]);
 
+  // Si la cola rechazó de forma definitiva un movimiento de este acreedor,
+  // ya corrigió el saldo en IndexedDB de inmediato (ver outbox.ts) — sin
+  // esto, esta pantalla seguiría mostrando el saldo optimista viejo hasta el
+  // próximo sync periódico. Mismo listener que usa Fiado.
+  useEffect(() => onFalloPermanente(() => {
+    getAcreedores().then(as => setAcreedores(as.filter(a => a.activo)));
+  }), []);
+
   // Recién ahora, con todos los hooks ya llamados, se puede cortar el
   // render — mismo criterio que Fiado, evita un frame de contenido indebido
   // antes de que el redirect del efecto de arriba (o useGuardarRuta) actúe.
@@ -102,6 +159,23 @@ export default function PorPagarPage() {
   const acreedoresFiltrados = acreedores
     .filter(a => (chip === 'todos' ? true : a.tipo === chip))
     .sort((a, b) => b.saldo_usd - a.saldo_usd || a.nombre.localeCompare(b.nombre, 'es'));
+
+  // El historial no viaja en el sync periódico (el saldo sí) — se pide al
+  // expandir. Sin red se muestra lo último cacheado en este dispositivo, o
+  // nada la primera vez, sin bloquear el resto de la pantalla. Espejo de
+  // expandirCliente en fiado/page.tsx.
+  const expandirAcreedor = async (acreedorId: string) => {
+    setExpandido(prev => (prev === acreedorId ? null : acreedorId));
+    const local = await getMovimientosAcreedorPorAcreedor(acreedorId);
+    setDetalleMovimientos(prev => ({ ...prev, [acreedorId]: local }));
+    if (isOnline) {
+      const remotos = await getMovimientosAcreedorRemoto(acreedorId, 20);
+      if (remotos) {
+        await Promise.all(remotos.map(m => saveMovimientoAcreedor(m)));
+        setDetalleMovimientos(prev => ({ ...prev, [acreedorId]: remotos }));
+      }
+    }
+  };
 
   const abrirCrear = () => {
     setNombreNuevo('');
@@ -162,6 +236,179 @@ export default function PorPagarPage() {
       setGuardando(false);
     }
   };
+
+  const abrirRegistrarDeuda = (acreedor: Acreedor) => {
+    setRegistrandoDeuda(acreedor);
+    setMonedaDeuda('usd');
+    setMontoDeuda('');
+    setVenceElDeuda('');
+    setNotaDeuda('');
+    setErrorDeuda('');
+  };
+
+  const cerrarRegistrarDeuda = () => {
+    if (guardandoDeuda) return;
+    setRegistrandoDeuda(null);
+  };
+
+  const montoDeudaEsUsd = monedaDeuda === 'usd';
+  const montoDeudaNum = parseFloat(montoDeuda);
+  // El equivalente se calcula una sola vez, con la tasa de este instante, y
+  // se guarda tal cual — nunca se deriva después del otro monto. Igual que
+  // montoAbonoUsd/montoAbonoBsCalculado en Fiado.
+  const montoDeudaUsd = registrandoDeuda && montoDeudaNum > 0
+    ? (montoDeudaEsUsd ? montoDeudaNum : (tasa > 0 ? montoDeudaNum / tasa : 0))
+    : 0;
+  const montoDeudaBsCalculado = registrandoDeuda && montoDeudaNum > 0
+    ? (montoDeudaEsUsd ? (tasa > 0 ? montoDeudaNum * tasa : 0) : montoDeudaNum)
+    : 0;
+  const totalDespuesDeuda = registrandoDeuda && montoDeudaNum > 0 ? registrandoDeuda.saldo_usd + montoDeudaUsd : null;
+
+  const confirmarDeuda = async () => {
+    if (!registrandoDeuda || !negocioId) return;
+    if (!montoDeuda.trim() || isNaN(montoDeudaNum) || montoDeudaNum <= 0) {
+      setErrorDeuda('Ingresa un monto válido');
+      return;
+    }
+    if (!montoDeudaEsUsd && tasa <= 0) {
+      setErrorDeuda('Configura la tasa BCV para registrar en Bs');
+      return;
+    }
+
+    setGuardandoDeuda(true);
+    const now = new Date().toISOString();
+    const nuevoSaldo = registrandoDeuda.saldo_usd + montoDeudaUsd;
+    const movimiento: MovimientoAcreedor = {
+      id: crypto.randomUUID(),
+      negocio_id: negocioId,
+      acreedor_id: registrandoDeuda.id,
+      tipo: 'deuda',
+      monto_usd: montoDeudaUsd,
+      monto_bs: montoDeudaBsCalculado,
+      tasa_usada: tasa,
+      metodo_pago: null,
+      vence_el: venceElDeuda || null,
+      nota: notaDeuda.trim() || null,
+      usuario_nombre: userNombre || null,
+      saldo_resultante: nuevoSaldo,
+      ocurrido_en: now,
+      sincronizado: false,
+    };
+
+    try {
+      // Offline-first, mismo orden que confirmarAbono en Fiado: el
+      // movimiento ya ocurrió en la realidad (la mercancía llegó) — se
+      // aplica local de inmediato y nunca se revierte solo porque falle la
+      // red en este instante.
+      await saveMovimientoAcreedor(movimiento);
+      await actualizarSaldoAcreedorLocal(registrandoDeuda.id, nuevoSaldo);
+      setAcreedores(prev => prev.map(a => (a.id === registrandoDeuda.id ? { ...a, saldo_usd: nuevoSaldo } : a)));
+      await encolarAplicarMovimientoAcreedor(movimiento.id, negocioId);
+      setRegistrandoDeuda(null);
+      showToast('Deuda registrada');
+    } catch {
+      // Mismo candado que confirmarCrear: el finally de abajo es lo único
+      // que garantiza que la hoja se pueda cerrar pase lo que pase.
+      setErrorDeuda('No se pudo guardar en este teléfono. Intenta de nuevo.');
+    } finally {
+      setGuardandoDeuda(false);
+    }
+  };
+
+  const abrirRegistrarPago = (acreedor: Acreedor) => {
+    setPagando(acreedor);
+    setMetodoPago(null);
+    setMontoPago('');
+    setNotaPago('');
+    setErrorPago('');
+  };
+
+  const cerrarRegistrarPago = () => {
+    if (guardandoPago) return;
+    setPagando(null);
+  };
+
+  const pagoEsUsd = metodoPago === 'efectivo_usd';
+  const montoPagoNum = parseFloat(montoPago);
+  const montoPagoUsd = pagando && montoPagoNum > 0
+    ? (pagoEsUsd ? montoPagoNum : (tasa > 0 ? montoPagoNum / tasa : 0))
+    : 0;
+  const montoPagoBsCalculado = pagando && montoPagoNum > 0
+    ? (pagoEsUsd ? (tasa > 0 ? montoPagoNum * tasa : 0) : montoPagoNum)
+    : 0;
+  const restanteDespuesPago = pagando && montoPagoNum > 0 ? pagando.saldo_usd - montoPagoUsd : null;
+  const excedeDeudaPago = pagando !== null && montoPagoNum > 0 && montoPagoUsd > pagando.saldo_usd + EPSILON_SALDO;
+  const quedaEnCeroPago = Math.max(0, restanteDespuesPago ?? 0) <= EPSILON_SALDO;
+  const muestraTodoPago = metodoPago !== null && (pagoEsUsd || tasa > 0);
+
+  // Rellena el monto con la deuda completa, convertida a la moneda del
+  // método elegido — mismo botón píldora "Todo" que Fiado.
+  const montoTodoPago = () => {
+    if (!pagando || !metodoPago) return;
+    const v = pagoEsUsd ? pagando.saldo_usd : pagando.saldo_usd * tasa;
+    setMontoPago(v.toFixed(2));
+  };
+
+  const confirmarPago = async () => {
+    if (!pagando || !negocioId) return;
+    if (!metodoPago) {
+      setErrorPago('Elige un método de pago');
+      return;
+    }
+    if (!montoPago.trim() || isNaN(montoPagoNum) || montoPagoNum <= 0) {
+      setErrorPago('Ingresa un monto válido');
+      return;
+    }
+    if (!pagoEsUsd && tasa <= 0) {
+      setErrorPago('Configura la tasa BCV para pagar con este método');
+      return;
+    }
+    if (excedeDeudaPago) {
+      setErrorPago(`No puede superar la deuda: ${formatUSD(pagando.saldo_usd)}`);
+      return;
+    }
+
+    setGuardandoPago(true);
+    const now = new Date().toISOString();
+    const nuevoSaldo = Math.max(0, pagando.saldo_usd - montoPagoUsd);
+    const movimiento: MovimientoAcreedor = {
+      id: crypto.randomUUID(),
+      negocio_id: negocioId,
+      acreedor_id: pagando.id,
+      tipo: 'pago',
+      monto_usd: montoPagoUsd,
+      monto_bs: montoPagoBsCalculado,
+      tasa_usada: tasa,
+      metodo_pago: metodoPago,
+      vence_el: null,
+      nota: notaPago.trim() || null,
+      usuario_nombre: userNombre || null,
+      saldo_resultante: nuevoSaldo,
+      ocurrido_en: now,
+      sincronizado: false,
+    };
+
+    try {
+      await saveMovimientoAcreedor(movimiento);
+      await actualizarSaldoAcreedorLocal(pagando.id, nuevoSaldo);
+      setAcreedores(prev => prev.map(a => (a.id === pagando.id ? { ...a, saldo_usd: nuevoSaldo } : a)));
+      await encolarAplicarMovimientoAcreedor(movimiento.id, negocioId);
+      setPagando(null);
+      showToast('Pago registrado');
+    } catch {
+      setErrorPago('No se pudo guardar en este teléfono. Intenta de nuevo.');
+    } finally {
+      setGuardandoPago(false);
+    }
+  };
+
+  const textoConfirmarPago = guardandoPago
+    ? 'Guardando...'
+    : !metodoPago
+    ? 'Elige el método del pago'
+    : !montoPago.trim() || montoPagoNum <= 0
+    ? 'Ingresa el monto'
+    : 'Confirmar pago';
 
   return (
     <div>
@@ -250,46 +497,117 @@ export default function PorPagarPage() {
               return (
                 <div
                   key={a.id}
-                  className={`bg-tarjeta rounded-2xl border p-3.5 flex items-center gap-3 ${a.vencido ? 'border-negativo-borde' : 'border-borde-tarjeta'}`}
+                  className={`bg-tarjeta rounded-2xl border overflow-hidden ${a.vencido ? 'border-negativo-borde' : 'border-borde-tarjeta'}`}
                 >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <p className="font-semibold text-[15px] text-texto truncate">{a.nombre}</p>
-                      <span className="flex-none h-5 px-1.5 inline-flex items-center rounded-full bg-tarjeta-hundida text-texto-3 text-[11px] font-semibold">
-                        {labelTipo(a.tipo)}
-                      </span>
-                      {a.vencido && (
-                        <span className="flex-none h-5 px-1.5 inline-flex items-center rounded-full bg-negativo-fondo text-negativo text-[11px] font-bold">
-                          Vencido
+                  <button onClick={() => expandirAcreedor(a.id)} className="w-full flex items-center gap-3 p-3.5 text-left">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="font-semibold text-[15px] text-texto truncate">{a.nombre}</p>
+                        <span className="flex-none h-5 px-1.5 inline-flex items-center rounded-full bg-tarjeta-hundida text-texto-3 text-[11px] font-semibold">
+                          {labelTipo(a.tipo)}
                         </span>
-                      )}
-                    </div>
-                    {(a.movimientos > 0 || a.proximo_vencimiento) && (
-                      <div className="flex items-center gap-3 mt-0.5 flex-wrap">
-                        {a.movimientos > 0 && (
-                          <p className="text-xs text-texto-3">
-                            {a.movimientos} {a.movimientos === 1 ? 'movimiento' : 'movimientos'}
-                          </p>
-                        )}
-                        {a.proximo_vencimiento && (
-                          <p className="flex items-center gap-1 text-xs text-texto-3">
-                            <Icon nombre="calendario" tamano={TAMANO_ICONO.chip} />
-                            Vence el {fmtVencimiento(a.proximo_vencimiento)}
-                          </p>
+                        {a.vencido && (
+                          <span className="flex-none h-5 px-1.5 inline-flex items-center rounded-full bg-negativo-fondo text-negativo text-[11px] font-bold">
+                            Vencido
+                          </span>
                         )}
                       </div>
-                    )}
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    {debe ? (
-                      <>
-                        <p className="font-bold text-lg text-aviso tabular-nums">{formatUSD(a.saldo_usd)}</p>
-                        {tasa > 0 && <p className="text-xs text-texto-2 tabular-nums">{formatBS(a.saldo_usd * tasa)}</p>}
-                      </>
-                    ) : (
-                      <p className="font-medium text-texto-2">Al día</p>
-                    )}
-                  </div>
+                      {(a.movimientos > 0 || a.proximo_vencimiento) && (
+                        <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                          {a.movimientos > 0 && (
+                            <p className="text-xs text-texto-3">
+                              {a.movimientos} {a.movimientos === 1 ? 'movimiento' : 'movimientos'}
+                            </p>
+                          )}
+                          {a.proximo_vencimiento && (
+                            <p className="flex items-center gap-1 text-xs text-texto-3">
+                              <Icon nombre="calendario" tamano={TAMANO_ICONO.chip} />
+                              Vence el {fmtVencimiento(a.proximo_vencimiento)}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      {debe ? (
+                        <>
+                          <p className="font-bold text-lg text-aviso tabular-nums">{formatUSD(a.saldo_usd)}</p>
+                          {tasa > 0 && <p className="text-xs text-texto-2 tabular-nums">{formatBS(a.saldo_usd * tasa)}</p>}
+                        </>
+                      ) : (
+                        <p className="font-medium text-texto-2">{a.movimientos === 0 ? 'Sin deudas' : 'Al día'}</p>
+                      )}
+                    </div>
+                  </button>
+
+                  {expandido === a.id && (
+                    <div className="px-3.5 pb-3.5 border-t border-borde-divisor pt-3 flex flex-col gap-2.5">
+                      {(() => {
+                        const movimientos = detalleMovimientos[a.id] ?? [];
+                        if (movimientos.length === 0) {
+                          return (
+                            <p className="text-xs text-texto-3 py-1">
+                              {isOnline ? 'Todavía no hay movimientos' : 'Sin conexión — hace falta señal para ver el detalle'}
+                            </p>
+                          );
+                        }
+                        return (
+                          <div className="flex flex-col gap-2">
+                            {movimientos.map(m => {
+                              const esDeuda = m.tipo === 'deuda';
+                              const metodoLabel = m.metodo_pago
+                                ? METODOS_PAGO.find(x => x.id === m.metodo_pago)?.label ?? m.metodo_pago
+                                : null;
+                              return (
+                                <div key={m.id} className="bg-tarjeta-hundida rounded-[12px] p-3 flex flex-col gap-1.5">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span
+                                      className={`h-5 px-1.5 inline-flex items-center rounded-full text-[11px] font-bold whitespace-nowrap ${
+                                        esDeuda ? 'bg-aviso-fondo text-aviso' : 'bg-marca-suave text-marca-suave-texto'
+                                      }`}
+                                    >
+                                      {esDeuda ? 'Deuda' : 'Pago'}
+                                    </span>
+                                    <span className={`font-bold tabular-nums whitespace-nowrap ${esDeuda ? 'text-texto' : 'text-marca'}`}>
+                                      {esDeuda ? '+' : '−'} {formatUSD(m.monto_usd)}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-texto-3">
+                                    {fmtFechaRelativa(m.ocurrido_en)} · {fmtFechaExacta(m.ocurrido_en)}
+                                    {m.sincronizado === false && ' · pendiente de subir'}
+                                  </p>
+                                  {!esDeuda && metodoLabel && (
+                                    <span className="self-start h-6 px-2 inline-flex items-center gap-1.5 rounded-full bg-tarjeta text-texto-2 text-xs">
+                                      {m.metodo_pago && <Icon nombre={ICONO_METODO_PAGO[m.metodo_pago]} tamano={12} />}
+                                      {metodoLabel}
+                                    </span>
+                                  )}
+                                  {esDeuda && m.vence_el && (
+                                    <p className="flex items-center gap-1 text-xs text-texto-3">
+                                      <Icon nombre="calendario" tamano={TAMANO_ICONO.chip} />
+                                      Vence el {fmtVencimiento(m.vence_el)}
+                                    </p>
+                                  )}
+                                  {m.nota && <p className="text-xs text-texto-2">{m.nota}</p>}
+                                  {m.usuario_nombre && <p className="text-xs text-texto-4">Registrado por {m.usuario_nombre}</p>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
+                      <div className="flex gap-2">
+                        <Button variante="secundario" onClick={() => abrirRegistrarDeuda(a)} className="flex-1">
+                          <Icon nombre="agregar" tamano={TAMANO_ICONO.secundario} />
+                          Registrar deuda
+                        </Button>
+                        <Button variante="primario" disabled={!debe} onClick={() => abrirRegistrarPago(a)} className="flex-1">
+                          <Icon nombre="confirmar" tamano={TAMANO_ICONO.secundario} />
+                          Registrar pago
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -350,6 +668,217 @@ export default function PorPagarPage() {
             {guardando ? 'Guardando...' : 'Agregar acreedor'}
           </Button>
         </div>
+      </BottomSheet>
+
+      {/* Registrar deuda */}
+      <BottomSheet
+        abierto={!!registrandoDeuda}
+        onCerrar={cerrarRegistrarDeuda}
+        titulo={registrandoDeuda ? `Deuda — ${registrandoDeuda.nombre}` : undefined}
+      >
+        {registrandoDeuda && (
+          <div className="space-y-5">
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-wide text-texto-3 mb-2">Moneda</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setMonedaDeuda('usd'); setErrorDeuda(''); }}
+                  className={`h-[52px] rounded-[12px] border flex items-center justify-center text-sm font-semibold ${
+                    montoDeudaEsUsd ? 'bg-marca-suave text-marca-suave-texto border-marca' : 'bg-tarjeta-hundida text-texto-2 border-borde-campo'
+                  }`}
+                >
+                  USD
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setMonedaDeuda('bs'); setErrorDeuda(''); }}
+                  className={`h-[52px] rounded-[12px] border flex items-center justify-center text-sm font-semibold ${
+                    !montoDeudaEsUsd ? 'bg-marca-suave text-marca-suave-texto border-marca' : 'bg-tarjeta-hundida text-texto-2 border-borde-campo'
+                  }`}
+                >
+                  Bs
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-wide text-texto-3 mb-2">
+                Monto ({montoDeudaEsUsd ? 'USD' : 'Bs'})
+              </p>
+              <div className="flex items-center gap-2 h-[52px] px-3.5 rounded-[12px] bg-tarjeta border border-borde-campo focus-within:border-foco">
+                <span className="text-texto-3 font-medium">{montoDeudaEsUsd ? '$' : 'Bs'}</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={montoDeuda}
+                  onChange={e => { setMontoDeuda(e.target.value); setErrorDeuda(''); }}
+                  className="flex-1 min-w-0 bg-transparent outline-none text-lg font-bold text-texto tabular-nums"
+                  placeholder="0.00"
+                  autoFocus
+                />
+              </div>
+            </div>
+
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-wide text-texto-3 mb-2">Vence el (opcional)</p>
+              <input
+                type="date"
+                value={venceElDeuda}
+                onChange={e => setVenceElDeuda(e.target.value)}
+                className="w-full h-[52px] px-3.5 rounded-[12px] bg-tarjeta border border-borde-campo focus:outline-none focus:border-foco text-base text-texto"
+              />
+            </div>
+
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-wide text-texto-3 mb-2">Nota (opcional)</p>
+              <input
+                type="text"
+                value={notaDeuda}
+                onChange={e => setNotaDeuda(e.target.value)}
+                placeholder="Ej. Factura #4521"
+                className="w-full h-[52px] px-3.5 rounded-[12px] bg-tarjeta border border-borde-campo focus:outline-none focus:border-foco text-base text-texto"
+              />
+            </div>
+
+            {montoDeudaNum > 0 && (
+              <div className="p-3 rounded-[12px] bg-tarjeta-hundida flex items-center justify-between text-sm">
+                <span className="text-texto-3">Quedará debiendo</span>
+                <span className="font-semibold tabular-nums text-aviso">{formatUSD(totalDespuesDeuda ?? 0)}</span>
+              </div>
+            )}
+
+            {errorDeuda && <p className="text-sm text-negativo">{errorDeuda}</p>}
+
+            <Button
+              variante="primario"
+              disabled={guardandoDeuda || !montoDeuda.trim() || montoDeudaNum <= 0}
+              onClick={confirmarDeuda}
+              className="w-full"
+            >
+              {guardandoDeuda ? 'Guardando...' : 'Registrar deuda'}
+            </Button>
+          </div>
+        )}
+      </BottomSheet>
+
+      {/* Registrar pago */}
+      <BottomSheet
+        abierto={!!pagando}
+        onCerrar={cerrarRegistrarPago}
+        titulo={pagando ? `Pago — ${pagando.nombre}` : undefined}
+      >
+        {pagando && (
+          <div className="space-y-5">
+            <div className="p-4 rounded-2xl bg-tinta text-center">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-tinta-etiqueta">Debe</p>
+              <p className="mt-1 text-2xl font-extrabold text-tinta-texto tabular-nums">{formatUSD(pagando.saldo_usd)}</p>
+              {tasa > 0 && (
+                <p className="mt-0.5 text-tinta-etiqueta text-sm tabular-nums">{formatBS(pagando.saldo_usd * tasa)}</p>
+              )}
+            </div>
+
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-wide text-texto-3 mb-2">Método del pago</p>
+              <div className="grid grid-cols-2 gap-2">
+                {METODOS_ABONO.map(m => {
+                  const activo = metodoPago === m.id;
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => { setMetodoPago(m.id); setMontoPago(''); setErrorPago(''); }}
+                      className={`h-[52px] rounded-[12px] border flex items-center justify-center gap-2 text-sm font-semibold ${
+                        activo ? 'bg-marca-suave text-marca-suave-texto border-marca' : 'bg-tarjeta-hundida text-texto-2 border-borde-campo'
+                      }`}
+                    >
+                      <Icon nombre={ICONO_METODO_PAGO[m.id]} tamano={TAMANO_ICONO.secundario} />
+                      {m.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {metodoPago && (
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wide text-texto-3 mb-2">
+                  Monto a pagar ({pagoEsUsd ? 'USD' : 'Bs'})
+                </p>
+                <div className="flex items-center gap-2">
+                  <div
+                    className={`flex-1 flex items-center gap-2 h-[52px] px-3.5 rounded-[12px] bg-tarjeta border ${
+                      excedeDeudaPago ? 'border-negativo' : 'border-borde-campo focus-within:border-foco'
+                    }`}
+                  >
+                    <span className="text-texto-3 font-medium">{pagoEsUsd ? '$' : 'Bs'}</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={montoPago}
+                      onChange={e => { setMontoPago(e.target.value); setErrorPago(''); }}
+                      className="flex-1 min-w-0 bg-transparent outline-none text-lg font-bold text-texto tabular-nums"
+                      placeholder="0.00"
+                      autoFocus
+                    />
+                  </div>
+                  {muestraTodoPago && (
+                    <button
+                      type="button"
+                      onClick={montoTodoPago}
+                      className="flex-none h-[52px] px-4 rounded-[12px] bg-tarjeta-hundida text-texto-2 font-bold text-sm"
+                    >
+                      Todo
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-wide text-texto-3 mb-2">Nota (opcional)</p>
+              <input
+                type="text"
+                value={notaPago}
+                onChange={e => setNotaPago(e.target.value)}
+                className="w-full h-[52px] px-3.5 rounded-[12px] bg-tarjeta border border-borde-campo focus:outline-none focus:border-foco text-base text-texto"
+              />
+            </div>
+
+            {montoPagoNum > 0 && (
+              <div className="p-3 rounded-[12px] bg-tarjeta-hundida flex flex-col gap-1.5">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-texto-3">Pago en $</span>
+                  <span className={`font-semibold tabular-nums ${excedeDeudaPago ? 'text-negativo' : 'text-texto'}`}>
+                    {formatUSD(montoPagoUsd)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-texto-3">Queda debiendo</span>
+                  <span className={`font-semibold tabular-nums ${quedaEnCeroPago ? 'text-marca' : 'text-aviso'}`}>
+                    {quedaEnCeroPago ? 'Queda al día' : formatUSD(Math.max(0, restanteDespuesPago ?? 0))}
+                  </span>
+                </div>
+                {excedeDeudaPago && (
+                  <p className="text-xs font-semibold text-negativo pt-1">
+                    El monto supera lo que debe — no se puede confirmar
+                  </p>
+                )}
+              </div>
+            )}
+
+            {errorPago && <p className="text-sm text-negativo">{errorPago}</p>}
+
+            <Button
+              variante="primario"
+              disabled={guardandoPago || !metodoPago || !montoPago.trim() || montoPagoNum <= 0 || excedeDeudaPago}
+              onClick={confirmarPago}
+              className="w-full"
+            >
+              {textoConfirmarPago}
+            </Button>
+          </div>
+        )}
       </BottomSheet>
 
       {toast && (
