@@ -323,6 +323,13 @@ export interface Acreedor {
   ultimo_movimiento_en: string | null;
   proximo_vencimiento: string | null;
   vencido: boolean;
+  // Recordatorio de pago recurrente (ej. servicios fijos como internet) —
+  // solo recuerda, nunca genera la deuda sola (ver por-pagar/page.tsx).
+  // SELECT/INSERT nada más: el día de pago se fija al crear el acreedor y
+  // hoy no se puede corregir desde la app (no hay UPDATE permitido en la
+  // base todavía).
+  es_recurrente: boolean;
+  dia_pago: number | null;
 }
 
 // Ledger de cuentas por pagar, mismo patrón que MovimientoFiado: cada fila

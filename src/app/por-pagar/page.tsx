@@ -68,6 +68,32 @@ function fmtFechaExacta(iso: string): string {
   return new Date(iso).toLocaleDateString('es-VE', { day: '2-digit', month: 'short' });
 }
 
+// Recordatorio de pago recurrente: SOLO avisa cuándo toca pagar este mes,
+// nunca genera la deuda sola (ver Cambio 5 del brief) ni cruza con los
+// movimientos para adivinar si ya se pagó. Se recalcula contra el día de
+// hoy en el mes actual — normalizado para meses cortos (31 en febrero cae
+// en el último día real, no se desborda a marzo), con el mismo cuidado de
+// zona horaria que fmtVencimiento: se construye la fecha por partes, nunca
+// `new Date(iso)` a secas.
+function textoRecordatorio(diaPago: number): { texto: string; destacar: boolean } {
+  const hoy = new Date();
+  const anio = hoy.getFullYear();
+  const mes = hoy.getMonth();
+  const ultimoDiaDelMes = new Date(anio, mes + 1, 0).getDate();
+  const fecha = new Date(anio, mes, Math.min(diaPago, ultimoDiaDelMes));
+  const hoySinHora = new Date(anio, mes, hoy.getDate());
+  const dias = Math.round((fecha.getTime() - hoySinHora.getTime()) / (24 * 60 * 60 * 1000));
+
+  let cuando: string;
+  if (dias === 0) cuando = 'hoy';
+  else if (dias > 0) cuando = `faltan ${dias} ${dias === 1 ? 'día' : 'días'}`;
+  else cuando = `fue hace ${Math.abs(dias)} ${Math.abs(dias) === 1 ? 'día' : 'días'}`;
+
+  // Destacar cuando faltan 3 días o menos, o ya pasó — mismo umbral que el
+  // aviso de "Vencido" que ya existe en la pantalla.
+  return { texto: `Paga los ${diaPago} · ${cuando}`, destacar: dias <= 3 };
+}
+
 export default function PorPagarPage() {
   const permitida = useGuardarRuta();
   const { tasa, isOnline, negocioId, userNombre, usaCuentasPagar, productosVersion } = useApp();
@@ -83,6 +109,8 @@ export default function PorPagarPage() {
   const [nombreNuevo, setNombreNuevo] = useState('');
   const [tipoNuevo, setTipoNuevo] = useState<TipoAcreedor | null>(null);
   const [notaNuevo, setNotaNuevo] = useState('');
+  const [recurrenteNuevo, setRecurrenteNuevo] = useState(false);
+  const [diaPagoNuevo, setDiaPagoNuevo] = useState('');
   const [guardando, setGuardando] = useState(false);
   const [errorNuevo, setErrorNuevo] = useState('');
 
@@ -181,6 +209,8 @@ export default function PorPagarPage() {
     setNombreNuevo('');
     setTipoNuevo(null);
     setNotaNuevo('');
+    setRecurrenteNuevo(false);
+    setDiaPagoNuevo('');
     setErrorNuevo('');
     setCreando(true);
   };
@@ -201,6 +231,11 @@ export default function PorPagarPage() {
       setErrorNuevo('Elige un tipo');
       return;
     }
+    const diaPagoNum = parseInt(diaPagoNuevo, 10);
+    if (recurrenteNuevo && (!diaPagoNuevo.trim() || isNaN(diaPagoNum) || diaPagoNum < 1 || diaPagoNum > 31)) {
+      setErrorNuevo('Elige el día del mes (1 a 31)');
+      return;
+    }
 
     setGuardando(true);
     const nuevo: Acreedor = {
@@ -216,6 +251,10 @@ export default function PorPagarPage() {
       ultimo_movimiento_en: null,
       proximo_vencimiento: null,
       vencido: false,
+      // Apagado por defecto: si no está prendido, el día no se muestra ni
+      // se guarda (ver Cambio 5 del brief).
+      es_recurrente: recurrenteNuevo,
+      dia_pago: recurrenteNuevo ? diaPagoNum : null,
     };
 
     try {
@@ -227,6 +266,11 @@ export default function PorPagarPage() {
       await encolarCrearAcreedor(nuevo, negocioId);
       setCreando(false);
       showToast('Acreedor agregado');
+      // Corrección directa de lo que le pasó a Juan probando: crear un
+      // acreedor sin encadenar con "Registrar deuda" deja todo en cero sin
+      // que quede claro por qué. Se puede saltear sin fricción: el
+      // BottomSheet se cierra igual con el velo o la X.
+      abrirRegistrarDeuda(nuevo);
     } catch {
       // Si IndexedDB falla, lo único inaceptable es dejar al usuario
       // encerrado en la hoja: cerrarCrear() no responde mientras
@@ -527,6 +571,15 @@ export default function PorPagarPage() {
                           )}
                         </div>
                       )}
+                      {a.es_recurrente && a.dia_pago != null && (() => {
+                        const { texto, destacar } = textoRecordatorio(a.dia_pago);
+                        return (
+                          <p className={`flex items-center gap-1 text-xs mt-0.5 ${destacar ? 'text-negativo font-semibold' : 'text-texto-3'}`}>
+                            <Icon nombre="calendario" tamano={TAMANO_ICONO.chip} />
+                            {texto}
+                          </p>
+                        );
+                      })()}
                     </div>
                     <div className="text-right flex-shrink-0">
                       {debe ? (
@@ -650,6 +703,37 @@ export default function PorPagarPage() {
               })}
             </div>
           </div>
+
+          <div className="flex items-center justify-between gap-3 min-h-[56px] px-3.5 py-3 rounded-[12px] bg-tarjeta border border-borde-campo">
+            <div className="min-w-0">
+              <p className="text-[15px] font-semibold text-texto">Se paga todos los meses</p>
+              <p className="text-xs text-texto-3 mt-0.5">Caja te lo recuerda, pero no registra la deuda sola</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={recurrenteNuevo}
+              onClick={() => { setRecurrenteNuevo(v => !v); setErrorNuevo(''); }}
+              className={`relative inline-flex w-11 h-6 rounded-full transition-colors flex-shrink-0 ${recurrenteNuevo ? 'bg-marca' : 'bg-tarjeta-hundida'}`}
+            >
+              <span className={`inline-block w-5 h-5 m-0.5 bg-white rounded-full shadow-sm transition-transform ${recurrenteNuevo ? 'translate-x-5' : 'translate-x-0'}`} />
+            </button>
+          </div>
+
+          {recurrenteNuevo && (
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-wide text-texto-3 mb-2">Día del mes</p>
+              <input
+                type="number"
+                min={1}
+                max={31}
+                value={diaPagoNuevo}
+                onChange={e => { setDiaPagoNuevo(e.target.value); setErrorNuevo(''); }}
+                placeholder="Ej. 25"
+                className="w-full h-[52px] px-3.5 rounded-[12px] bg-tarjeta border border-borde-campo focus:outline-none focus:border-foco text-base text-texto"
+              />
+            </div>
+          )}
 
           <div>
             <p className="text-[11px] font-bold uppercase tracking-wide text-texto-3 mb-2">Nota (opcional)</p>

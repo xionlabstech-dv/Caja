@@ -518,6 +518,8 @@ export async function getAcreedoresRemoto(negocioId: string): Promise<Acreedor[]
       vencido: boolean;
       negocio_id: string;
       creado_en: string;
+      es_recurrente: boolean;
+      dia_pago: number | null;
     }
 
     return ((data ?? []) as FilaAcreedor[]).map(r => ({
@@ -533,6 +535,8 @@ export async function getAcreedoresRemoto(negocioId: string): Promise<Acreedor[]
       ultimo_movimiento_en: r.ultimo_movimiento_en,
       proximo_vencimiento: r.proximo_vencimiento,
       vencido: r.vencido,
+      es_recurrente: r.es_recurrente,
+      dia_pago: r.dia_pago,
     }));
   } catch {
     return null;
@@ -595,6 +599,8 @@ export async function createAcreedorSupabase(
         nombre: acreedor.nombre,
         tipo: acreedor.tipo,
         nota: acreedor.nota,
+        es_recurrente: acreedor.es_recurrente,
+        dia_pago: acreedor.dia_pago,
       })
       .select()
       .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS))
