@@ -22,7 +22,10 @@ const withPWA = require('next-pwa')({
     // sin depender de que el usuario ya las haya visitado antes.
     async manifestEntries => {
       const revision = process.env.VERCEL_GIT_COMMIT_SHA || String(Date.now());
-      const rutas = ['/', '/inventario', '/resumen', '/tasa', '/reportes', '/usuarios', '/movimientos', '/fiado', '/mas', '/presupuestos', '/presupuestos/nuevo', '/datos-negocio'].map(url => ({ url, revision }));
+      // Lista a mano: toda pantalla nueva tiene que agregarse acá. Si no,
+      // queda rota al abrirse desde cero (no al navegar por el menú, que
+      // sigue andando bien) — exactamente lo que le pasó a /perfil.
+      const rutas = ['/', '/inventario', '/resumen', '/tasa', '/reportes', '/usuarios', '/movimientos', '/fiado', '/mas', '/presupuestos', '/presupuestos/nuevo', '/datos-negocio', '/perfil', '/por-pagar'].map(url => ({ url, revision }));
       return { manifest: [...manifestEntries, ...rutas], warnings: [] };
     },
   ],

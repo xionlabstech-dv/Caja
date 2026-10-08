@@ -144,16 +144,23 @@ export default function PorPagarPage() {
       vencido: false,
     };
 
-    // Offline-first: igual que crearClienteFiado (src/app/page.tsx) — se
-    // guarda local primero y se encola, nunca se espera al servidor para
-    // mostrarlo.
-    await saveAcreedor(nuevo);
-    setAcreedores(prev => [...prev, nuevo]);
-    await encolarCrearAcreedor(nuevo, negocioId);
-
-    setGuardando(false);
-    setCreando(false);
-    showToast('Acreedor agregado');
+    try {
+      // Offline-first: igual que crearClienteFiado (src/app/page.tsx) — se
+      // guarda local primero y se encola, nunca se espera al servidor para
+      // mostrarlo.
+      await saveAcreedor(nuevo);
+      setAcreedores(prev => [...prev, nuevo]);
+      await encolarCrearAcreedor(nuevo, negocioId);
+      setCreando(false);
+      showToast('Acreedor agregado');
+    } catch {
+      // Si IndexedDB falla, lo único inaceptable es dejar al usuario
+      // encerrado en la hoja: cerrarCrear() no responde mientras
+      // `guardando` esté en true, y el BottomSheet solo se cierra por ahí.
+      setErrorNuevo('No se pudo guardar en este teléfono. Intenta de nuevo.');
+    } finally {
+      setGuardando(false);
+    }
   };
 
   return (
