@@ -347,6 +347,14 @@ export default function PorPagarPage() {
       await saveMovimientoAcreedor(movimiento);
       await actualizarSaldoAcreedorLocal(registrandoDeuda.id, nuevoSaldo);
       setAcreedores(prev => prev.map(a => (a.id === registrandoDeuda.id ? { ...a, saldo_usd: nuevoSaldo } : a)));
+      // Si el historial de este acreedor ya está abierto (expandido), tiene
+      // que reflejar el movimiento recién guardado sin esperar a que se
+      // colapse y reexpanda — si no, queda contradiciendo al saldo de
+      // arriba, que sí se actualiza al toque.
+      setDetalleMovimientos(prev => ({
+        ...prev,
+        [registrandoDeuda.id]: [movimiento, ...(prev[registrandoDeuda.id] ?? [])],
+      }));
       await encolarAplicarMovimientoAcreedor(movimiento.id, negocioId);
       setRegistrandoDeuda(null);
       showToast('Deuda registrada');
@@ -436,6 +444,13 @@ export default function PorPagarPage() {
       await saveMovimientoAcreedor(movimiento);
       await actualizarSaldoAcreedorLocal(pagando.id, nuevoSaldo);
       setAcreedores(prev => prev.map(a => (a.id === pagando.id ? { ...a, saldo_usd: nuevoSaldo } : a)));
+      // Mismo motivo que en confirmarDeuda: si el historial de este
+      // acreedor está abierto, no puede seguir diciendo "no hay
+      // movimientos" mientras el saldo de arriba ya cambió.
+      setDetalleMovimientos(prev => ({
+        ...prev,
+        [pagando.id]: [movimiento, ...(prev[pagando.id] ?? [])],
+      }));
       await encolarAplicarMovimientoAcreedor(movimiento.id, negocioId);
       setPagando(null);
       showToast('Pago registrado');
