@@ -19,16 +19,20 @@ const listaAMano = createRequire(import.meta.url)('./rutas-precache.cjs');
 const problemas = [];
 
 // ── Falla 1 ───────────────────────────────────────────────────────────────
-// Las pantallas reales son las carpetas de src/app con un page.tsx. Se saltan
-// las que el App Router no expone como ruta: _privadas, (grupos) y @slots.
+// Las pantallas reales son las carpetas de src/app con un page.tsx.
 function pantallasDe(dir, base = '') {
   const salida = [];
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     if (!e.isDirectory()) continue;
-    if (/^[_(@[]/.test(e.name)) continue;
+    // _privadas, [dinamicas] y @slots no son rutas estaticas precacheables.
+    // Se saltan enteras, con todo lo que tengan adentro.
+    if (/^[_[@]/.test(e.name)) continue;
     const sub = join(dir, e.name);
-    const ruta = `${base}/${e.name}`;
-    if (existsSync(join(sub, 'page.tsx'))) salida.push(ruta);
+    // Un (grupo) no aporta segmento a la URL, pero las pantallas que tiene
+    // adentro SI son rutas: src/app/(panel)/estadisticas es /estadisticas.
+    // Se recorre sin sumar su nombre al camino.
+    const ruta = e.name.startsWith('(') ? base : `${base}/${e.name}`;
+    if (ruta && existsSync(join(sub, 'page.tsx'))) salida.push(ruta);
     salida.push(...pantallasDe(sub, ruta));
   }
   return salida;
