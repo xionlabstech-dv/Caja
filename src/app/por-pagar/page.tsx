@@ -906,7 +906,7 @@ export default function PorPagarPage() {
                 </p>
                 <div className="flex items-center gap-2">
                   <div
-                    className={`flex-1 flex items-center gap-2 h-[52px] px-3.5 rounded-[12px] bg-tarjeta border ${
+                    className={`flex-1 min-w-0 flex items-center gap-2 h-[52px] px-3.5 rounded-[12px] bg-tarjeta border ${
                       excedeDeudaPago ? 'border-negativo' : 'border-borde-campo focus-within:border-foco'
                     }`}
                   >

@@ -32,6 +32,24 @@ input[type='number']::-webkit-outer-spin-button {
   -webkit-appearance: none;
 }
 
+/* Los campos no heredan el piso de ancho de ítem flex.
+
+   Todo ítem flex trae `min-width: auto`, que lo frena en su min-content. Un
+   <input> tiene un ancho intrínseco por defecto grande (289px para un
+   type=number con text-lg en Chromium), así que un campo con `flex-1` dentro
+   de una fila se niega a encoger y empuja afuera de la pantalla al botón que
+   tiene al lado. Fue el bug del botón "Todo" en Fiado y Por pagar, y tenía
+   dos casos más sin reportar (Movimientos y el código manual del Scanner).
+
+   Esto cubre solo el caso en que el <input> ES el ítem flex. Si el ítem flex
+   es un <div> que envuelve al campo, hay que ponerle `min-w-0` a mano a ese
+   div — ver fiado/page.tsx y por-pagar/page.tsx. */
+input,
+select,
+textarea {
+  min-width: 0;
+}
+
 /* ── Sistema de diseño — tokens de color (Brief 01) ───────────────────────────
    Fuente: design-system/tokens/colors.css en la rama referencias-diseno, con
    dos resoluciones del brief sobre ese archivo: la tarjeta tinta usa #0C1A14
