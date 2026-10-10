@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build && node scripts/mover-polyfill-al-frente.mjs",
+    "build": "next build && node scripts/mover-polyfill-al-frente.mjs && node scripts/verificar-precache.mjs",
     "start": "next start",
     "lint": "next lint"
   },

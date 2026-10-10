@@ -1,3 +1,5 @@
+const rutasPrecache = require('./scripts/rutas-precache.cjs');
+
 const withPWA = require('next-pwa')({
   dest: 'public',
   // El auto-registro de next-pwa apunta al entry 'main.js' (Pages Router) y
@@ -22,10 +24,10 @@ const withPWA = require('next-pwa')({
     // sin depender de que el usuario ya las haya visitado antes.
     async manifestEntries => {
       const revision = process.env.VERCEL_GIT_COMMIT_SHA || String(Date.now());
-      // Lista a mano: toda pantalla nueva tiene que agregarse acá. Si no,
-      // queda rota al abrirse desde cero (no al navegar por el menú, que
-      // sigue andando bien) — exactamente lo que le pasó a /perfil.
-      const rutas = ['/', '/inventario', '/resumen', '/tasa', '/reportes', '/usuarios', '/movimientos', '/fiado', '/mas', '/presupuestos', '/presupuestos/nuevo', '/datos-negocio', '/perfil', '/por-pagar'].map(url => ({ url, revision }));
+      // La lista vive en scripts/rutas-precache.cjs, compartida con
+      // scripts/verificar-precache.mjs, que rompe el build si se
+      // desincroniza de las pantallas reales de src/app.
+      const rutas = rutasPrecache.map(url => ({ url, revision }));
       return { manifest: [...manifestEntries, ...rutas], warnings: [] };
     },
   ],
