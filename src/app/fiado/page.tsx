@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { ClienteFiado, MovimientoFiado, MetodoAbono, ResumenClienteFiado } from '@/types';
-import { getClientesFiado, actualizarSaldoFiadoLocal, saveMovimientoFiado, getMovimientosFiadoPorCliente, getResumenFiado } from '@/lib/db';
+import { getClientesFiado, actualizarSaldoFiadoLocal, saveMovimientoFiado, getMovimientosFiadoPorCliente, getMovimientosFiado, getResumenFiado } from '@/lib/db';
 import { getMovimientosFiadoPorClienteRemoto } from '@/lib/sync';
 import { encolarAplicarMovimientoFiado, onFalloPermanente } from '@/lib/outbox';
 import { formatBS, formatUSD } from '@/lib/precio';
@@ -100,6 +100,13 @@ export default function FiadoPage() {
   const [chip, setChip] = useState<'todos' | 'deuda' | 'aldia'>('todos');
   const [expandido, setExpandido] = useState<string | null>(null);
   const [detalleMovimientos, setDetalleMovimientos] = useState<Record<string, MovimientoFiado[]>>({});
+  // Cargos ligados a una venta que el servidor rechazó de forma definitiva
+  // (ver outbox.ts) — se conservan en vez de borrarse, así que hay que
+  // avisarlos. Aparte de detalleMovimientos a propósito: ese estado se pisa
+  // con lo que devuelve el servidor al expandir con conexión, y el servidor
+  // nunca va a tener este movimiento — perdería el aviso justo cuando hay
+  // señal para resolverlo.
+  const [fallosPermanentes, setFallosPermanentes] = useState<Record<string, MovimientoFiado[]>>({});
 
   const [abonando, setAbonando] = useState<ClienteFiado | null>(null);
   const [metodoAbono, setMetodoAbono] = useState<MetodoAbono | null>(null);
@@ -126,16 +133,31 @@ export default function FiadoPage() {
       setResumen(Object.fromEntries(rs.map(r => [r.cliente_id, r])));
       setCargando(false);
     });
+    cargarFallosPermanentes();
     return () => { cancelado = true; };
   }, [productosVersion]);
 
   // Si la cola rechazó de forma definitiva un movimiento de este cliente, ya
   // corrigió el saldo en IndexedDB de inmediato (ver outbox.ts) — sin esto,
   // esta pantalla seguiría mostrando el saldo optimista viejo hasta el
-  // próximo sync periódico.
+  // próximo sync periódico. También puede ser justo el aviso de un cargo que
+  // se acaba de conservar (ver Cambio 2 de outbox.ts) — se releen los dos a
+  // la vez.
   useEffect(() => onFalloPermanente(() => {
     getClientesFiado().then(cs => setClientes(cs));
+    cargarFallosPermanentes();
   }), []);
+
+  function cargarFallosPermanentes() {
+    getMovimientosFiado().then(ms => {
+      const porCliente: Record<string, MovimientoFiado[]> = {};
+      for (const m of ms) {
+        if (!m.falloPermanente) continue;
+        (porCliente[m.cliente_id] ??= []).push(m);
+      }
+      setFallosPermanentes(porCliente);
+    });
+  }
 
   // Recién ahora, con todos los hooks ya llamados, se puede cortar el
   // render sin violar el orden de hooks — evita el frame de contenido
@@ -398,12 +420,22 @@ export default function FiadoPage() {
 
                   {expandido === c.id && (
                     <div className="px-3 pb-3 border-t border-borde-divisor pt-3 flex flex-col gap-2.5">
+                      {(fallosPermanentes[c.id] ?? []).map(m => (
+                        <div key={m.id} className="p-3 rounded-[12px] bg-negativo-fondo border border-negativo-borde flex flex-col gap-1">
+                          <p className="text-sm font-bold text-negativo">
+                            No se registró una deuda de {formatUSD(m.monto_usd)}
+                          </p>
+                          <p className="text-xs text-negativo">
+                            {m.falloPermanente} — hay que cargarla a mano.
+                          </p>
+                        </div>
+                      ))}
                       {(() => {
                         const movimientos = detalleMovimientos[c.id] ?? [];
                         if (movimientos.length === 0) {
                           return (
                             <p className="text-xs text-texto-3 py-1">
-                              {isOnline ? 'Sin detalle disponible' : 'Sin conexión — hace falta señal para ver el detalle'}
+                              {isOnline ? 'Todavía no tiene movimientos' : 'Sin conexión — hace falta señal para ver el detalle'}
                             </p>
                           );
                         }

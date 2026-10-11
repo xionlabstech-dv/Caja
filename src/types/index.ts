@@ -294,6 +294,12 @@ export interface MovimientoFiado {
   ocurrido_en: string;
   // Marca si ya se respaldó en Supabase (mismo patrón que Venta.sincronizada).
   sincronizado?: boolean;
+  // El servidor rechazó este movimiento de forma definitiva. Se conserva
+  // en vez de borrarse porque un cargo ligado a una venta es plata que
+  // alguien debe: perderlo deja la mercancía entregada sin deuda y sin
+  // rastro de a quién cobrarle. Guarda el mensaje del servidor para
+  // mostrárselo a quien tenga que resolverlo a mano.
+  falloPermanente?: string;
 }
 
 // Cuentas por pagar: a quién le debe el negocio (proveedores, servicios

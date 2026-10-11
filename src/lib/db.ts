@@ -538,7 +538,11 @@ export async function saveClientesFiado(clientes: ClienteFiado[]): Promise<void>
   // pendiente no se pisa con lo remoto hasta que se confirma.
   const movimientos = await db.getAll('fiado_movimientos');
   const conMovimientoPendiente = new Set(
-    movimientos.filter(m => m.sincronizado === false).map(m => m.cliente_id)
+    // Un movimiento con falloPermanente NO es un cambio pendiente: el
+    // servidor ya dijo que no y no se va a reintentar. Se conserva solo
+    // como registro para resolverlo a mano, así que el saldo del servidor
+    // tiene que seguir ganando sobre el local.
+    movimientos.filter(m => m.sincronizado === false && !m.falloPermanente).map(m => m.cliente_id)
   );
 
   const tx = db.transaction('clientes_fiado', 'readwrite');

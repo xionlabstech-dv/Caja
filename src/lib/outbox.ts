@@ -335,6 +335,28 @@ async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
         return true;
       }
       if (resultado.permanente) {
+        const saldoReal = await getSaldoFiadoRemoto(movimiento.cliente_id);
+
+        // Un cargo ligado a una venta es plata que alguien debe. La venta
+        // ya subió y `ventas` no guarda cliente_id, así que si se borra el
+        // cargo no queda NINGÚN rastro de a quién cobrarle. Se conserva,
+        // marcado, para que la pantalla Fiado lo muestre y se resuelva a
+        // mano. Un abono rechazado sí se borra: no se aplicó nunca y no
+        // deja nada colgando.
+        if (movimiento.tipo === 'cargo' && movimiento.venta_id) {
+          await saveMovimientoFiado({
+            ...movimiento,
+            sincronizado: false,
+            falloPermanente: resultado.mensaje ?? 'el servidor lo rechazó',
+          });
+          if (saldoReal !== null) await actualizarSaldoFiadoLocal(movimiento.cliente_id, saldoReal);
+          notificarFalloPermanente(
+            `No se registró una deuda de ${movimiento.monto_usd.toFixed(2)} $ por una venta a crédito. ` +
+            `Revisá el cliente en la pantalla Fiado: hay que cargarla a mano.`
+          );
+          return true;
+        }
+
         // Ej. un abono que ya no coincide con el saldo real para cuando le
         // toca subir (otro dispositivo cobró de más entre medio) — la RPC
         // lo rechaza con un mensaje pensado para mostrarse tal cual.
@@ -346,7 +368,6 @@ async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
         // quedó mal) se corrige ya mismo con el valor real de Supabase, sin
         // esperar al próximo ciclo.
         await eliminarMovimientoFiado(movimiento.id);
-        const saldoReal = await getSaldoFiadoRemoto(movimiento.cliente_id);
         if (saldoReal !== null) await actualizarSaldoFiadoLocal(movimiento.cliente_id, saldoReal);
         notificarFalloPermanente(
           `No se pudo aplicar un movimiento de fiado: ${resultado.mensaje ?? 'el servidor lo rechazó'}`
