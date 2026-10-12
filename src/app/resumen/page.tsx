@@ -34,7 +34,7 @@ const METODO_LABELS: Record<MetodoPagoVenta, string> = {
   biopago: 'Biopago',
   tarjeta: 'Tarjeta',
   efectivo_usd: 'Efectivo $',
-  fiado: 'Fiado',
+  fiado: 'A crédito',
   mixto: 'Mixto',
 };
 
@@ -528,7 +528,7 @@ export default function ResumenPage() {
                 </p>
               </div>
               <div className={`p-3.5 rounded-2xl bg-tarjeta border border-borde-tarjeta space-y-1 ${anuladasCount === 0 ? 'col-span-2' : ''}`}>
-                <p className="text-[11px] font-semibold text-texto-3">Abonado a fiado</p>
+                <p className="text-[11px] font-semibold text-texto-3">Abonado a cuentas por cobrar</p>
                 <p className="text-xl font-bold text-texto">{formatBS(totalAbonadoBs)}</p>
                 <p className="text-[11px] text-texto-3">cobrado, no vendido</p>
               </div>

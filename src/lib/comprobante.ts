@@ -21,7 +21,7 @@ const METODO_LABELS: Record<MetodoPago, string> = {
   biopago: 'Biopago',
   tarjeta: 'Tarjeta',
   efectivo_usd: 'Efectivo $',
-  fiado: 'Fiado',
+  fiado: 'A crédito',
 };
 
 const LEYENDA_FISCAL = 'Este documento no tiene validez fiscal';

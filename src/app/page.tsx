@@ -1398,7 +1398,7 @@ export default function CajaPage() {
                       {clienteFiadoElegido ? (
                         <div className="flex items-center justify-between px-3.5 py-3 rounded-xl bg-deuda-fondo">
                           <div>
-                            <p className="text-[11px] font-bold uppercase tracking-wide text-deuda">Fiado a</p>
+                            <p className="text-[11px] font-bold uppercase tracking-wide text-deuda">Queda debiendo</p>
                             <p className="font-bold text-texto">{clienteFiadoElegido.nombre}</p>
                           </div>
                           <button

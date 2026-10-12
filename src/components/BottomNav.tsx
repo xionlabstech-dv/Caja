@@ -12,7 +12,7 @@ import Icon from '@/components/ui/Icon';
 const tabs = [
   { href: '/', label: 'Caja', icon: <Icon nombre="caja" /> },
   { href: '/resumen', label: 'Resumen', icon: <Icon nombre="resumen" /> },
-  { href: '/fiado', label: 'Fiado', icon: <Icon nombre="fiado" /> },
+  { href: '/fiado', label: 'Por Cobrar', icon: <Icon nombre="fiado" /> },
   { href: '/mas', label: 'Más', icon: <Icon nombre="mas" /> },
 ];
 

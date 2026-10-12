@@ -62,7 +62,7 @@ function razonesSinEnviar(pendientes: number, deudasSinRegistrar: number): strin
   if (pendientes > 0) razones.push(`${pendientes} cambio${pendientes === 1 ? '' : 's'} sin enviar`);
   if (deudasSinRegistrar > 0) {
     razones.push(
-      `${deudasSinRegistrar} deuda${deudasSinRegistrar === 1 ? '' : 's'} de fiado que no se ${deudasSinRegistrar === 1 ? 'pudo' : 'pudieron'} registrar`
+      `${deudasSinRegistrar} deuda${deudasSinRegistrar === 1 ? '' : 's'} por cobrar que no se ${deudasSinRegistrar === 1 ? 'pudo' : 'pudieron'} registrar`
     );
   }
   return razones.join(' y ');
@@ -530,7 +530,7 @@ export default function Providers({ children }: { children: ReactNode }) {
         ? (() => {
             const acciones: string[] = [];
             if (pendientes > 0) acciones.push('conéctate a internet para que lo pendiente se envíe solo');
-            if (deudasSinRegistrar > 0) acciones.push(`resuélve${deudasSinRegistrar === 1 ? 'la' : 'las'} en la pantalla Fiado`);
+            if (deudasSinRegistrar > 0) acciones.push(`resuélve${deudasSinRegistrar === 1 ? 'la' : 'las'} en la pantalla Por Cobrar`);
             return (
               `Quedan ${razonesSinEnviar(pendientes, deudasSinRegistrar)} en este teléfono. ` +
               `Vuelve a entrar con una cuenta de este mismo negocio: ${acciones.join(' y ')}.`
@@ -585,7 +585,7 @@ export default function Providers({ children }: { children: ReactNode }) {
           ? (() => {
               const acciones: string[] = [];
               if (pendientes > 0) acciones.push('conéctate a internet para que lo pendiente se envíe solo');
-              if (deudasSinRegistrar > 0) acciones.push(`resuélve${deudasSinRegistrar === 1 ? 'la' : 'las'} en la pantalla Fiado`);
+              if (deudasSinRegistrar > 0) acciones.push(`resuélve${deudasSinRegistrar === 1 ? 'la' : 'las'} en la pantalla Por Cobrar`);
               return (
                 ` Quedan ${razonesSinEnviar(pendientes, deudasSinRegistrar)} en este teléfono. ` +
                 `Vuelve a entrar con una cuenta de este mismo negocio: ${acciones.join(' y ')}.`
@@ -789,7 +789,7 @@ export default function Providers({ children }: { children: ReactNode }) {
             // de ambos.
             const acciones: string[] = [];
             if (pendientes > 0) acciones.push('conéctate a internet para que lo pendiente se envíe solo');
-            if (deudasSinRegistrar > 0) acciones.push(`resuélve${deudasSinRegistrar === 1 ? 'la' : 'las'} en la pantalla Fiado`);
+            if (deudasSinRegistrar > 0) acciones.push(`resuélve${deudasSinRegistrar === 1 ? 'la' : 'las'} en la pantalla Por Cobrar`);
             setMotivoDeslogueo(
               `Este teléfono tiene ${razonesSinEnviar(pendientes, deudasSinRegistrar)}, de otro negocio. ` +
               `Vuelve a entrar con la cuenta anterior: ${acciones.join(' y ')}. Después podrás entrar con esta.`

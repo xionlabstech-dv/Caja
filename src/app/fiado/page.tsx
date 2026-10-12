@@ -310,7 +310,7 @@ export default function FiadoPage() {
     <div>
       <header className="bg-superficie-barra border-b border-borde-divisor px-4 pt-3.5 pb-3 flex items-center gap-2.5">
         <div className="flex-1 min-w-0">
-          <h1 className="text-base font-bold text-texto truncate">Fiado</h1>
+          <h1 className="text-base font-bold text-texto truncate">Por Cobrar</h1>
           <p className="text-[11px] font-medium text-texto-3 truncate">
             {clientes.length} clientes · {conDeuda.length} con deuda
           </p>
@@ -383,8 +383,8 @@ export default function FiadoPage() {
         ) : clientes.length === 0 ? (
           <div className="text-center text-texto-3 py-16">
             <Icon nombre="fiado" tamano={48} className="mx-auto mb-3 text-texto-4" />
-            <p className="font-medium">Todavía no hay clientes de fiado</p>
-            <p className="text-sm mt-1">Se crean solos al cobrar una venta como fiado, desde Caja</p>
+            <p className="font-medium">Todavía no hay clientes con crédito</p>
+            <p className="text-sm mt-1">Se crean solos al cobrar una venta a crédito, desde Caja</p>
           </div>
         ) : clientesFiltrados.length === 0 ? (
           <div className="text-center text-texto-3 py-12">

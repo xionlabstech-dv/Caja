@@ -375,7 +375,7 @@ async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
           if (saldoReal !== null) await actualizarSaldoFiadoLocal(movimiento.cliente_id, saldoReal);
           notificarFalloPermanente(
             `No se registró una deuda de ${movimiento.monto_usd.toFixed(2)} $ por una venta a crédito. ` +
-            `Revisá el cliente en la pantalla Fiado: hay que cargarla a mano.`
+            `Revisá el cliente en la pantalla Por Cobrar: hay que cargarla a mano.`
           );
           return true;
         }
@@ -393,7 +393,7 @@ async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
         await eliminarMovimientoFiado(movimiento.id);
         if (saldoReal !== null) await actualizarSaldoFiadoLocal(movimiento.cliente_id, saldoReal);
         notificarFalloPermanente(
-          `No se pudo aplicar un movimiento de fiado: ${resultado.mensaje ?? 'el servidor lo rechazó'}`
+          `No se pudo aplicar un movimiento en Por Cobrar: ${resultado.mensaje ?? 'el servidor lo rechazó'}`
         );
         return true;
       }

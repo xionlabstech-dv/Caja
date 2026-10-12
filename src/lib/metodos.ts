@@ -9,5 +9,5 @@ export const METODOS_PAGO: { id: MetodoPago; label: string }[] = [
   { id: 'biopago', label: 'Biopago' },
   { id: 'tarjeta', label: 'Tarjeta' },
   { id: 'efectivo_usd', label: 'Efectivo $' },
-  { id: 'fiado', label: 'Fiado' },
+  { id: 'fiado', label: 'A crédito' },
 ];

@@ -50,7 +50,7 @@ const METODO_INFO: Record<string, MetodoInfo> = {
   divisa: { label: 'Efectivo $', color: 'bg-amber-100 text-amber-700', enUsd: true },
   // reportes_por_metodo lee de venta_pagos, donde 'fiado' sí aparece como
   // método real (273 ventas en producción) — antes caía en el fallback gris.
-  fiado: { label: 'Fiado', color: 'bg-orange-100 text-orange-700', enUsd: false },
+  fiado: { label: 'A crédito', color: 'bg-orange-100 text-orange-700', enUsd: false },
 };
 
 function metodoInfo(metodoPago: string): MetodoInfo {
@@ -505,7 +505,7 @@ export default function ReportesPage() {
 
             {/* Abonos de fiado — no depende de que haya ventas en el período */}
             <div className="space-y-2">
-              <span className="block text-[11px] font-bold uppercase tracking-wide text-texto-3">Abonos de fiado</span>
+              <span className="block text-[11px] font-bold uppercase tracking-wide text-texto-3">Abonos de cuentas por cobrar</span>
               <div className="p-3.5 rounded-2xl bg-tarjeta border border-borde-tarjeta space-y-2.5">
                 <div className="flex items-end justify-between gap-3">
                   <div className="min-w-0">
@@ -518,7 +518,7 @@ export default function ReportesPage() {
                     onClick={() => router.push('/fiado')}
                     className="flex-none h-11 px-3 rounded-xl border border-borde-tarjeta bg-tarjeta-hundida text-texto-3 text-sm font-semibold flex items-center gap-1.5"
                   >
-                    Ver fiado
+                    Ver Por Cobrar
                     <Icon nombre="flechaDerecha" tamano={14} />
                   </button>
                 </div>

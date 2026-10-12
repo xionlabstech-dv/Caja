@@ -14,7 +14,7 @@ const ITEMS: { icono: NombreIcono; titulo: string; descripcion: string }[] = [
   },
   {
     icono: 'fiado',
-    titulo: 'Lleva el fiado de tus clientes',
+    titulo: 'Lleva las cuentas por cobrar de tus clientes',
     descripcion: 'Quién debe, cuánto, y cuándo pagó, todo organizado.',
   },
   {

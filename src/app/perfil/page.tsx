@@ -391,7 +391,7 @@ export default function PerfilPage() {
               <div className="p-3.5 rounded-2xl bg-tarjeta border border-negativo-borde space-y-2.5">
                 <p className="text-[15px] font-bold text-negativo leading-snug">Eliminar cuenta</p>
                 <p className="text-sm text-texto-3 leading-relaxed">
-                  Se borran para siempre los productos, ventas, fiado, presupuestos y usuarios de {negocioNombre}. No se puede deshacer.
+                  Se borran para siempre los productos, ventas, cuentas por cobrar, presupuestos y usuarios de {negocioNombre}. No se puede deshacer.
                 </p>
                 <button
                   onClick={abrirEliminar}
@@ -486,7 +486,7 @@ export default function PerfilPage() {
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-2 space-y-3.5">
               <p className="text-sm text-texto leading-relaxed">
-                Esto borra <strong className="font-bold">para siempre</strong> el negocio <strong className="font-bold">{negocioNombre}</strong>: sus productos, ventas, fiado, presupuestos y usuarios. No se puede deshacer.
+                Esto borra <strong className="font-bold">para siempre</strong> el negocio <strong className="font-bold">{negocioNombre}</strong>: sus productos, ventas, cuentas por cobrar, presupuestos y usuarios. No se puede deshacer.
               </p>
 
               <div className="p-3 rounded-xl bg-aviso-fondo border border-aviso-borde space-y-1.5">
