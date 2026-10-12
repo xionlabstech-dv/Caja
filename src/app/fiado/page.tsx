@@ -165,14 +165,17 @@ export default function FiadoPage() {
   async function reintentarCargo(m: MovimientoFiado) {
     if (!negocioId) return;
     setReintentando(m.id);
-    // Mismo id: la RPC es idempotente, así que reintentar no puede duplicar
-    // la deuda. Se limpia la marca de fallo y se vuelve a encolar — ahora
-    // con el cliente ya creado en el servidor, entra sin problema.
-    const { falloPermanente: _descartado, ...limpio } = m;
-    await saveMovimientoFiado({ ...limpio, sincronizado: false });
-    await encolarAplicarMovimientoFiado(m.id, negocioId, m.cliente_id);
-    cargarFallosPermanentes();
-    setReintentando(null);
+    try {
+      // Mismo id: la RPC es idempotente, así que reintentar no puede duplicar
+      // la deuda. Se limpia la marca de fallo y se vuelve a encolar — ahora
+      // con el cliente ya creado en el servidor, entra sin problema.
+      const { falloPermanente: _descartado, ...limpio } = m;
+      await saveMovimientoFiado({ ...limpio, sincronizado: false });
+      await encolarAplicarMovimientoFiado(m.id, negocioId, m.cliente_id);
+      cargarFallosPermanentes();
+    } finally {
+      setReintentando(null);
+    }
   }
 
   // Recién ahora, con todos los hooks ya llamados, se puede cortar el

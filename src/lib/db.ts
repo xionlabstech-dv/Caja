@@ -771,3 +771,13 @@ export async function contarPendientes(): Promise<number> {
   const db = await getDB();
   return db.count('pendientes');
 }
+
+// Deudas que el servidor rechazó y que se conservaron a propósito (ver la
+// rama de falloPermanente en outbox.ts). NO están en la cola —ya salieron—
+// pero son la única copia que queda de esa deuda, así que cuentan como
+// trabajo sin enviar para todo lo que decida borrar datos locales.
+export async function contarDeudasSinRegistrar(): Promise<number> {
+  const db = await getDB();
+  const movimientos = await db.getAll('fiado_movimientos');
+  return movimientos.filter(m => m.falloPermanente).length;
+}

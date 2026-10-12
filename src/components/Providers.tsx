@@ -33,6 +33,7 @@ import {
   clearTenantData,
   limpiarIdentidadUsuario,
   contarPendientes,
+  contarDeudasSinRegistrar,
 } from '@/lib/db';
 import { procesarCola, onFalloPermanente, getDiagnosticoCola } from '@/lib/outbox';
 import { Configuracion, Rol, EstadoNegocio, ItemCarrito, DatosNegocio } from '@/types';
@@ -50,6 +51,22 @@ type EstadoSync = 'online' | 'offline' | 'syncing';
 // una cola lenta: es una operación que nunca puede completarse (ver
 // colaAtascada en AppContextType).
 const UMBRAL_INTENTOS_COLA_ATASCADA = 10;
+
+// Frase para los dos tipos de "esto no se puede borrar todavía", reusada en
+// las tres pantallas donde el guardia de borrado rechaza seguir (signOut,
+// deslogueo por inactivo, cambio de negocio). Los dos se distinguen porque
+// la acción de la persona es distinta: lo que está en cola se envía solo
+// con conexión, una deuda conservada hay que resolverla a mano en Fiado.
+function razonesSinEnviar(pendientes: number, deudasSinRegistrar: number): string {
+  const razones: string[] = [];
+  if (pendientes > 0) razones.push(`${pendientes} cambio${pendientes === 1 ? '' : 's'} sin enviar`);
+  if (deudasSinRegistrar > 0) {
+    razones.push(
+      `${deudasSinRegistrar} deuda${deudasSinRegistrar === 1 ? '' : 's'} de fiado que no se pudo${deudasSinRegistrar === 1 ? '' : 'ieron'} registrar`
+    );
+  }
+  return razones.join(' y ');
+}
 
 interface AppContextType {
   tasa: number;
@@ -470,17 +487,22 @@ export default function Providers({ children }: { children: ReactNode }) {
   // avisa por mensajeInicial de LoginScreen en vez de preguntar con un
   // confirm — ya no hay nada destructivo que confirmar.
   const signOut = async () => {
+    // Una deuda conservada ya NO está en la cola, pero es la única copia que
+    // queda de esa plata — borrarla al cerrar sesión la pierde para siempre.
     const pendientes = await contarPendientes();
+    const deudasSinRegistrar = await contarDeudasSinRegistrar();
+    const sinEnviar = pendientes + deudasSinRegistrar;
     await supabase.auth.signOut();
     await limpiarIdentidadUsuario();
     // La regla nunca fue "cerrar sesión no borra datos" a secas — es "no
-    // borra datos SIN SINCRONIZAR". Con la cola vacía no hay nada que
-    // proteger: todo lo local ya está en el servidor y se vuelve a bajar
-    // solo. contarPendientes()===0 no es garantía absoluta (un rechazo
-    // definitivo del servidor sale de la cola sin dejar la venta
-    // "sincronizada", ver resolverResultadoEscritura en outbox.ts) — ese
-    // caso ya existía desde siempre, no es nuevo de este fix.
-    if (pendientes === 0) await clearTenantData();
+    // borra datos SIN SINCRONIZAR". Con la cola vacía y sin deudas
+    // conservadas no hay nada que proteger: todo lo local ya está en el
+    // servidor (o nunca llegó a existir ahí) y se vuelve a bajar solo. Lo que
+    // queda fuera de esta cuenta son los rechazos definitivos de OTRAS
+    // operaciones (ventas, stock), que salen de la cola sin dejar el dato
+    // "sincronizado" (ver resolverResultadoEscritura en outbox.ts) — ese caso
+    // ya existía desde siempre, no es nuevo de este fix.
+    if (sinEnviar === 0) await clearTenantData();
     setUser(null);
     setNegocioId(null);
     setNegocioNombre('');
@@ -504,8 +526,16 @@ export default function Providers({ children }: { children: ReactNode }) {
     setPresupuestoClienteNombre(null);
     setDatosVerificados(false);
     setMotivoDeslogueo(
-      pendientes > 0
-        ? `Quedan ${pendientes} cambio${pendientes === 1 ? '' : 's'} sin enviar guardados en este teléfono. Vuelve a entrar con una cuenta de este mismo negocio y se enviarán solos cuando haya internet.`
+      sinEnviar > 0
+        ? (() => {
+            const acciones: string[] = [];
+            if (pendientes > 0) acciones.push('conéctate a internet para que lo pendiente se envíe solo');
+            if (deudasSinRegistrar > 0) acciones.push(`resuélve${deudasSinRegistrar === 1 ? 'la' : 'las'} en la pantalla Fiado`);
+            return (
+              `Quedan ${razonesSinEnviar(pendientes, deudasSinRegistrar)} en este teléfono. ` +
+              `Vuelve a entrar con una cuenta de este mismo negocio: ${acciones.join(' y ')}.`
+            );
+          })()
         : null
     );
   };
@@ -523,11 +553,14 @@ export default function Providers({ children }: { children: ReactNode }) {
       // Mismo criterio que signOut: un admin desactivando al cajero no
       // puede ser la forma en que ese cajero pierde sus ventas sin
       // enterarse — se borra solo la identidad, nunca los datos sin
-      // sincronizar. Con la cola vacía no hay nada que proteger.
+      // sincronizar. Con la cola vacía y sin deudas conservadas no hay nada
+      // que proteger.
       const pendientes = await contarPendientes();
+      const deudasSinRegistrar = await contarDeudasSinRegistrar();
+      const sinEnviar = pendientes + deudasSinRegistrar;
       await supabase.auth.signOut();
       await limpiarIdentidadUsuario();
-      if (pendientes === 0) await clearTenantData();
+      if (sinEnviar === 0) await clearTenantData();
       setUser(null);
       setNegocioId(null);
       setNegocioNombre('');
@@ -548,8 +581,16 @@ export default function Providers({ children }: { children: ReactNode }) {
       setDatosVerificados(false);
       setMotivoDeslogueo(
         'Tu usuario fue desactivado. Contacta al administrador de tu negocio.' +
-        (pendientes > 0
-          ? ` Quedan ${pendientes} cambio${pendientes === 1 ? '' : 's'} sin enviar guardados en este teléfono. Vuelve a entrar con una cuenta de este mismo negocio y se enviarán solos cuando haya internet.`
+        (sinEnviar > 0
+          ? (() => {
+              const acciones: string[] = [];
+              if (pendientes > 0) acciones.push('conéctate a internet para que lo pendiente se envíe solo');
+              if (deudasSinRegistrar > 0) acciones.push(`resuélve${deudasSinRegistrar === 1 ? 'la' : 'las'} en la pantalla Fiado`);
+              return (
+                ` Quedan ${razonesSinEnviar(pendientes, deudasSinRegistrar)} en este teléfono. ` +
+                `Vuelve a entrar con una cuenta de este mismo negocio: ${acciones.join(' y ')}.`
+              );
+            })()
           : '')
       );
     };
@@ -710,16 +751,19 @@ export default function Providers({ children }: { children: ReactNode }) {
         const cachedNegocioId = negocioIdPrevioRef.current;
         if (cachedNegocioId !== null && cachedNegocioId !== id) {
           // El teléfono tenía datos de OTRO negocio. Si no hay nada sin
-          // enviar, es un cambio de negocio limpio — se borra todo como
-          // siempre. Si hay algo en cola, borrar ahora destruiría plata
-          // registrada de ese otro negocio (las operaciones en cola son
-          // punteros a ventas/movimientos/presupuestos, no copias — ver el
-          // brief de este fix): se rechaza la sesión que recién se abrió, en
-          // vez de arrasar con los datos. En la práctica esto solo le pasa a
-          // un teléfono de prueba compartido entre negocios, nunca a un
+          // enviar NI ninguna deuda conservada, es un cambio de negocio
+          // limpio — se borra todo como siempre. Si hay algo en cola o una
+          // deuda conservada, borrar ahora destruiría plata registrada de
+          // ese otro negocio (las operaciones en cola son punteros a
+          // ventas/movimientos/presupuestos, no copias, y una deuda
+          // conservada es la ÚNICA copia que queda — ver el brief de este
+          // fix): se rechaza la sesión que recién se abrió, en vez de
+          // arrasar con los datos. En la práctica esto solo le pasa a un
+          // teléfono de prueba compartido entre negocios, nunca a un
           // cliente real.
           const pendientes = await contarPendientes();
-          if (pendientes > 0) {
+          const deudasSinRegistrar = await contarDeudasSinRegistrar();
+          if (pendientes > 0 || deudasSinRegistrar > 0) {
             await supabase.auth.signOut();
             setUser(null);
             setNegocioId(null);
@@ -738,9 +782,17 @@ export default function Providers({ children }: { children: ReactNode }) {
             setPresupuestoConvirtiendoId(null);
             setPresupuestoClienteNombre(null);
             setDatosVerificados(false);
+            // Los dos tipos de pendiente requieren una acción distinta de
+            // la persona: lo que está en cola se envía solo con conexión,
+            // una deuda conservada hay que resolverla a mano en Fiado — el
+            // mensaje tiene que distinguirlos, y mencionar los dos si hay
+            // de ambos.
+            const acciones: string[] = [];
+            if (pendientes > 0) acciones.push('conéctate a internet para que lo pendiente se envíe solo');
+            if (deudasSinRegistrar > 0) acciones.push(`resuélve${deudasSinRegistrar === 1 ? 'la' : 'las'} en la pantalla Fiado`);
             setMotivoDeslogueo(
-              `Este teléfono tiene ${pendientes} cambio${pendientes === 1 ? '' : 's'} sin enviar de otro negocio. ` +
-              'Conéctate a internet y vuelve a entrar con la cuenta anterior para enviarlos. Después podrás entrar con esta.'
+              `Este teléfono tiene ${razonesSinEnviar(pendientes, deudasSinRegistrar)}, de otro negocio. ` +
+              `Vuelve a entrar con la cuenta anterior: ${acciones.join(' y ')}. Después podrás entrar con esta.`
             );
             return;
           }
