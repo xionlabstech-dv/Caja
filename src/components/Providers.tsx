@@ -62,7 +62,7 @@ function razonesSinEnviar(pendientes: number, deudasSinRegistrar: number): strin
   if (pendientes > 0) razones.push(`${pendientes} cambio${pendientes === 1 ? '' : 's'} sin enviar`);
   if (deudasSinRegistrar > 0) {
     razones.push(
-      `${deudasSinRegistrar} deuda${deudasSinRegistrar === 1 ? '' : 's'} de fiado que no se pudo${deudasSinRegistrar === 1 ? '' : 'ieron'} registrar`
+      `${deudasSinRegistrar} deuda${deudasSinRegistrar === 1 ? '' : 's'} de fiado que no se ${deudasSinRegistrar === 1 ? 'pudo' : 'pudieron'} registrar`
     );
   }
   return razones.join(' y ');
