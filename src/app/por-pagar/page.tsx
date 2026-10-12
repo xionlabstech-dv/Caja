@@ -658,55 +658,64 @@ export default function PorPagarPage() {
                   key={a.id}
                   className={`bg-tarjeta rounded-2xl border overflow-hidden ${a.vencido ? 'border-negativo-borde' : 'border-borde-tarjeta'}`}
                 >
-                  <button onClick={() => expandirAcreedor(a.id)} className="w-full flex items-center gap-3 p-3.5 text-left">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <p className="font-semibold text-[15px] text-texto truncate">{a.nombre}</p>
-                        <span className="flex-none h-5 px-1.5 inline-flex items-center rounded-full bg-tarjeta-hundida text-texto-3 text-[11px] font-semibold">
-                          {labelTipo(a.tipo)}
-                        </span>
-                        {a.vencido && (
-                          <span className="flex-none h-5 px-1.5 inline-flex items-center rounded-full bg-negativo-fondo text-negativo text-[11px] font-bold">
-                            Vencido
+                  <div className="flex items-stretch">
+                    <button onClick={() => expandirAcreedor(a.id)} className="min-w-0 flex-1 flex items-center gap-3 p-3.5 text-left">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="font-semibold text-[15px] text-texto truncate">{a.nombre}</p>
+                          <span className="flex-none h-5 px-1.5 inline-flex items-center rounded-full bg-tarjeta-hundida text-texto-3 text-[11px] font-semibold">
+                            {labelTipo(a.tipo)}
                           </span>
-                        )}
-                      </div>
-                      {(a.movimientos > 0 || a.proximo_vencimiento) && (
-                        <div className="flex items-center gap-3 mt-0.5 flex-wrap">
-                          {a.movimientos > 0 && (
-                            <p className="text-xs text-texto-3">
-                              {a.movimientos} {a.movimientos === 1 ? 'movimiento' : 'movimientos'}
-                            </p>
-                          )}
-                          {a.proximo_vencimiento && (
-                            <p className="flex items-center gap-1 text-xs text-texto-3">
-                              <Icon nombre="calendario" tamano={TAMANO_ICONO.chip} />
-                              Vence el {fmtVencimiento(a.proximo_vencimiento)}
-                            </p>
+                          {a.vencido && (
+                            <span className="flex-none h-5 px-1.5 inline-flex items-center rounded-full bg-negativo-fondo text-negativo text-[11px] font-bold">
+                              Vencido
+                            </span>
                           )}
                         </div>
-                      )}
-                      {a.es_recurrente && a.dia_pago != null && (() => {
-                        const { texto, destacar } = textoRecordatorio(a.dia_pago);
-                        return (
-                          <p className={`flex items-center gap-1 text-xs mt-0.5 ${destacar ? 'text-negativo font-semibold' : 'text-texto-3'}`}>
-                            <Icon nombre="calendario" tamano={TAMANO_ICONO.chip} />
-                            {texto}
-                          </p>
-                        );
-                      })()}
-                    </div>
-                    <div className="text-right flex-shrink-0">
-                      {debe ? (
-                        <>
-                          <p className="font-bold text-lg text-aviso tabular-nums">{formatUSD(a.saldo_usd)}</p>
-                          {tasa > 0 && <p className="text-xs text-texto-2 tabular-nums">{formatBS(a.saldo_usd * tasa)}</p>}
-                        </>
-                      ) : (
-                        <p className="font-medium text-texto-2">{a.movimientos === 0 ? 'Sin deudas' : 'Al día'}</p>
-                      )}
-                    </div>
-                  </button>
+                        {(a.movimientos > 0 || a.proximo_vencimiento) && (
+                          <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                            {a.movimientos > 0 && (
+                              <p className="text-xs text-texto-3">
+                                {a.movimientos} {a.movimientos === 1 ? 'movimiento' : 'movimientos'}
+                              </p>
+                            )}
+                            {a.proximo_vencimiento && (
+                              <p className="flex items-center gap-1 text-xs text-texto-3">
+                                <Icon nombre="calendario" tamano={TAMANO_ICONO.chip} />
+                                Vence el {fmtVencimiento(a.proximo_vencimiento)}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                        {a.es_recurrente && a.dia_pago != null && (() => {
+                          const { texto, destacar } = textoRecordatorio(a.dia_pago);
+                          return (
+                            <p className={`flex items-center gap-1 text-xs mt-0.5 ${destacar ? 'text-negativo font-semibold' : 'text-texto-3'}`}>
+                              <Icon nombre="calendario" tamano={TAMANO_ICONO.chip} />
+                              {texto}
+                            </p>
+                          );
+                        })()}
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        {debe ? (
+                          <>
+                            <p className="font-bold text-lg text-aviso tabular-nums">{formatUSD(a.saldo_usd)}</p>
+                            {tasa > 0 && <p className="text-xs text-texto-2 tabular-nums">{formatBS(a.saldo_usd * tasa)}</p>}
+                          </>
+                        ) : (
+                          <p className="font-medium text-texto-2">{a.movimientos === 0 ? 'Sin deudas' : 'Al día'}</p>
+                        )}
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => abrirEditar(a)}
+                      aria-label={`Editar ${a.nombre}`}
+                      className="flex-none w-12 flex items-center justify-center text-texto-3 border-l border-borde-divisor"
+                    >
+                      <Icon nombre="editar" tamano={TAMANO_ICONO.secundario} />
+                    </button>
+                  </div>
 
                   {expandido === a.id && (
                     <div className="px-3.5 pb-3.5 border-t border-borde-divisor pt-3 flex flex-col gap-2.5">
@@ -764,15 +773,12 @@ export default function PorPagarPage() {
                           </div>
                         );
                       })()}
-                      <div className="flex gap-2">
-                        <Button variante="secundario" onClick={() => abrirEditar(a)} className="flex-none" aria-label="Editar acreedor">
-                          <Icon nombre="editar" tamano={TAMANO_ICONO.secundario} />
-                        </Button>
-                        <Button variante="secundario" onClick={() => abrirRegistrarDeuda(a)} className="flex-1">
+                      <div className="flex flex-wrap gap-2">
+                        <Button variante="secundario" onClick={() => abrirRegistrarDeuda(a)} className="flex-1 basis-36">
                           <Icon nombre="agregar" tamano={TAMANO_ICONO.secundario} />
                           Registrar deuda
                         </Button>
-                        <Button variante="primario" disabled={!debe} onClick={() => abrirRegistrarPago(a)} className="flex-1">
+                        <Button variante="primario" disabled={!debe} onClick={() => abrirRegistrarPago(a)} className="flex-1 basis-36">
                           <Icon nombre="confirmar" tamano={TAMANO_ICONO.secundario} />
                           Registrar pago
                         </Button>
