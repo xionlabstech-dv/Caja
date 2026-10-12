@@ -649,6 +649,11 @@ export async function getAcreedores(): Promise<Acreedor[]> {
   return db.getAll('acreedores');
 }
 
+export async function getAcreedor(id: string): Promise<Acreedor | undefined> {
+  const db = await getDB();
+  return db.get('acreedores', id);
+}
+
 // Aplica el saldo autoritativo que devuelve la RPC al acreedor cacheado —
 // mismo patrón que actualizarSaldoFiadoLocal.
 export async function actualizarSaldoAcreedorLocal(acreedorId: string, nuevoSaldo: number): Promise<void> {

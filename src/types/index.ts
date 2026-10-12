@@ -330,10 +330,11 @@ export interface Acreedor {
   proximo_vencimiento: string | null;
   vencido: boolean;
   // Recordatorio de pago recurrente (ej. servicios fijos como internet) —
-  // solo recuerda, nunca genera la deuda sola (ver por-pagar/page.tsx).
-  // SELECT/INSERT nada más: el día de pago se fija al crear el acreedor y
-  // hoy no se puede corregir desde la app (no hay UPDATE permitido en la
-  // base todavía).
+  // solo recuerda, nunca genera la deuda sola (ver por-pagar/page.tsx). Se
+  // corrige desde la app vía la RPC editar_acreedor, nunca con un UPDATE
+  // directo: ese camino lo bloquea la falta de política RLS de UPDATE
+  // (no los permisos de columna — authenticated sí tiene UPDATE a nivel de
+  // tabla, pero sin policy no hay fila que lo deje pasar).
   es_recurrente: boolean;
   dia_pago: number | null;
 }
@@ -445,7 +446,8 @@ export type TipoPendiente =
   | 'actualizar_presupuesto'
   | 'actualizar_datos_negocio'
   | 'crear_acreedor'
-  | 'aplicar_movimiento_acreedor';
+  | 'aplicar_movimiento_acreedor'
+  | 'editar_acreedor';
 
 export interface PayloadCrearProducto {
   producto: Producto;
@@ -526,6 +528,11 @@ export interface PayloadCrearAcreedor {
   negocioId: string;
 }
 
+export interface PayloadEditarAcreedor {
+  acreedorId: string;
+  negocioId: string;
+}
+
 export interface PayloadAplicarMovimientoAcreedor {
   movimientoId: string;
   negocioId: string;
@@ -548,7 +555,8 @@ export type PayloadPendiente =
   | PayloadActualizarPresupuesto
   | PayloadActualizarDatosNegocio
   | PayloadCrearAcreedor
-  | PayloadAplicarMovimientoAcreedor;
+  | PayloadAplicarMovimientoAcreedor
+  | PayloadEditarAcreedor;
 
 export interface OperacionPendiente {
   id: string;

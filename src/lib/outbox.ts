@@ -17,6 +17,7 @@ import {
   saveMovimientoAcreedor,
   eliminarMovimientoAcreedor,
   actualizarSaldoAcreedorLocal,
+  getAcreedor,
 } from './db';
 import {
   createProductoSupabase,
@@ -38,6 +39,7 @@ import {
   createAcreedorSupabase,
   aplicarMovimientoAcreedorRemoto,
   getSaldoAcreedorRemoto,
+  editarAcreedorRemoto,
   ResultadoEscritura,
 } from './sync';
 import {
@@ -61,6 +63,7 @@ import {
   PayloadActualizarDatosNegocio,
   PayloadCrearAcreedor,
   PayloadAplicarMovimientoAcreedor,
+  PayloadEditarAcreedor,
   Producto,
   CierreCaja,
   ClienteFiado,
@@ -187,6 +190,22 @@ export async function encolarActualizarDatosNegocio(datos: DatosNegocio, negocio
 export async function encolarCrearAcreedor(acreedor: Acreedor, negocioId: string): Promise<void> {
   const payload: PayloadCrearAcreedor = { acreedor, negocioId };
   await encolar('crear_acreedor', payload, acreedor.id);
+}
+
+export async function encolarEditarAcreedor(acreedorId: string, negocioId: string): Promise<void> {
+  const payload: PayloadEditarAcreedor = { acreedorId, negocioId };
+  // id fijo DISTINTO del id del acreedor: crear_acreedor ya usa acreedor.id
+  // como id de operación, así que reusarlo haría que una edición PISE el
+  // alta todavía en cola y el acreedor nunca se cree. Mismo criterio que
+  // `presupuesto-estado-${id}` más arriba.
+  //
+  // Que sea fijo es a propósito: dos ediciones seguidas sin señal dejan una
+  // sola operación en la cola, y como el handler relee el acreedor de
+  // IndexedDB, sube el último estado.
+  //
+  // dependeDe = acreedorId: si el alta de este acreedor sigue en la cola,
+  // la edición espera — el servidor la rechazaría por no encontrarlo.
+  await encolar('editar_acreedor', payload, `acreedor-editar-${acreedorId}`, acreedorId);
 }
 
 export async function encolarAplicarMovimientoAcreedor(movimientoId: string, negocioId: string, acreedorId?: string): Promise<void> {
@@ -438,6 +457,19 @@ async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
         return true;
       }
       return false;
+    }
+    case 'editar_acreedor': {
+      const { acreedorId } = op.payload as PayloadEditarAcreedor;
+      // Se relee de IndexedDB en vez de congelar los datos en el payload —
+      // mismo patrón que 'actualizar_presupuesto': manda lo último que se
+      // sabe de este acreedor en el momento de sincronizar.
+      const acreedor = await getAcreedor(acreedorId);
+      if (!acreedor) return true; // ya no existe local: nada que sincronizar
+      const resultado = await editarAcreedorRemoto(
+        acreedor.id, acreedor.nombre, acreedor.tipo, acreedor.nota,
+        acreedor.activo, acreedor.es_recurrente, acreedor.dia_pago,
+      );
+      return resolverResultadoEscritura(resultado, 'No se pudo guardar el cambio del acreedor');
     }
     default:
       return true;

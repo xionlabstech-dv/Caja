@@ -11,7 +11,7 @@ import {
   actualizarSaldoAcreedorLocal,
 } from '@/lib/db';
 import { getMovimientosAcreedorRemoto } from '@/lib/sync';
-import { encolarCrearAcreedor, encolarAplicarMovimientoAcreedor, onFalloPermanente } from '@/lib/outbox';
+import { encolarCrearAcreedor, encolarAplicarMovimientoAcreedor, encolarEditarAcreedor, onFalloPermanente } from '@/lib/outbox';
 import { formatBS, formatUSD } from '@/lib/precio';
 import { METODOS_PAGO } from '@/lib/metodos';
 import { useApp } from '@/components/Providers';
@@ -130,6 +130,17 @@ export default function PorPagarPage() {
   const [notaPago, setNotaPago] = useState('');
   const [guardandoPago, setGuardandoPago] = useState(false);
   const [errorPago, setErrorPago] = useState('');
+
+  // Editar / dar de baja
+  const [editando, setEditando] = useState<Acreedor | null>(null);
+  const [nombreEditar, setNombreEditar] = useState('');
+  const [tipoEditar, setTipoEditar] = useState<TipoAcreedor | null>(null);
+  const [notaEditar, setNotaEditar] = useState('');
+  const [recurrenteEditar, setRecurrenteEditar] = useState(false);
+  const [diaPagoEditar, setDiaPagoEditar] = useState('');
+  const [guardandoEditar, setGuardandoEditar] = useState(false);
+  const [dandoBaja, setDandoBaja] = useState(false);
+  const [errorEditar, setErrorEditar] = useState('');
 
   const [toast, setToast] = useState('');
 
@@ -469,6 +480,95 @@ export default function PorPagarPage() {
     ? 'Ingresa el monto'
     : 'Confirmar pago';
 
+  const abrirEditar = (acreedor: Acreedor) => {
+    setEditando(acreedor);
+    setNombreEditar(acreedor.nombre);
+    setTipoEditar(acreedor.tipo);
+    setNotaEditar(acreedor.nota ?? '');
+    setRecurrenteEditar(acreedor.es_recurrente);
+    setDiaPagoEditar(acreedor.dia_pago != null ? String(acreedor.dia_pago) : '');
+    setErrorEditar('');
+  };
+
+  const cerrarEditar = () => {
+    if (guardandoEditar || dandoBaja) return;
+    setEditando(null);
+  };
+
+  const confirmarEditar = async () => {
+    if (!editando || !negocioId) return;
+    const nombre = nombreEditar.trim();
+    if (!nombre) {
+      setErrorEditar('Ingresa un nombre');
+      return;
+    }
+    if (!tipoEditar) {
+      setErrorEditar('Elige un tipo');
+      return;
+    }
+    const diaPagoNum = parseInt(diaPagoEditar, 10);
+    if (recurrenteEditar && (!diaPagoEditar.trim() || isNaN(diaPagoNum) || diaPagoNum < 1 || diaPagoNum > 31)) {
+      setErrorEditar('Elige el día del mes (1 a 31)');
+      return;
+    }
+
+    setGuardandoEditar(true);
+    // Apagado el interruptor, se manda lo que haya en diaPagoEditar tal
+    // cual (incluso vacío) — el servidor ya normaliza a NULL cuando
+    // es_recurrente es false. Duplicar esa regla acá es cómo el cliente y
+    // el servidor terminan desincronizados.
+    const actualizado: Acreedor = {
+      ...editando,
+      nombre,
+      tipo: tipoEditar,
+      nota: notaEditar.trim() || null,
+      es_recurrente: recurrenteEditar,
+      dia_pago: recurrenteEditar ? diaPagoNum : null,
+    };
+
+    try {
+      await saveAcreedor(actualizado);
+      setAcreedores(prev => prev.map(a => (a.id === editando.id ? actualizado : a)));
+      await encolarEditarAcreedor(editando.id, negocioId);
+      setEditando(null);
+      showToast('Acreedor actualizado');
+    } catch {
+      setErrorEditar('No se pudo guardar en este teléfono. Intenta de nuevo.');
+    } finally {
+      setGuardandoEditar(false);
+    }
+  };
+
+  const confirmarDarBaja = async () => {
+    if (!editando || !negocioId) return;
+    // Si se permitiera con saldo, esa deuda desaparecería del total por
+    // pagar (la lista solo muestra activos) y el número dejaría de ser
+    // cierto. La RPC sí lo acepta — la regla vive acá a propósito, para
+    // que una limpieza desde el panel siga siendo posible.
+    if (editando.saldo_usd > EPSILON_SALDO) {
+      setErrorEditar(`Todavía le debes ${formatUSD(editando.saldo_usd)}. Registra el pago antes de darlo de baja.`);
+      return;
+    }
+
+    setDandoBaja(true);
+    const actualizado: Acreedor = { ...editando, activo: false };
+    try {
+      await saveAcreedor(actualizado);
+      // A diferencia de confirmarEditar, acá no se actualiza in place: el
+      // acreedor state solo contiene activos (ver el efecto de carga), así
+      // que uno dado de baja se saca, no se mapea con activo:false.
+      setAcreedores(prev => prev.filter(a => a.id !== editando.id));
+      if (expandido === editando.id) setExpandido(null);
+      await encolarEditarAcreedor(editando.id, negocioId);
+      setEditando(null);
+      showToast('Acreedor dado de baja');
+    } catch {
+      setErrorEditar('No se pudo guardar en este teléfono. Intenta de nuevo.');
+    } finally {
+      setDandoBaja(false);
+    }
+  };
+
   return (
     <div>
       <header className="bg-superficie-barra border-b border-borde-divisor px-4 pt-3.5 pb-3 flex items-center gap-2.5">
@@ -665,6 +765,9 @@ export default function PorPagarPage() {
                         );
                       })()}
                       <div className="flex gap-2">
+                        <Button variante="secundario" onClick={() => abrirEditar(a)} className="flex-none" aria-label="Editar acreedor">
+                          <Icon nombre="editar" tamano={TAMANO_ICONO.secundario} />
+                        </Button>
                         <Button variante="secundario" onClick={() => abrirRegistrarDeuda(a)} className="flex-1">
                           <Icon nombre="agregar" tamano={TAMANO_ICONO.secundario} />
                           Registrar deuda
@@ -975,6 +1078,110 @@ export default function PorPagarPage() {
               className="w-full"
             >
               {textoConfirmarPago}
+            </Button>
+          </div>
+        )}
+      </BottomSheet>
+
+      {/* Editar / dar de baja */}
+      <BottomSheet
+        abierto={!!editando}
+        onCerrar={cerrarEditar}
+        titulo={editando ? `Editar — ${editando.nombre}` : undefined}
+      >
+        {editando && (
+          <div className="space-y-5">
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-wide text-texto-3 mb-2">Nombre</p>
+              <input
+                type="text"
+                value={nombreEditar}
+                onChange={e => { setNombreEditar(e.target.value); setErrorEditar(''); }}
+                className="w-full h-[52px] px-3.5 rounded-[12px] bg-tarjeta border border-borde-campo focus:outline-none focus:border-foco text-base text-texto"
+                autoFocus
+              />
+            </div>
+
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-wide text-texto-3 mb-2">Tipo</p>
+              <div className="grid grid-cols-3 gap-2">
+                {TIPOS.map(t => {
+                  const activo = tipoEditar === t.id;
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => { setTipoEditar(t.id); setErrorEditar(''); }}
+                      className={`h-[52px] rounded-[12px] border flex items-center justify-center text-sm font-semibold ${
+                        activo ? 'bg-marca-suave text-marca-suave-texto border-marca' : 'bg-tarjeta-hundida text-texto-2 border-borde-campo'
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 min-h-[56px] px-3.5 py-3 rounded-[12px] bg-tarjeta border border-borde-campo">
+              <div className="min-w-0">
+                <p className="text-[15px] font-semibold text-texto">Se paga todos los meses</p>
+                <p className="text-xs text-texto-3 mt-0.5">Caja te lo recuerda, pero no registra la deuda sola</p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={recurrenteEditar}
+                onClick={() => { setRecurrenteEditar(v => !v); setErrorEditar(''); }}
+                className={`relative inline-flex w-11 h-6 rounded-full transition-colors flex-shrink-0 ${recurrenteEditar ? 'bg-marca' : 'bg-tarjeta-hundida'}`}
+              >
+                <span className={`inline-block w-5 h-5 m-0.5 bg-white rounded-full shadow-sm transition-transform ${recurrenteEditar ? 'translate-x-5' : 'translate-x-0'}`} />
+              </button>
+            </div>
+
+            {recurrenteEditar && (
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wide text-texto-3 mb-2">Día del mes</p>
+                <input
+                  type="number"
+                  min={1}
+                  max={31}
+                  value={diaPagoEditar}
+                  onChange={e => { setDiaPagoEditar(e.target.value); setErrorEditar(''); }}
+                  placeholder="Ej. 25"
+                  className="w-full h-[52px] px-3.5 rounded-[12px] bg-tarjeta border border-borde-campo focus:outline-none focus:border-foco text-base text-texto"
+                />
+              </div>
+            )}
+
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-wide text-texto-3 mb-2">Nota (opcional)</p>
+              <input
+                type="text"
+                value={notaEditar}
+                onChange={e => setNotaEditar(e.target.value)}
+                className="w-full h-[52px] px-3.5 rounded-[12px] bg-tarjeta border border-borde-campo focus:outline-none focus:border-foco text-base text-texto"
+              />
+            </div>
+
+            {errorEditar && <p className="text-sm text-negativo">{errorEditar}</p>}
+
+            <Button
+              variante="primario"
+              disabled={guardandoEditar || dandoBaja}
+              onClick={confirmarEditar}
+              className="w-full"
+            >
+              {guardandoEditar ? 'Guardando...' : 'Guardar'}
+            </Button>
+
+            <Button
+              variante="destructivo"
+              disabled={guardandoEditar || dandoBaja}
+              onClick={confirmarDarBaja}
+              className="w-full"
+            >
+              {dandoBaja ? 'Dando de baja...' : 'Dar de baja'}
             </Button>
           </div>
         )}

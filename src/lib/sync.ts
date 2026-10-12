@@ -691,11 +691,16 @@ export async function editarAcreedorRemoto(
   nombre: string,
   tipo: TipoAcreedor,
   nota: string | null,
-  activo: boolean
+  activo: boolean,
+  esRecurrente: boolean,
+  diaPago: number | null
 ): Promise<ResultadoEscritura> {
   try {
     const { error } = await supabase
-      .rpc('editar_acreedor', { p_id: id, p_nombre: nombre, p_tipo: tipo, p_nota: nota, p_activo: activo })
+      .rpc('editar_acreedor', {
+        p_id: id, p_nombre: nombre, p_tipo: tipo, p_nota: nota, p_activo: activo,
+        p_es_recurrente: esRecurrente, p_dia_pago: diaPago,
+      })
       .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
     if (error) return { ok: false, permanente: true, mensaje: error.message };
     return { ok: true };
