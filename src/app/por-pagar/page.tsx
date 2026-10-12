@@ -355,7 +355,7 @@ export default function PorPagarPage() {
         ...prev,
         [registrandoDeuda.id]: [movimiento, ...(prev[registrandoDeuda.id] ?? [])],
       }));
-      await encolarAplicarMovimientoAcreedor(movimiento.id, negocioId);
+      await encolarAplicarMovimientoAcreedor(movimiento.id, negocioId, registrandoDeuda.id);
       setRegistrandoDeuda(null);
       showToast('Deuda registrada');
     } catch {
@@ -451,7 +451,7 @@ export default function PorPagarPage() {
         ...prev,
         [pagando.id]: [movimiento, ...(prev[pagando.id] ?? [])],
       }));
-      await encolarAplicarMovimientoAcreedor(movimiento.id, negocioId);
+      await encolarAplicarMovimientoAcreedor(movimiento.id, negocioId, pagando.id);
       setPagando(null);
       showToast('Pago registrado');
     } catch {

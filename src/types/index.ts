@@ -557,4 +557,14 @@ export interface OperacionPendiente {
   timestamp: string;
   intentos: number;
   ultimoIntento?: string;
+  // Id de otra operación de la cola que tiene que resolverse ANTES que esta.
+  // La cola está ordenada por timestamp, pero una operación en espera de
+  // backoff se saltea y las de atrás se procesan igual — así un cargo de
+  // fiado llegaba antes que el alta del cliente al que pertenece, y el
+  // servidor lo rechazaba con "Cliente no encontrado".
+  //
+  // Los ids ya coinciden: crear_cliente_fiado usa cliente.id como id de
+  // operación y crear_acreedor usa acreedor.id, así que acá va el id del
+  // cliente o del acreedor.
+  dependeDe?: string;
 }

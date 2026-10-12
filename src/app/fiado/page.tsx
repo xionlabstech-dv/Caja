@@ -107,6 +107,9 @@ export default function FiadoPage() {
   // nunca va a tener este movimiento — perdería el aviso justo cuando hay
   // señal para resolverlo.
   const [fallosPermanentes, setFallosPermanentes] = useState<Record<string, MovimientoFiado[]>>({});
+  // Id del movimiento cuyo botón "Reintentar" está en curso — para
+  // deshabilitarlo y mostrar "Reintentando..." solo en ese, no en todos.
+  const [reintentando, setReintentando] = useState<string | null>(null);
 
   const [abonando, setAbonando] = useState<ClienteFiado | null>(null);
   const [metodoAbono, setMetodoAbono] = useState<MetodoAbono | null>(null);
@@ -157,6 +160,19 @@ export default function FiadoPage() {
       }
       setFallosPermanentes(porCliente);
     });
+  }
+
+  async function reintentarCargo(m: MovimientoFiado) {
+    if (!negocioId) return;
+    setReintentando(m.id);
+    // Mismo id: la RPC es idempotente, así que reintentar no puede duplicar
+    // la deuda. Se limpia la marca de fallo y se vuelve a encolar — ahora
+    // con el cliente ya creado en el servidor, entra sin problema.
+    const { falloPermanente: _descartado, ...limpio } = m;
+    await saveMovimientoFiado({ ...limpio, sincronizado: false });
+    await encolarAplicarMovimientoFiado(m.id, negocioId, m.cliente_id);
+    cargarFallosPermanentes();
+    setReintentando(null);
   }
 
   // Recién ahora, con todos los hooks ya llamados, se puede cortar el
@@ -269,7 +285,7 @@ export default function FiadoPage() {
     const nuevoSaldo = Math.max(0, abonando.saldo_usd - movimiento.monto_usd);
     await actualizarSaldoFiadoLocal(abonando.id, nuevoSaldo);
     setClientes(prev => prev.map(c => (c.id === abonando.id ? { ...c, saldo_usd: nuevoSaldo } : c)));
-    await encolarAplicarMovimientoFiado(movimiento.id, negocioId);
+    await encolarAplicarMovimientoFiado(movimiento.id, negocioId, abonando.id);
 
     setGuardandoAbono(false);
     cerrarAbonar();
@@ -421,13 +437,21 @@ export default function FiadoPage() {
                   {expandido === c.id && (
                     <div className="px-3 pb-3 border-t border-borde-divisor pt-3 flex flex-col gap-2.5">
                       {(fallosPermanentes[c.id] ?? []).map(m => (
-                        <div key={m.id} className="p-3 rounded-[12px] bg-negativo-fondo border border-negativo-borde flex flex-col gap-1">
+                        <div key={m.id} className="p-3 rounded-[12px] bg-negativo-fondo border border-negativo-borde flex flex-col gap-2">
                           <p className="text-sm font-bold text-negativo">
                             No se registró una deuda de {formatUSD(m.monto_usd)}
                           </p>
                           <p className="text-xs text-negativo">
                             {m.falloPermanente} — hay que cargarla a mano.
                           </p>
+                          <Button
+                            variante="primario"
+                            disabled={reintentando === m.id}
+                            onClick={() => reintentarCargo(m)}
+                            className="w-full"
+                          >
+                            {reintentando === m.id ? 'Reintentando...' : 'Reintentar'}
+                          </Button>
                         </div>
                       ))}
                       {(() => {

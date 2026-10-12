@@ -113,6 +113,7 @@ async function encolar(
   tipo: TipoPendiente,
   payload: PayloadPendiente,
   idFijo?: string,
+  dependeDe?: string,
 ): Promise<void> {
   const op: OperacionPendiente = {
     id: idFijo ?? crypto.randomUUID(),
@@ -120,6 +121,7 @@ async function encolar(
     payload,
     timestamp: new Date().toISOString(),
     intentos: 0,
+    ...(dependeDe ? { dependeDe } : {}),
   };
   await encolarPendiente(op);
   if (typeof navigator !== 'undefined' && navigator.onLine) {
@@ -187,10 +189,10 @@ export async function encolarCrearAcreedor(acreedor: Acreedor, negocioId: string
   await encolar('crear_acreedor', payload, acreedor.id);
 }
 
-export async function encolarAplicarMovimientoAcreedor(movimientoId: string, negocioId: string): Promise<void> {
+export async function encolarAplicarMovimientoAcreedor(movimientoId: string, negocioId: string, acreedorId?: string): Promise<void> {
   const payload: PayloadAplicarMovimientoAcreedor = { movimientoId, negocioId };
   // id fijo = id del movimiento: mismo criterio que aplicar_movimiento_fiado.
-  await encolar('aplicar_movimiento_acreedor', payload, movimientoId);
+  await encolar('aplicar_movimiento_acreedor', payload, movimientoId, acreedorId);
 }
 
 export async function encolarAplicarMovimientoStock(movimientoId: string, negocioId: string): Promise<void> {
@@ -205,10 +207,12 @@ export async function encolarCrearClienteFiado(cliente: ClienteFiado, negocioId:
   await encolar('crear_cliente_fiado', payload, cliente.id);
 }
 
-export async function encolarAplicarMovimientoFiado(movimientoId: string, negocioId: string): Promise<void> {
+export async function encolarAplicarMovimientoFiado(movimientoId: string, negocioId: string, clienteId?: string): Promise<void> {
   const payload: PayloadAplicarMovimientoFiado = { movimientoId, negocioId };
   // id fijo = id del movimiento: mismo criterio que aplicar_movimiento_stock.
-  await encolar('aplicar_movimiento_fiado', payload, movimientoId);
+  // clienteId como dependencia: si el alta de ese cliente sigue en la cola,
+  // este movimiento espera — el servidor lo rechazaría por no encontrarlo.
+  await encolar('aplicar_movimiento_fiado', payload, movimientoId, clienteId);
 }
 
 export async function encolarCrearPresupuesto(presupuesto: Presupuesto, negocioId: string): Promise<void> {
@@ -443,8 +447,18 @@ async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
 async function procesarColaUnaPasada(): Promise<number> {
   let procesados = 0;
   const cola = await getPendientes();
+  // Ids que siguen en la cola — para saber si la dependencia de una
+  // operación todavía no se resolvió.
+  const idsEnCola = new Set(cola.map(o => o.id));
   for (const op of cola) {
     if (typeof navigator !== 'undefined' && !navigator.onLine) break;
+
+    // Su dependencia sigue pendiente (ej. el alta del cliente al que
+    // pertenece este cargo). No es un fallo: es que todavía no es su turno.
+    // Se saltea sin contar intento ni tocar el backoff, y se vuelve a mirar
+    // en la pasada siguiente. Si la dependencia ya salió de la cola —porque
+    // se resolvió, o porque se descartó— esta operación avanza normal.
+    if (op.dependeDe && idsEnCola.has(op.dependeDe)) continue;
 
     if (op.ultimoIntento) {
       const espera = backoffMs(op.intentos);
