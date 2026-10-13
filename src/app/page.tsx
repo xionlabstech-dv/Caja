@@ -878,8 +878,8 @@ export default function CajaPage() {
                 {/* Fila 1: nombre + precio */}
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <p className="font-medium text-texto">{formatearNombre(producto.nombre)}</p>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <p className="font-medium text-texto min-w-0 break-words">{formatearNombre(producto.nombre)}</p>
                       {producto.por_peso && (
                         <span className="text-xs bg-informativo-fondo text-informativo px-1.5 py-0.5 rounded-full font-medium flex-shrink-0">
                           /kg
