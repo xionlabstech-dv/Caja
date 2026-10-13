@@ -1053,6 +1053,7 @@ export default function PorPagarPage() {
                 value={notaPago}
                 onChange={e => setNotaPago(e.target.value)}
                 className="w-full h-[52px] px-3.5 rounded-[12px] bg-tarjeta border border-borde-campo focus:outline-none focus:border-foco text-base text-texto"
+                maxLength={120}
               />
             </div>
 
@@ -1170,6 +1171,7 @@ export default function PorPagarPage() {
                 value={notaEditar}
                 onChange={e => setNotaEditar(e.target.value)}
                 className="w-full h-[52px] px-3.5 rounded-[12px] bg-tarjeta border border-borde-campo focus:outline-none focus:border-foco text-base text-texto"
+                maxLength={120}
               />
             </div>
 
