@@ -141,7 +141,9 @@ export default function ResumenPage() {
     // red. No hay un flag "cierre_id" en fiado_movimientos como en ventas,
     // así que el corte de período es por fecha (después del último cierre).
     const abonosLocal = (await getMovimientosFiado()).filter(
-      m => m.tipo === 'abono' && (!uc || m.ocurrido_en > uc)
+      // !m.venta_id: mismo criterio que getAbonosPeriodoRemoto — un abono
+      // con venta_id es un reverso de anulación, no plata cobrada.
+      m => m.tipo === 'abono' && !m.venta_id && (!uc || m.ocurrido_en > uc)
     );
 
     // Etapa 1 — pinta de inmediato con lo que ya hay en este dispositivo,
@@ -425,8 +427,10 @@ export default function ResumenPage() {
     const resultado = await anularVenta(anulando.id, motivoAnular.trim());
     setGuardandoAnulacion(false);
 
-    if (!resultado) {
-      setErrorAnular('No se pudo anular la venta. Intenta de nuevo.');
+    if ('ok' in resultado) {
+      setErrorAnular(
+        resultado.mensaje ?? 'No se pudo anular la venta. Revisa la conexión e intenta de nuevo.',
+      );
       return;
     }
 

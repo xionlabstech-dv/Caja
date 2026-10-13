@@ -1007,15 +1007,28 @@ export interface ResultadoAnulacion {
   ya_estaba_anulada: boolean;
 }
 
-export async function anularVenta(ventaId: string, motivo: string): Promise<ResultadoAnulacion | null> {
+// Un fallo de anulación no siempre vale la pena reintentarlo: el servidor
+// puede rechazar por algo definitivo (el cliente ya abonó parte de la venta
+// a crédito, el negocio no está activo, no sos admin) y esos mensajes están
+// escritos para mostrarse tal cual, igual que los del trigger de piso de
+// tasa en updateTasa. mensaje en null = nunca hubo respuesta (sin red).
+export interface FalloAnulacion {
+  ok: false;
+  mensaje: string | null;
+}
+
+export async function anularVenta(
+  ventaId: string,
+  motivo: string,
+): Promise<ResultadoAnulacion | FalloAnulacion> {
   try {
     const { data, error } = await supabase
       .rpc('anular_venta', { p_venta_id: ventaId, p_motivo: motivo })
       .single();
-    if (error) throw error;
+    if (error) return { ok: false, mensaje: error.message ?? null };
     return data as ResultadoAnulacion;
   } catch {
-    return null;
+    return { ok: false, mensaje: null };
   }
 }
 
@@ -1286,6 +1299,12 @@ export async function getAbonosPeriodoRemoto(
       .select('id, cliente_id, tipo, monto_usd, monto_bs, tasa_usada, venta_id, ocurrido_en')
       .eq('negocio_id', negocioId)
       .eq('tipo', 'abono')
+      // Un reverso de anulación también es un abono, pero no es plata que
+      // entró: lo genera anular_venta, no un cliente pagando. Se distingue
+      // por venta_id — un abono real siempre lo trae en null. Sin este
+      // filtro el reverso infla "Abonado a cuentas por cobrar" y, peor, el
+      // total_abonado del cierre, que queda congelado.
+      .is('venta_id', null)
       .lte('ocurrido_en', hasta);
     if (desde) query = query.gt('ocurrido_en', desde);
     const { data, error } = await query;
