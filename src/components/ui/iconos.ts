@@ -107,6 +107,7 @@ export const ICONOS = {
   info: Info,
   actualizarApp: RefreshCw,
   suspendido: AlertCircle,
+  avisoDeuda: AlertCircle,
 
   // Conexión
   enLinea: Wifi,

@@ -190,6 +190,9 @@ export default function FiadoPage() {
   const totalDeudaUsd = conDeuda.reduce((s, c) => s + c.saldo_usd, 0);
   const totalDeudaBs = tasa > 0 ? totalDeudaUsd * tasa : 0;
   const montoVencidoUsd = vencidos.reduce((s, c) => s + c.saldo_usd, 0);
+  // Cuenta TODOS los fallos de todos los clientes, no solo el expandido —
+  // es la fuente del aviso en la tarjeta "Total por cobrar" de más abajo.
+  const totalFallosPermanentes = Object.values(fallosPermanentes).reduce((s, arr) => s + arr.length, 0);
 
   const clientesFiltrados = clientes
     .filter(c => (chip === 'todos' ? true : chip === 'deuda' ? c.saldo_usd > EPSILON_SALDO : c.saldo_usd <= EPSILON_SALDO))
@@ -376,6 +379,17 @@ export default function FiadoPage() {
           )}
         </div>
 
+        {totalFallosPermanentes > 0 && (
+          <div className="p-3.5 rounded-2xl bg-negativo-fondo border border-negativo-borde flex items-center gap-2.5">
+            <Icon nombre="avisoDeuda" tamano={TAMANO_ICONO.secundario} className="flex-none text-negativo" />
+            <p className="text-sm font-semibold text-negativo">
+              {totalFallosPermanentes === 1
+                ? '1 deuda no se pudo registrar — mirá abajo cuál cliente.'
+                : `${totalFallosPermanentes} deudas no se pudieron registrar — mirá abajo cuáles clientes.`}
+            </p>
+          </div>
+        )}
+
         {cargando ? (
           <div className="text-center text-texto-3 py-16">
             <Icon nombre="cargando" tamano={32} className="mx-auto mb-3 text-marca animate-spin" />
@@ -437,9 +451,9 @@ export default function FiadoPage() {
                     </div>
                   </button>
 
-                  {expandido === c.id && (
+                  {(fallosPermanentes[c.id] ?? []).length > 0 && (
                     <div className="px-3 pb-3 border-t border-borde-divisor pt-3 flex flex-col gap-2.5">
-                      {(fallosPermanentes[c.id] ?? []).map(m => (
+                      {fallosPermanentes[c.id].map(m => (
                         <div key={m.id} className="p-3 rounded-[12px] bg-negativo-fondo border border-negativo-borde flex flex-col gap-2">
                           <p className="text-sm font-bold text-negativo">
                             No se registró una deuda de {formatUSD(m.monto_usd)}
@@ -457,6 +471,11 @@ export default function FiadoPage() {
                           </Button>
                         </div>
                       ))}
+                    </div>
+                  )}
+
+                  {expandido === c.id && (
+                    <div className="px-3 pb-3 border-t border-borde-divisor pt-3 flex flex-col gap-2.5">
                       {(() => {
                         const movimientos = detalleMovimientos[c.id] ?? [];
                         if (movimientos.length === 0) {
