@@ -803,6 +803,7 @@ export default function PorPagarPage() {
               onChange={e => { setNombreNuevo(e.target.value); setErrorNuevo(''); }}
               placeholder="Ej. Distribuidora La Central"
               className="w-full h-[52px] px-3.5 rounded-[12px] bg-tarjeta border border-borde-campo focus:outline-none focus:border-foco text-base text-texto"
+              maxLength={40}
               autoFocus
             />
           </div>
@@ -867,6 +868,7 @@ export default function PorPagarPage() {
               onChange={e => setNotaNuevo(e.target.value)}
               placeholder="Ej. Pago los días 15 y 30"
               className="w-full h-[52px] px-3.5 rounded-[12px] bg-tarjeta border border-borde-campo focus:outline-none focus:border-foco text-base text-texto"
+              maxLength={120}
             />
           </div>
 
@@ -946,6 +948,7 @@ export default function PorPagarPage() {
                 onChange={e => setNotaDeuda(e.target.value)}
                 placeholder="Ej. Factura #4521"
                 className="w-full h-[52px] px-3.5 rounded-[12px] bg-tarjeta border border-borde-campo focus:outline-none focus:border-foco text-base text-texto"
+                maxLength={120}
               />
             </div>
 

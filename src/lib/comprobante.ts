@@ -389,7 +389,10 @@ function dibujarComprobanteTicket(ctx: CanvasRenderingContext2D, datos: DatosCom
   ctx.textAlign = 'center';
   ctx.font = 'bold 16px sans-serif';
   ctx.fillStyle = COLOR_TEXTO;
-  ctx.fillText(datosNegocio?.nombreComercial || negocioNombre || 'Negocio', centroX, y);
+  ctx.fillText(
+    truncar(ctx, datosNegocio?.nombreComercial || negocioNombre || 'Negocio', ancho - padX * 2),
+    centroX, y,
+  );
   y += 18;
 
   // Datos de contacto — a diferencia del nombre (centrado, como hoy), van

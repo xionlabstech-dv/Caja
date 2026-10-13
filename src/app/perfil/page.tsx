@@ -507,6 +507,7 @@ export default function PerfilPage() {
                   autoCapitalize="off"
                   autoCorrect="off"
                   spellCheck={false}
+                  maxLength={32}
                   className={`w-full h-[52px] px-3.5 rounded-xl bg-tarjeta-hundida border outline-none text-[15px] font-semibold text-texto ${
                     nombreErrado ? 'border-negativo-borde' : 'border-borde-campo'
                   }`}

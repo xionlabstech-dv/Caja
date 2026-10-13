@@ -276,6 +276,7 @@ export default function UsuariosPage() {
                   onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))}
                   placeholder="Ej: Carlos"
                   className="w-full border border-borde-campo rounded-xl px-4 py-3 bg-tarjeta text-texto placeholder:text-texto-4 focus:outline-none focus:border-marca"
+                  maxLength={40}
                   autoFocus
                 />
               </div>
@@ -292,6 +293,7 @@ export default function UsuariosPage() {
                   autoCorrect="off"
                   placeholder="Ej: carlos"
                   className="w-full border border-borde-campo rounded-xl px-4 py-3 font-mono bg-tarjeta text-texto placeholder:text-texto-4 focus:outline-none focus:border-marca"
+                  maxLength={30}
                 />
                 <p className="text-xs text-texto-4 mt-1">Solo letras, números y guiones, sin espacios</p>
               </div>

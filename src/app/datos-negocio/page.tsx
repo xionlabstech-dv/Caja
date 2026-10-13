@@ -325,6 +325,7 @@ export default function DatosNegocioPage() {
                   onChange={e => setNombreComercial(e.target.value)}
                   placeholder="Ej: Charcutería Mayga"
                   className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-3 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-400"
+                  maxLength={32}
                 />
               </div>
 
@@ -336,6 +337,7 @@ export default function DatosNegocioPage() {
                   onChange={e => setDireccion(e.target.value)}
                   placeholder="Ej: Av. Principal, local 3"
                   className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-3 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-400"
+                  maxLength={50}
                 />
               </div>
 
@@ -347,6 +349,7 @@ export default function DatosNegocioPage() {
                   onChange={e => setTelefono(e.target.value)}
                   placeholder="Ej: 0414-1234567"
                   className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-3 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-400"
+                  maxLength={20}
                 />
               </div>
 
@@ -358,6 +361,7 @@ export default function DatosNegocioPage() {
                   onChange={e => setCorreo(e.target.value)}
                   placeholder="Ej: contacto@negocio.com"
                   className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-3 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-400"
+                  maxLength={60}
                 />
               </div>
 
@@ -369,6 +373,7 @@ export default function DatosNegocioPage() {
                   onChange={e => setRif(e.target.value)}
                   placeholder="Ej: J-12345678-9"
                   className="w-full border border-gray-200 dark:border-slate-600 rounded-xl px-4 py-3 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:outline-none focus:border-emerald-400"
+                  maxLength={15}
                 />
               </div>
 

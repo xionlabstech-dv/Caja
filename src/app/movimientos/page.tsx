@@ -473,6 +473,7 @@ export default function MovimientosPage() {
             value={nota}
             onChange={e => setNota(e.target.value)}
             placeholder="Ej: Compra semanal"
+            maxLength={120}
           />
 
           {error && <p className="font-caja text-sm text-negativo">{error}</p>}

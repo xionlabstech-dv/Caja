@@ -398,6 +398,7 @@ export default function CajaPage() {
           onChange={e => setBusquedaClienteFiado(e.target.value)}
           placeholder="Buscar o escribir nombre nuevo"
           className="w-full h-[52px] px-3.5 rounded-xl bg-tarjeta-hundida border border-borde-campo text-base text-texto focus:outline-none focus:border-foco mb-2"
+          maxLength={40}
           autoFocus
         />
         <div className="max-h-40 overflow-y-auto space-y-1.5">

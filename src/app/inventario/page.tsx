@@ -1038,8 +1038,14 @@ export default function InventarioPage() {
             value={form.nombre}
             onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))}
             placeholder="Nombre del producto"
+            maxLength={45}
             autoFocus
           />
+          {form.nombre.length > 35 && (
+            <p className="text-xs text-texto-3 mt-1 tabular-nums">
+              {form.nombre.length}/45
+            </p>
+          )}
 
           <div className="flex items-center justify-between py-1">
             <div>
@@ -1072,6 +1078,7 @@ export default function InventarioPage() {
                 onChange={e => setForm(f => ({ ...f, codigo_barra: e.target.value }))}
                 className="font-mono"
                 placeholder="Opcional"
+                maxLength={20}
               />
               <button
                 type="button"

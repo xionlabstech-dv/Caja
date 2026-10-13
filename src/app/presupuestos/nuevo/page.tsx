@@ -458,6 +458,7 @@ export default function NuevoPresupuestoPage() {
               onChange={e => setClienteNombre(e.target.value)}
               placeholder="Nombre del cliente"
               className="flex-1"
+              maxLength={40}
             />
           </div>
           <Input

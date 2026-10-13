@@ -599,6 +599,7 @@ export default function PresupuestosPage() {
                 rows={3}
                 placeholder="Ej: El cliente ya no lo necesita"
                 className="font-caja w-full rounded-[12px] border bg-tarjeta text-texto text-base px-4 py-3 placeholder:text-texto-4 outline-none transition-colors duration-150 border-borde-campo focus:border-foco"
+                maxLength={120}
                 autoFocus
               />
             </div>
