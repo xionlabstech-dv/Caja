@@ -375,7 +375,7 @@ async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
           if (saldoReal !== null) await actualizarSaldoFiadoLocal(movimiento.cliente_id, saldoReal);
           notificarFalloPermanente(
             `No se registró una deuda de ${movimiento.monto_usd.toFixed(2)} $ por una venta a crédito. ` +
-            `Revisá el cliente en la pantalla Por Cobrar: hay que cargarla a mano.`
+            `Revisa el cliente en la pantalla Por Cobrar: hay que cargarla a mano.`
           );
           return true;
         }

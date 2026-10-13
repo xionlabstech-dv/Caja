@@ -384,8 +384,8 @@ export default function FiadoPage() {
             <Icon nombre="avisoDeuda" tamano={TAMANO_ICONO.secundario} className="flex-none text-negativo" />
             <p className="text-sm font-semibold text-negativo">
               {totalFallosPermanentes === 1
-                ? '1 deuda no se pudo registrar — mirá abajo cuál cliente.'
-                : `${totalFallosPermanentes} deudas no se pudieron registrar — mirá abajo cuáles clientes.`}
+                ? '1 deuda no se pudo registrar. Revisa el cliente marcado abajo.'
+                : `${totalFallosPermanentes} deudas no se pudieron registrar. Revisa los clientes marcados abajo.`}
             </p>
           </div>
         )}
