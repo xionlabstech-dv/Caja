@@ -814,15 +814,29 @@ function dibujarRecuadroVigencia(
   ctx: CanvasRenderingContext2D, x: number, y: number, ancho: number, alto: number,
   texto1: string, texto2: string, tam1: number, tam2: number,
   colorFondo: string = COLOR_NARANJA_BG, colorTinta: string = COLOR_NARANJA,
+  maxLineas: number = 1,
 ) {
+  const PAD = 14;
+  const anchoUtil = ancho - PAD * 2;
   ctx.fillStyle = colorFondo;
   ctx.fillRect(x, y, ancho, alto);
   ctx.textAlign = 'left';
   ctx.fillStyle = colorTinta;
   ctx.font = `bold ${tam1}px sans-serif`;
-  ctx.fillText(texto1, x + 14, y + tam1 + 8);
+  ctx.fillText(truncar(ctx, texto1, anchoUtil), x + PAD, y + tam1 + 8);
   ctx.font = `${tam2}px sans-serif`;
-  ctx.fillText(texto2, x + 14, y + tam1 + tam2 + 14);
+  const todas = envolverTexto(ctx, texto2, anchoUtil);
+  const lineas = todas.slice(0, maxLineas);
+  // Solo se recorta si de verdad sobró texto: si entró completo, no hay
+  // puntos suspensivos de adorno.
+  if (todas.length > maxLineas) {
+    lineas[maxLineas - 1] = truncar(ctx, lineas[maxLineas - 1] + ' ' + todas[maxLineas], anchoUtil);
+  }
+  let yLinea = y + tam1 + tam2 + 14;
+  for (const linea of lineas) {
+    ctx.fillText(linea, x + PAD, yLinea);
+    yLinea += tam2 + 2;
+  }
 }
 
 // El recuadro de la esquina no puede seguir diciendo "Válido hasta" cuando el
@@ -914,7 +928,7 @@ function dibujarPresupuestoCarta(ctx: CanvasRenderingContext2D, datos: DatosPres
   const rec = recuadroEstadoPresupuesto(presupuesto, 'Los precios en bolívares pueden cambiar después de esa fecha.');
   dibujarRecuadroVigencia(
     ctx, xVigencia, y, anchoVigencia, altoFila,
-    rec.texto1, rec.texto2, 17, 12, rec.fondo, rec.tinta,
+    rec.texto1, rec.texto2, 17, 12, rec.fondo, rec.tinta, 2,
   );
   y += altoFila;
   trazarLinea(ctx, padX, ancho - padX, y, { color: COLOR_DIVISOR });
@@ -1070,7 +1084,7 @@ function dibujarPresupuestoMediaCarta(ctx: CanvasRenderingContext2D, datos: Dato
   ctx.fillStyle = COLOR_TEXTO;
   ctx.fillText(presupuesto.creado_por_nombre || '—', xCursor, y + altoFila / 2 + 4);
 
-  const rec = recuadroEstadoPresupuesto(presupuesto, 'Los precios en Bs pueden cambiar después');
+  const rec = recuadroEstadoPresupuesto(presupuesto, 'Los precios en Bs pueden cambiar');
   dibujarRecuadroVigencia(
     ctx, xVigencia, y, anchoVigencia, altoFila,
     rec.texto1, rec.texto2, 13.5, 10.5, rec.fondo, rec.tinta,
