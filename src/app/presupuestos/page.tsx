@@ -291,10 +291,10 @@ export default function PresupuestosPage() {
   const vencidos = presupuestos.filter(esVencido);
   const totalVigenteUsd = presupuestos
     .filter(p => p.estado === 'vigente')
-    .reduce((s, p) => s + p.total_usd, 0);
+    .reduce((s, p) => s + p.total_usd + (p.iva_usd ?? 0), 0);
   const totalVigenteBs = presupuestos
     .filter(p => p.estado === 'vigente')
-    .reduce((s, p) => s + p.total_bs_estimado, 0);
+    .reduce((s, p) => s + p.total_bs_estimado + (p.iva_bs_estimado ?? 0), 0);
 
   const presupuestosVisibles = verHistorialCompleto ? presupuestos : presupuestos.filter(esReciente);
 
@@ -470,8 +470,8 @@ export default function PresupuestosPage() {
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <div className="text-right">
-                        <p className="font-bold text-texto tabular-nums">{formatUSD(p.total_usd)}</p>
-                        <p className="text-xs text-texto-3 tabular-nums">{formatBS(p.total_bs_estimado)}</p>
+                        <p className="font-bold text-texto tabular-nums">{formatUSD(p.total_usd + (p.iva_usd ?? 0))}</p>
+                        <p className="text-xs text-texto-3 tabular-nums">{formatBS(p.total_bs_estimado + (p.iva_bs_estimado ?? 0))}</p>
                       </div>
                       <Icon
                         nombre="flechaDerecha"
@@ -531,7 +531,7 @@ export default function PresupuestosPage() {
 
                       <div className="border-t border-borde-divisor pt-2 flex items-center justify-between text-sm">
                         <span className="text-texto-3">Equivalente</span>
-                        <span className="text-texto-2">{formatUSD(p.total_usd)}</span>
+                        <span className="text-texto-2">{formatUSD(p.total_usd + (p.iva_usd ?? 0))}</span>
                       </div>
                       <div className="flex items-center justify-between text-sm">
                         <span className="text-texto-3">Creado por</span>

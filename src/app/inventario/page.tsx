@@ -79,9 +79,19 @@ const PRODUCTO_VACIO = {
   stock: '',
   stock_minimo: '',
   controla_stock: true,
+  iva_tasa: 16 as 16 | 0 | 8 | 31,
 };
 
 const MARGENES_RAPIDOS = [10, 20, 30, 50];
+
+// Orden pedido: 16% primero porque es el caso mayoritario, "Exento" segundo
+// porque es el que de verdad se usa (los libros en esta librería).
+const IVA_TASAS: { valor: 16 | 0 | 8 | 31; etiqueta: string }[] = [
+  { valor: 16, etiqueta: '16% (general)' },
+  { valor: 0, etiqueta: 'Exento' },
+  { valor: 8, etiqueta: '8% (reducida)' },
+  { valor: 31, etiqueta: '31% (lujo)' },
+];
 
 // Acepta coma o punto como separador decimal (el margen se escribe a mano,
 // a diferencia de costo/precio que usan <input type="number">).
@@ -92,7 +102,7 @@ function parseNum(s: string): number {
 export default function InventarioPage() {
   const permitida = useGuardarRuta();
   const router = useRouter();
-  const { tasa, isOnline, negocioId, productosVersion, rol, usaCostos, usaStock, ultimaSincronizacion, user, userNombre } = useApp();
+  const { tasa, isOnline, negocioId, productosVersion, rol, usaCostos, usaStock, usaIva, ultimaSincronizacion, user, userNombre } = useApp();
   const [productos, setProductos] = useState<Producto[]>([]);
   const [cargandoProductos, setCargandoProductos] = useState(true);
   const [busqueda, setBusqueda] = useState('');
@@ -219,6 +229,9 @@ export default function InventarioPage() {
       stock: p.stock != null ? String(p.stock) : '',
       stock_minimo: p.stock_minimo != null ? String(p.stock_minimo) : '',
       controla_stock: p.controla_stock ?? true,
+      // Default 16 ("general"), nunca 0 ("exento") — un producto sin tasa
+      // definida no es exento, es el caso general sin marcar.
+      iva_tasa: (p.iva_tasa ?? 16) as 16 | 0 | 8 | 31,
     });
     // precio es el valor ya confirmado del producto; si el admin edita el
     // costo sin tocar nada más, se recalculan margen y ganancia, y se
@@ -381,6 +394,7 @@ export default function InventarioPage() {
       stock?: number | null;
       stock_minimo?: number | null;
       controla_stock?: boolean;
+      iva_tasa?: number;
     } = {
       nombre: form.nombre.trim(),
       codigo_barra: codigoBarra,
@@ -389,6 +403,12 @@ export default function InventarioPage() {
       activo: true,
       por_peso: form.por_peso,
     };
+    // Mismo criterio que costo/stock: solo se toca si el selector estaba
+    // visible en este guardado — si usaIva está apagado, no se incluye la
+    // llave, para no pisar la tasa ya guardada de cuando sí estaba activo.
+    if (usaIva) {
+      datos.iva_tasa = form.iva_tasa;
+    }
     // El campo costo solo se toca si de verdad estaba visible y editable en
     // este guardado — si usa_costos está apagado (o el rol no es admin), NO
     // se incluye la llave en absoluto, para no pisar con null un costo que
@@ -1068,6 +1088,26 @@ export default function InventarioPage() {
               />
             </button>
           </div>
+
+          {usaIva && (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm text-texto-3">IVA</label>
+              <div className="grid grid-cols-2 gap-1.5">
+                {IVA_TASAS.map(({ valor, etiqueta }) => (
+                  <button
+                    key={valor}
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, iva_tasa: valor }))}
+                    className={`h-[52px] rounded-[12px] font-bold text-sm ${
+                      form.iva_tasa === valor ? 'bg-marca text-texto-invertido' : 'bg-tarjeta-hundida text-texto-2'
+                    }`}
+                  >
+                    {etiqueta}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="flex flex-col gap-1.5">
             <label className="text-sm text-texto-3">Código de barra</label>

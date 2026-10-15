@@ -6,6 +6,10 @@ export interface Producto {
   precio: number;
   activo: boolean;
   por_peso: boolean;
+  // Alícuota de IVA en porcentaje: 0 exento, 8 reducida, 16 general,
+  // 31 suntuario. Solo se usa en presupuestos, y solo si el negocio tiene
+  // usa_iva activo. Default 16 en la base — el caso mayoritario.
+  iva_tasa?: number;
   // Costo de adquisición, en la MISMA moneda que `precio` (por kilo si
   // por_peso). null = sin costo registrado. Información sensible del dueño
   // — nunca se muestra a un cajero, verificado por rol en cada pantalla que
@@ -375,6 +379,10 @@ export interface PresupuestoItem {
   gramos?: number;
   precioUnitarioUsd: number;
   precioUnitarioBs: number;
+  // La tasa que tenía el producto AL CREAR este presupuesto. Se congela,
+  // igual que el precio unitario: si mañana cambia la del producto, los
+  // presupuestos viejos no se reescriben. undefined = se hizo sin IVA.
+  ivaTasa?: number;
 }
 
 export interface Presupuesto {
@@ -388,6 +396,11 @@ export interface Presupuesto {
   tasa_al_crear: number;
   total_usd: number;
   total_bs_estimado: number;
+  // Monto del impuesto, APARTE del subtotal. undefined = presupuesto hecho
+  // sin IVA. El total al cliente es total_usd + (iva_usd ?? 0) — nunca se
+  // pisa total_usd, de eso depende convertirlo en venta.
+  iva_usd?: number;
+  iva_bs_estimado?: number;
   // En Supabase vive en su propia tabla (presupuesto_items), pero acá se
   // guarda embebido — igual que Venta.items — porque es lo que permite
   // crear y convertir sin conexión. Puede faltar si este presupuesto se

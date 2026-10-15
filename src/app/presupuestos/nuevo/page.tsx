@@ -64,7 +64,7 @@ function stockBadge(
 export default function NuevoPresupuestoPage() {
   const permitida = useGuardarRuta();
   const router = useRouter();
-  const { tasa, isOnline, usaStock, ultimaSincronizacion, negocioId, user, userNombre, negocioNombre, datosNegocio, productosVersion } = useApp();
+  const { tasa, isOnline, usaStock, usaIva, ultimaSincronizacion, negocioId, user, userNombre, negocioNombre, datosNegocio, productosVersion } = useApp();
 
   const [productos, setProductos] = useState<Producto[]>([]);
   const [busqueda, setBusqueda] = useState('');
@@ -134,10 +134,14 @@ export default function NuevoPresupuestoPage() {
         cantidad: 1,
         precioUnitarioUsd: precioUSD(producto, tasa),
         precioUnitarioBs: precioBS(producto, tasa),
+        // Se congela al agregar, igual que el precio — si mañana cambia la
+        // tasa del producto, este renglón no se entera. undefined si el
+        // negocio no cotiza con IVA.
+        ivaTasa: usaIva ? producto.iva_tasa : undefined,
       }];
     });
     showToast(`${producto.nombre} agregado`);
-  }, [tasa]);
+  }, [tasa, usaIva]);
 
   const agregarPorPeso = () => {
     if (!productoPeso) return;
@@ -153,6 +157,7 @@ export default function NuevoPresupuestoPage() {
       // para items por peso.
       precioUnitarioUsd: precioUSD(productoPeso, tasa),
       precioUnitarioBs: precioBS(productoPeso, tasa),
+      ivaTasa: usaIva ? productoPeso.iva_tasa : undefined,
     }]);
     setShowPeso(false);
     showToast(`${productoPeso.nombre} ${g}g agregado`);
@@ -204,6 +209,15 @@ export default function NuevoPresupuestoPage() {
   const totalBs = items.reduce((s, i) => s + itemSubtotalBs(i), 0);
   const totalUsd = items.reduce((s, i) => s + itemSubtotalUsd(i), 0);
 
+  // Por renglón, nunca sobre el total: cada producto puede llevar su propia
+  // alícuota (un cuaderno 16%, un libro exento).
+  const ivaUsd = !usaIva ? undefined : items.reduce(
+    (s, i) => s + itemSubtotalUsd(i) * ((i.ivaTasa ?? 0) / 100), 0,
+  );
+  const ivaBs = !usaIva ? undefined : items.reduce(
+    (s, i) => s + itemSubtotalBs(i) * ((i.ivaTasa ?? 0) / 100), 0,
+  );
+
   const guardarPresupuesto = async () => {
     if (items.length === 0) { setError('Agrega al menos un producto'); return; }
     if (!fechaVencimiento) { setError('Elige una fecha de vencimiento'); return; }
@@ -220,6 +234,8 @@ export default function NuevoPresupuestoPage() {
       tasa_al_crear: tasa,
       total_usd: totalUsd,
       total_bs_estimado: totalBs,
+      iva_usd: ivaUsd,
+      iva_bs_estimado: ivaBs,
       items,
       creado_por: user?.id,
       creado_por_nombre: userNombre || undefined,
@@ -421,13 +437,33 @@ export default function NuevoPresupuestoPage() {
           ))}
         </div>
         <div className="mt-4 pt-4 border-t border-borde-divisor">
-          <div className="flex justify-between items-center mb-3">
-            <span className="text-texto-2">Total</span>
-            <div className="text-right">
-              <p className="text-2xl font-bold text-texto tabular-nums">{formatBS(totalBs)}</p>
-              {tasa > 0 && <p className="text-sm text-texto-4 tabular-nums">{formatUSD(totalUsd)}</p>}
+          {usaIva && ivaBs !== undefined ? (
+            <div className="mb-3 flex flex-col gap-1">
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-texto-2">Subtotal</span>
+                <span className="text-texto tabular-nums">{formatBS(totalBs)}</span>
+              </div>
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-texto-2">IVA</span>
+                <span className="text-texto tabular-nums">{formatBS(ivaBs)}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-texto-2 font-semibold">Total</span>
+                <div className="text-right">
+                  <p className="text-2xl font-bold text-texto tabular-nums">{formatBS(totalBs + ivaBs)}</p>
+                  {tasa > 0 && <p className="text-sm text-texto-4 tabular-nums">{formatUSD(totalUsd + (ivaUsd ?? 0))}</p>}
+                </div>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="flex justify-between items-center mb-3">
+              <span className="text-texto-2">Total</span>
+              <div className="text-right">
+                <p className="text-2xl font-bold text-texto tabular-nums">{formatBS(totalBs)}</p>
+                {tasa > 0 && <p className="text-sm text-texto-4 tabular-nums">{formatUSD(totalUsd)}</p>}
+              </div>
+            </div>
+          )}
           <Button variante="primario" onClick={() => { setShowCarrito(false); setShowDatos(true); }} className="w-full">
             Continuar
           </Button>
@@ -472,11 +508,31 @@ export default function NuevoPresupuestoPage() {
             Después de esa fecha el presupuesto queda vencido y los precios se recalculan al pasarlo a cobro.
           </p>
 
-          <div className="p-3 rounded-[12px] bg-tarjeta-hundida">
-            <p className="text-xs text-texto-4">Total</p>
-            <p className="text-xl font-bold text-texto tabular-nums">{formatBS(totalBs)}</p>
-            {tasa > 0 && <p className="text-xs text-texto-4 tabular-nums">{formatUSD(totalUsd)}</p>}
-          </div>
+          {usaIva && ivaBs !== undefined ? (
+            <div className="p-3 rounded-[12px] bg-tarjeta-hundida flex flex-col gap-1">
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-texto-4">Subtotal</span>
+                <span className="text-texto tabular-nums">{formatBS(totalBs)}</span>
+              </div>
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-texto-4">IVA</span>
+                <span className="text-texto tabular-nums">{formatBS(ivaBs)}</span>
+              </div>
+              <div className="flex justify-between items-end">
+                <span className="text-xs text-texto-4">Total</span>
+                <div className="text-right">
+                  <p className="text-xl font-bold text-texto tabular-nums">{formatBS(totalBs + ivaBs)}</p>
+                  {tasa > 0 && <p className="text-xs text-texto-4 tabular-nums">{formatUSD(totalUsd + (ivaUsd ?? 0))}</p>}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="p-3 rounded-[12px] bg-tarjeta-hundida">
+              <p className="text-xs text-texto-4">Total</p>
+              <p className="text-xl font-bold text-texto tabular-nums">{formatBS(totalBs)}</p>
+              {tasa > 0 && <p className="text-xs text-texto-4 tabular-nums">{formatUSD(totalUsd)}</p>}
+            </div>
+          )}
 
           {error && <p className="text-sm text-negativo">{error}</p>}
         </div>

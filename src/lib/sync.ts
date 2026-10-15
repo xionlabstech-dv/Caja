@@ -1340,6 +1340,8 @@ export async function sincronizarPresupuesto(presupuesto: Presupuesto, negocioId
       tasa_al_crear: presupuesto.tasa_al_crear,
       total_usd: presupuesto.total_usd,
       total_bs_estimado: presupuesto.total_bs_estimado,
+      iva_usd: presupuesto.iva_usd ?? null,
+      iva_bs_estimado: presupuesto.iva_bs_estimado ?? null,
       creado_por: presupuesto.creado_por ?? null,
       creado_por_nombre: presupuesto.creado_por_nombre ?? null,
       creado_en: presupuesto.creado_en,
@@ -1355,6 +1357,7 @@ export async function sincronizarPresupuesto(presupuesto: Presupuesto, negocioId
       gramos: item.gramos ?? null,
       precio_unitario_usd: item.precioUnitarioUsd,
       precio_unitario_bs: item.precioUnitarioBs,
+      iva_tasa: item.ivaTasa ?? null,
     }));
 
     if (itemsPayload.length > 0) {
@@ -1398,6 +1401,8 @@ export async function getPresupuestosRemoto(
       tasa_al_crear: number | null;
       total_usd: number;
       total_bs_estimado: number;
+      iva_usd: number | null;
+      iva_bs_estimado: number | null;
       creado_por_nombre: string | null;
       creado_en: string;
       convertido_en: string | null;
@@ -1413,6 +1418,8 @@ export async function getPresupuestosRemoto(
       tasa_al_crear: p.tasa_al_crear ?? 0,
       total_usd: p.total_usd,
       total_bs_estimado: p.total_bs_estimado,
+      iva_usd: p.iva_usd ?? undefined,
+      iva_bs_estimado: p.iva_bs_estimado ?? undefined,
       creado_por_nombre: p.creado_por_nombre ?? undefined,
       creado_en: p.creado_en,
       convertido_en: p.convertido_en ?? undefined,
@@ -1433,7 +1440,7 @@ export async function getPresupuestoItemsRemoto(presupuestoId: string): Promise<
   try {
     const { data, error } = await supabase
       .from('presupuesto_items')
-      .select('id, producto_id, nombre, cantidad, gramos, precio_unitario_usd, precio_unitario_bs')
+      .select('id, producto_id, nombre, cantidad, gramos, precio_unitario_usd, precio_unitario_bs, iva_tasa')
       .eq('presupuesto_id', presupuestoId);
     if (error) throw error;
     return (data ?? []).map(it => ({
@@ -1444,6 +1451,7 @@ export async function getPresupuestoItemsRemoto(presupuestoId: string): Promise<
       gramos: it.gramos ?? undefined,
       precioUnitarioUsd: it.precio_unitario_usd,
       precioUnitarioBs: it.precio_unitario_bs,
+      ivaTasa: it.iva_tasa ?? undefined,
     }));
   } catch {
     return null;

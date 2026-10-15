@@ -964,18 +964,41 @@ function dibujarPresupuestoCarta(ctx: CanvasRenderingContext2D, datos: DatosPres
   // grande. El bolívar es apenas una proyección a la tasa de hoy — texto
   // secundario. (Punto ya resuelto con Juan — no es un desvío del mockup
   // de Diseño, que sí lo muestra al revés.)
+  const tieneIva = presupuesto.iva_usd !== undefined;
+  const xCajaTotal = ancho - padX - 300;
+  let yTotal = yPie;
+  if (tieneIva) {
+    ctx.textAlign = 'left';
+    ctx.font = '13px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO_SUAVE;
+    ctx.fillText('Subtotal', xCajaTotal, yTotal);
+    ctx.textAlign = 'right';
+    ctx.font = '600 13px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO;
+    ctx.fillText(formatUSD(presupuesto.total_usd), ancho - padX, yTotal);
+    yTotal += 18;
+    ctx.textAlign = 'left';
+    ctx.font = '13px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO_SUAVE;
+    ctx.fillText('IVA', xCajaTotal, yTotal);
+    ctx.textAlign = 'right';
+    ctx.font = '600 13px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO;
+    ctx.fillText(formatUSD(presupuesto.iva_usd ?? 0), ancho - padX, yTotal);
+    yTotal += 26;
+  }
   ctx.textAlign = 'right';
   ctx.font = 'bold 12px sans-serif';
   ctx.fillStyle = COLOR_TEXTO;
-  ctx.fillText('TOTAL', ancho - padX, yPie);
+  ctx.fillText('TOTAL', ancho - padX, yTotal);
   ctx.font = 'bold 34px sans-serif';
-  ctx.fillText(formatUSD(presupuesto.total_usd), ancho - padX, yPie + 34);
+  ctx.fillText(formatUSD(presupuesto.total_usd + (presupuesto.iva_usd ?? 0)), ancho - padX, yTotal + 34);
   ctx.font = '13px sans-serif';
   ctx.fillStyle = COLOR_TEXTO_SUAVE;
-  ctx.fillText(`≈ ${formatBS(presupuesto.total_bs_estimado)}`, ancho - padX, yPie + 54);
-  trazarLinea(ctx, ancho - padX - 300, ancho - padX, yPie - 18, { color: COLOR_TINTA, grosor: 2 });
+  ctx.fillText(`≈ ${formatBS(presupuesto.total_bs_estimado + (presupuesto.iva_bs_estimado ?? 0))}`, ancho - padX, yTotal + 54);
+  trazarLinea(ctx, xCajaTotal, ancho - padX, yPie - 18, { color: COLOR_TINTA, grosor: 2 });
 
-  y = Math.max(yNota, yPie + 66) + 24;
+  y = Math.max(yNota, yTotal + 66) + 24;
 
   y = dibujarLeyendaFiscal(ctx, padX, ancho - padX * 2, y, {
     tamano: 14, textoDerecha: `Presupuesto #${numero} · ${fmtFechaSolo(presupuesto.creado_en)}`, tamanoDerecha: 12,
@@ -1090,18 +1113,40 @@ function dibujarPresupuestoMediaCarta(ctx: CanvasRenderingContext2D, datos: Dato
     tamano: 11.5, centrado: false, padding: 6,
   });
 
+  const tieneIva = presupuesto.iva_usd !== undefined;
+  let yTotal = yFilaFinal;
+  if (tieneIva) {
+    ctx.textAlign = 'left';
+    ctx.font = '11px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO_SUAVE;
+    ctx.fillText('Subtotal', xTotalesInicio, yTotal);
+    ctx.textAlign = 'right';
+    ctx.font = '600 11px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO;
+    ctx.fillText(formatUSD(presupuesto.total_usd), ancho - padX, yTotal);
+    yTotal += 14;
+    ctx.textAlign = 'left';
+    ctx.font = '11px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO_SUAVE;
+    ctx.fillText('IVA', xTotalesInicio, yTotal);
+    ctx.textAlign = 'right';
+    ctx.font = '600 11px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO;
+    ctx.fillText(formatUSD(presupuesto.iva_usd ?? 0), ancho - padX, yTotal);
+    yTotal += 20;
+  }
   ctx.textAlign = 'right';
   ctx.font = 'bold 11px sans-serif';
   ctx.fillStyle = COLOR_TEXTO;
-  ctx.fillText('TOTAL', ancho - padX, yFilaFinal);
+  ctx.fillText('TOTAL', ancho - padX, yTotal);
   ctx.font = 'bold 26px sans-serif';
-  ctx.fillText(formatUSD(presupuesto.total_usd), ancho - padX, yFilaFinal + 26);
+  ctx.fillText(formatUSD(presupuesto.total_usd + (presupuesto.iva_usd ?? 0)), ancho - padX, yTotal + 26);
   ctx.font = '11.5px sans-serif';
   ctx.fillStyle = COLOR_TEXTO_SUAVE;
-  ctx.fillText(`≈ ${formatBS(presupuesto.total_bs_estimado)}`, ancho - padX, yFilaFinal + 44);
+  ctx.fillText(`≈ ${formatBS(presupuesto.total_bs_estimado + (presupuesto.iva_bs_estimado ?? 0))}`, ancho - padX, yTotal + 44);
   trazarLinea(ctx, xTotalesInicio, ancho - padX, yFilaFinal - 14, { color: COLOR_TINTA, grosor: 2 });
 
-  y = Math.max(y, yFilaFinal + 54) + 12;
+  y = Math.max(y, yTotal + 54) + 12;
 
   return y;
 }

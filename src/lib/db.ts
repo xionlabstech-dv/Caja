@@ -349,6 +349,20 @@ export async function setCachedUsaCuentasPagar(usaCuentasPagar: boolean): Promis
   await db.put('meta', { key: 'usa_cuentas_pagar', value: String(usaCuentasPagar) });
 }
 
+// IVA en presupuestos: módulo opcional, apagado por defecto (negocios.
+// usa_iva). Mismo patrón de fetch/cache que usaCuentasPagar, también sin
+// setter público — lo enciende un admin desde panel-caja, no la app.
+export async function getCachedUsaIva(): Promise<boolean> {
+  const db = await getDB();
+  const item = await db.get('meta', 'usa_iva');
+  return item?.value === 'true';
+}
+
+export async function setCachedUsaIva(usaIva: boolean): Promise<void> {
+  const db = await getDB();
+  await db.put('meta', { key: 'usa_iva', value: String(usaIva) });
+}
+
 // Si el usuario ya vio/cerró el checklist de bienvenida. Default seguro sin
 // cache: true (que NO aparezca de más), al revés de usaCostos/usaStock —
 // ahí el default seguro es false.

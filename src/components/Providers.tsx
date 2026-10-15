@@ -21,6 +21,8 @@ import {
   setCachedTutorialVisto,
   getCachedUsaCuentasPagar,
   setCachedUsaCuentasPagar,
+  getCachedUsaIva,
+  setCachedUsaIva,
   getCachedEstado,
   setCachedEstado,
   getCachedFechaProximoPago,
@@ -89,6 +91,10 @@ interface AppContextType {
   // patrón que usaCostos.
   usaStock: boolean;
   setUsaStock: (v: boolean) => void;
+  // Preferencia del negocio: si cotiza con IVA desglosado en presupuestos
+  // (negocios.usa_iva). Mismo patrón de fetch/cache que usaCuentasPagar,
+  // también sin setter público — lo enciende un admin desde panel-caja.
+  usaIva: boolean;
   // Si el usuario ya vio/cerró el checklist de bienvenida (columna
   // perfiles.tutorial_visto). Default true mientras no resuelve — para no
   // parpadear el checklist antes de tiempo (ver fetchPerfil).
@@ -190,6 +196,7 @@ const AppContext = createContext<AppContextType>({
   setUsaCostos: () => {},
   usaStock: false,
   setUsaStock: () => {},
+  usaIva: false,
   tutorialVisto: true,
   marcarTutorialVisto: async () => {},
   usaCuentasPagar: false,
@@ -227,6 +234,7 @@ interface PerfilResuelto {
   userNombre: string;
   usaCostos: boolean;
   usaStock: boolean;
+  usaIva: boolean;
   tutorialVisto: boolean;
   usaCuentasPagar: boolean;
   estado: EstadoNegocio;
@@ -249,7 +257,7 @@ async function fetchPerfil(uid: string): Promise<PerfilResuelto | 'desactivado' 
 
     const { data: negocio } = await supabase
       .from('negocios')
-      .select('nombre, usa_costos, usa_stock, usa_cuentas_pagar, estado, fecha_proximo_pago, limite_usuarios, nombre_comercial, direccion, telefono, correo, rif, formato_comprobante, formato_presupuesto, solicitud_eliminacion_en')
+      .select('nombre, usa_costos, usa_stock, usa_cuentas_pagar, usa_iva, estado, fecha_proximo_pago, limite_usuarios, nombre_comercial, direccion, telefono, correo, rif, formato_comprobante, formato_presupuesto, solicitud_eliminacion_en')
       .eq('id', perfil.negocio_id)
       .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS))
       .single();
@@ -269,6 +277,8 @@ async function fetchPerfil(uid: string): Promise<PerfilResuelto | 'desactivado' 
       // Default seguro false: un negocio que todavía no prendió el módulo
       // (o un select parcial) no debe ver nada de cuentas por pagar.
       usaCuentasPagar: negocio.usa_cuentas_pagar ?? false,
+      // Mismo default seguro false que usaCuentasPagar.
+      usaIva: negocio.usa_iva ?? false,
       // Default seguro: un negocio sin `estado` (no debería pasar, pero
       // cubre datos viejos o un select parcial) se trata como activo, nunca
       // como restringido/suspendido.
@@ -312,6 +322,7 @@ async function resolverPerfil(uid: string): Promise<PerfilResuelto | 'desactivad
     await setCachedUsaStock(perfil.usaStock);
     await setCachedTutorialVisto(perfil.tutorialVisto);
     await setCachedUsaCuentasPagar(perfil.usaCuentasPagar);
+    await setCachedUsaIva(perfil.usaIva);
     await setCachedEstado(perfil.estado);
     await setCachedFechaProximoPago(perfil.fechaProximoPago);
     await setCachedLimiteUsuarios(perfil.limiteUsuarios);
@@ -321,7 +332,7 @@ async function resolverPerfil(uid: string): Promise<PerfilResuelto | 'desactivad
 
   const cachedId = await getCachedNegocioId();
   if (!cachedId) return null;
-  const [cachedNombre, cachedRol, cachedUserNombre, cachedUsaCostos, cachedUsaStock, cachedTutorialVisto, cachedUsaCuentasPagar, cachedEstado, cachedFecha, cachedLimiteUsuarios, cachedDatosNegocio] =
+  const [cachedNombre, cachedRol, cachedUserNombre, cachedUsaCostos, cachedUsaStock, cachedTutorialVisto, cachedUsaCuentasPagar, cachedUsaIva, cachedEstado, cachedFecha, cachedLimiteUsuarios, cachedDatosNegocio] =
     await Promise.all([
       getCachedNegocioNombre(),
       getCachedRol(),
@@ -330,6 +341,7 @@ async function resolverPerfil(uid: string): Promise<PerfilResuelto | 'desactivad
       getCachedUsaStock(),
       getCachedTutorialVisto(),
       getCachedUsaCuentasPagar(),
+      getCachedUsaIva(),
       getCachedEstado(),
       getCachedFechaProximoPago(),
       getCachedLimiteUsuarios(),
@@ -344,6 +356,7 @@ async function resolverPerfil(uid: string): Promise<PerfilResuelto | 'desactivad
     usaStock: cachedUsaStock,
     tutorialVisto: cachedTutorialVisto,
     usaCuentasPagar: cachedUsaCuentasPagar,
+    usaIva: cachedUsaIva,
     estado: cachedEstado,
     fechaProximoPago: cachedFecha,
     limiteUsuarios: cachedLimiteUsuarios,
@@ -370,6 +383,9 @@ export default function Providers({ children }: { children: ReactNode }) {
   // Default false (oculto) hasta que se resuelva el perfil — mismo criterio
   // de "nunca mostrar de más" que usaCostos/usaStock.
   const [usaCuentasPagar, setUsaCuentasPagar] = useState(false);
+  // Default false (oculto) hasta que se resuelva el perfil — mismo criterio
+  // de "nunca mostrar de más" que usaCuentasPagar.
+  const [usaIva, setUsaIva] = useState(false);
   // Default seguro: 'activo' hasta que se resuelva el perfil (fetch o
   // cache) — nunca arrancar mostrando restricciones que no corresponden.
   const [estado, setEstado] = useState<EstadoNegocio>('activo');
@@ -512,6 +528,7 @@ export default function Providers({ children }: { children: ReactNode }) {
     setUsaStock(false);
     setTutorialVisto(true);
     setUsaCuentasPagar(false);
+    setUsaIva(false);
     setEstado('activo');
     setFechaProximoPago(null);
     setLimiteUsuarios(2);
@@ -570,6 +587,7 @@ export default function Providers({ children }: { children: ReactNode }) {
       setUsaStock(false);
       setTutorialVisto(true);
       setUsaCuentasPagar(false);
+      setUsaIva(false);
       setEstado('activo');
       setFechaProximoPago(null);
       setLimiteUsuarios(2);
@@ -614,6 +632,7 @@ export default function Providers({ children }: { children: ReactNode }) {
         setUsaStock(perfil.usaStock);
         setTutorialVisto(perfil.tutorialVisto);
         setUsaCuentasPagar(perfil.usaCuentasPagar);
+        setUsaIva(perfil.usaIva);
         setEstado(perfil.estado);
         setFechaProximoPago(perfil.fechaProximoPago);
         setLimiteUsuarios(perfil.limiteUsuarios);
@@ -654,6 +673,7 @@ export default function Providers({ children }: { children: ReactNode }) {
         setUsaStock(false);
         setTutorialVisto(true);
         setUsaCuentasPagar(false);
+        setUsaIva(false);
         setEstado('activo');
         setFechaProximoPago(null);
         setLimiteUsuarios(2);
@@ -962,7 +982,7 @@ export default function Providers({ children }: { children: ReactNode }) {
     <AppContext.Provider value={{
       tasa, setTasa, isOnline, configuracion, theme, toggleTheme,
       user, negocioId, negocioNombre, rol, userNombre, usaCostos, setUsaCostos,
-      usaStock, setUsaStock, tutorialVisto, marcarTutorialVisto, usaCuentasPagar, estado, fechaProximoPago, limiteUsuarios, datosNegocio, setDatosNegocio, ultimaSincronizacion, authLoading, signOut,
+      usaStock, setUsaStock, usaIva, tutorialVisto, marcarTutorialVisto, usaCuentasPagar, estado, fechaProximoPago, limiteUsuarios, datosNegocio, setDatosNegocio, ultimaSincronizacion, authLoading, signOut,
       pendientesCount, syncStatus, sincronizarAhora, colaAtascada, productosVersion,
       carrito, setCarrito, showCarrito, setShowCarrito,
       presupuestoConvirtiendoId, setPresupuestoConvirtiendoId,
