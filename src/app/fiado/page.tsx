@@ -119,12 +119,6 @@ export default function FiadoPage() {
     ocurridoEn: string;
   } | null>(null);
   const [compartiendo, setCompartiendo] = useState(false);
-  const [toast, setToast] = useState('');
-
-  const showToast = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(''), 3000);
-  };
 
   // clientes_fiado viaja en el mismo sync periódico que productos (ver
   // syncFromSupabase), así que se relee de IndexedDB con el mismo
@@ -190,8 +184,12 @@ export default function FiadoPage() {
         clienteNombre: c.nombre,
         saldoUsd: c.saldo_usd,
         tasa,
-        // Lo que esté cargado en pantalla y nada más — ver §6.2.
-        movimientos: detalleMovimientos[c.id] ?? [],
+        // Lo que esté cargado en pantalla, menos los cargos que el servidor
+        // rechazó: la deuda total no los incluye, así que listarlos haría
+        // que los movimientos no sumen el total. El comerciante los sigue
+        // viendo en pantalla, con su botón de Reintentar — que es donde
+        // corresponde resolverlos, antes de compartir nada.
+        movimientos: (detalleMovimientos[c.id] ?? []).filter(m => !m.falloPermanente),
         emitidoPor: userNombre || undefined,
         emitidoEn: new Date().toISOString(),
       });
@@ -768,12 +766,6 @@ export default function FiadoPage() {
           </div>
         )}
       </BottomSheet>
-
-      {toast && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-toast-fondo text-toast-texto px-5 py-2.5 rounded-xl text-sm font-medium z-50 shadow-lg max-w-xs text-center">
-          {toast}
-        </div>
-      )}
     </div>
   );
 }
