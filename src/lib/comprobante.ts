@@ -1,4 +1,4 @@
-import { Venta, VentaItem, PagoVenta, MetodoPago, Presupuesto, PresupuestoItem, DatosNegocio } from '@/types';
+import { Venta, VentaItem, PagoVenta, MetodoPago, Presupuesto, PresupuestoItem, DatosNegocio, MovimientoFiado } from '@/types';
 import { formatBS, formatUSD } from './precio';
 
 // Documentos de venta y de presupuesto — NUNCA fiscales (ver la leyenda que
@@ -1176,4 +1176,297 @@ export async function generarPresupuestoPNG(datos: DatosPresupuesto): Promise<{ 
 export async function compartirPresupuesto(datos: DatosPresupuesto): Promise<'compartido' | 'descargado'> {
   const { blob, nombreArchivo } = await generarPresupuestoPNG(datos);
   return compartirArchivo(blob, nombreArchivo, 'Presupuesto');
+}
+
+// ============================================================
+//  Por Cobrar — estado de cuenta y recibo de abono
+// ============================================================
+
+export function splitItemsFiado(detalle: string): string[] {
+  return detalle.split(/,\s+(?=\d+(?:\s*×|\s*g)\s)/);
+}
+
+export interface DatosEstadoCuenta {
+  negocioNombre: string;
+  datosNegocio?: DatosNegocio;
+  clienteNombre: string;
+  saldoUsd: number;
+  tasa: number;
+  movimientos: MovimientoFiado[];
+  emitidoPor?: string;
+  emitidoEn: string;
+}
+
+export interface DatosReciboAbono {
+  negocioNombre: string;
+  datosNegocio?: DatosNegocio;
+  clienteNombre: string;
+  montoUsd: number;
+  montoBs: number;
+  metodoPago?: MetodoPago;
+  saldoAnteriorUsd: number;
+  saldoNuevoUsd: number;
+  tasa: number;
+  recibidoPor?: string;
+  ocurridoEn: string;
+}
+
+// Mismo umbral que usa la pantalla de Por Cobrar para decidir quién está
+// al día: por debajo de medio centavo, la deuda es cero.
+const EPSILON_SALDO_COMPROBANTE = 0.005;
+
+const ANCHO_TICKET = 302;
+const PAD_TICKET = 16;
+
+function cabeceraTicketFiado(
+  ctx: CanvasRenderingContext2D, negocioNombre: string, datosNegocio: DatosNegocio | undefined, titulo: string,
+): number {
+  const ancho = ANCHO_TICKET, padX = PAD_TICKET, centroX = ancho / 2;
+  dibujarBarraMarca(ctx, ancho, 3);
+  ctx.textBaseline = 'alphabetic';
+  let y = 3 + 22;
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 16px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO;
+  ctx.fillText(truncar(ctx, datosNegocio?.nombreComercial || negocioNombre || 'Negocio', ancho - padX * 2), centroX, y);
+  y += 18;
+  ctx.textAlign = 'left';
+  ctx.font = '11px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO_SUAVE;
+  for (const linea of lineasDatosNegocio(datosNegocio)) {
+    ctx.fillText(truncar(ctx, linea, ancho - padX * 2), padX, y);
+    y += 14;
+  }
+  y += 4;
+  trazarLinea(ctx, padX, ancho - padX, y, { color: '#AEB7B3', guiones: [3, 3] });
+  y += 20;
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 12px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO;
+  ctx.fillText(titulo, centroX, y);
+  y += 18;
+  return y;
+}
+
+function dibujarEstadoCuentaTicket(ctx: CanvasRenderingContext2D, datos: DatosEstadoCuenta): number {
+  const { negocioNombre, datosNegocio, clienteNombre, saldoUsd, tasa, movimientos, emitidoPor, emitidoEn } = datos;
+  const ancho = ANCHO_TICKET, padX = PAD_TICKET, centroX = ancho / 2;
+  let y = cabeceraTicketFiado(ctx, negocioNombre, datosNegocio, 'ESTADO DE CUENTA');
+
+  ctx.font = '500 11px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO_SUAVE;
+  ctx.textAlign = 'center';
+  ctx.fillText(fmtFechaHora(emitidoEn), centroX, y);
+  y += 18;
+
+  trazarLinea(ctx, padX, ancho - padX, y, { color: '#AEB7B3', guiones: [3, 3] });
+  y += 18;
+
+  ctx.textAlign = 'left';
+  ctx.font = '11px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO_SUAVE;
+  ctx.fillText('Cliente', padX, y);
+  y += 15;
+  ctx.font = 'bold 13px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO;
+  ctx.fillText(truncar(ctx, clienteNombre, ancho - padX * 2), padX, y);
+  y += 20;
+
+  trazarLinea(ctx, padX, ancho - padX, y, { color: '#AEB7B3', guiones: [3, 3] });
+  y += 22;
+
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 10px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO_SUAVE;
+  ctx.fillText('DEUDA ACTUAL', centroX, y);
+  y += 24;
+  ctx.font = 'bold 24px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO;
+  ctx.fillText(formatUSD(saldoUsd), centroX, y);
+  y += 18;
+  if (tasa > 0) {
+    ctx.font = '12px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO_SUAVE;
+    ctx.fillText(formatBS(saldoUsd * tasa), centroX, y);
+    y += 14;
+    ctx.font = '10px sans-serif';
+    ctx.fillText(`tasa ${formatBS(tasa)}`, centroX, y);
+    y += 16;
+  }
+  y += 6;
+
+  if (movimientos.length > 0) {
+    trazarLinea(ctx, padX, ancho - padX, y, { color: '#AEB7B3', guiones: [3, 3] });
+    y += 16;
+    ctx.textAlign = 'left';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO_SUAVE;
+    ctx.fillText('ÚLTIMOS MOVIMIENTOS', padX, y);
+    y += 16;
+
+    for (const m of movimientos) {
+      const esCargo = m.tipo === 'cargo';
+      ctx.font = '500 11px sans-serif';
+      ctx.fillStyle = COLOR_TEXTO_SUAVE;
+      ctx.textAlign = 'left';
+      ctx.fillText(`${fmtFechaSolo(m.ocurrido_en)}  ${esCargo ? 'Cargo' : 'Abono'}`, padX, y);
+      ctx.textAlign = 'right';
+      ctx.font = '600 12px sans-serif';
+      ctx.fillStyle = COLOR_TEXTO;
+      ctx.fillText(`${esCargo ? '+' : '−'} ${formatUSD(m.monto_usd)}`, ancho - padX, y);
+      y += 14;
+      if (esCargo && m.detalleItems) {
+        ctx.textAlign = 'left';
+        ctx.font = '10.5px sans-serif';
+        ctx.fillStyle = COLOR_TEXTO_SUAVE;
+        for (const item of splitItemsFiado(m.detalleItems)) {
+          for (const linea of envolverTexto(ctx, item, ancho - padX * 2 - 10)) {
+            ctx.fillText(linea, padX + 10, y);
+            y += 13;
+          }
+        }
+      }
+      if (!esCargo && m.metodoPago) {
+        ctx.textAlign = 'left';
+        ctx.font = '10.5px sans-serif';
+        ctx.fillStyle = COLOR_TEXTO_SUAVE;
+        ctx.fillText(METODO_LABELS[m.metodoPago], padX + 10, y);
+        y += 13;
+      }
+      y += 5;
+    }
+    y += 2;
+  }
+
+  trazarLinea(ctx, padX, ancho - padX, y, { color: '#AEB7B3', guiones: [3, 3] });
+  y += 16;
+  if (emitidoPor) {
+    ctx.textAlign = 'left';
+    ctx.font = '11px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO_SUAVE;
+    ctx.fillText(truncar(ctx, `Atendió: ${emitidoPor}`, ancho - padX * 2), padX, y);
+    y += 18;
+  }
+  y = dibujarLeyendaFiscal(ctx, padX, ancho - padX * 2, y, { tamano: 11, centrado: true });
+  y += 14;
+  return y;
+}
+
+function dibujarReciboAbonoTicket(ctx: CanvasRenderingContext2D, datos: DatosReciboAbono): number {
+  const { negocioNombre, datosNegocio, clienteNombre, montoUsd, montoBs, metodoPago,
+    saldoAnteriorUsd, saldoNuevoUsd, tasa, recibidoPor, ocurridoEn } = datos;
+  const ancho = ANCHO_TICKET, padX = PAD_TICKET, centroX = ancho / 2;
+  let y = cabeceraTicketFiado(ctx, negocioNombre, datosNegocio, 'RECIBO DE ABONO');
+
+  ctx.font = '500 11px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO_SUAVE;
+  ctx.textAlign = 'center';
+  ctx.fillText(fmtFechaHora(ocurridoEn), centroX, y);
+  y += 18;
+
+  trazarLinea(ctx, padX, ancho - padX, y, { color: '#AEB7B3', guiones: [3, 3] });
+  y += 18;
+
+  ctx.textAlign = 'left';
+  ctx.font = '11px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO_SUAVE;
+  ctx.fillText('Cliente', padX, y);
+  y += 15;
+  ctx.font = 'bold 13px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO;
+  ctx.fillText(truncar(ctx, clienteNombre, ancho - padX * 2), padX, y);
+  y += 20;
+
+  trazarLinea(ctx, padX, ancho - padX, y, { color: '#AEB7B3', guiones: [3, 3] });
+  y += 22;
+
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 10px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO_SUAVE;
+  ctx.fillText('ABONÓ', centroX, y);
+  y += 26;
+  ctx.font = 'bold 26px sans-serif';
+  ctx.fillStyle = VERDE_MARCA;
+  ctx.fillText(formatUSD(montoUsd), centroX, y);
+  y += 19;
+  ctx.font = '12px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO_SUAVE;
+  ctx.fillText(formatBS(montoBs), centroX, y);
+  y += 16;
+  if (metodoPago) {
+    ctx.font = '500 11px sans-serif';
+    ctx.fillText(METODO_LABELS[metodoPago], centroX, y);
+    y += 16;
+  }
+  y += 6;
+
+  trazarLinea(ctx, padX, ancho - padX, y, { color: '#AEB7B3', guiones: [3, 3] });
+  y += 18;
+
+  ctx.font = '11px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO_SUAVE;
+  ctx.textAlign = 'left';
+  ctx.fillText('Debía', padX, y);
+  ctx.textAlign = 'right';
+  ctx.fillStyle = COLOR_TEXTO;
+  ctx.font = '500 11.5px sans-serif';
+  ctx.fillText(formatUSD(saldoAnteriorUsd), ancho - padX, y);
+  y += 16;
+  ctx.font = '11px sans-serif';
+  ctx.fillStyle = COLOR_TEXTO_SUAVE;
+  ctx.textAlign = 'left';
+  ctx.fillText('Abonó', padX, y);
+  ctx.textAlign = 'right';
+  ctx.fillStyle = VERDE_MARCA;
+  ctx.font = '500 11.5px sans-serif';
+  ctx.fillText(`− ${formatUSD(montoUsd)}`, ancho - padX, y);
+  y += 18;
+
+  trazarLinea(ctx, padX, ancho - padX, y, { color: COLOR_TINTA, grosor: 1.5 });
+  y += 20;
+
+  // Saldar la deuda es el buen final de la historia: se dice con palabras,
+  // no con un "LE QUEDA $0.00" que se lee como un error de redondeo.
+  const quedoAlDia = saldoNuevoUsd <= EPSILON_SALDO_COMPROBANTE;
+  ctx.textAlign = 'left';
+  ctx.font = 'bold 13px sans-serif';
+  ctx.fillStyle = quedoAlDia ? VERDE_MARCA : COLOR_TEXTO;
+  ctx.fillText(quedoAlDia ? 'QUEDÓ AL DÍA' : 'LE QUEDA', padX, y);
+  ctx.textAlign = 'right';
+  ctx.font = 'bold 20px sans-serif';
+  ctx.fillText(formatUSD(quedoAlDia ? 0 : saldoNuevoUsd), ancho - padX, y);
+  y += 17;
+  // Con la deuda saldada, el "Bs 0,00" no agrega nada: se omite.
+  if (tasa > 0 && !quedoAlDia) {
+    ctx.font = '11px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO_SUAVE;
+    ctx.textAlign = 'right';
+    ctx.fillText(formatBS(saldoNuevoUsd * tasa), ancho - padX, y);
+    y += 18;
+  } else if (quedoAlDia) {
+    y += 1;
+  }
+
+  trazarLinea(ctx, padX, ancho - padX, y, { color: '#AEB7B3', guiones: [3, 3] });
+  y += 16;
+  if (recibidoPor) {
+    ctx.textAlign = 'left';
+    ctx.font = '11px sans-serif';
+    ctx.fillStyle = COLOR_TEXTO_SUAVE;
+    ctx.fillText(truncar(ctx, `Recibido por: ${recibidoPor}`, ancho - padX * 2), padX, y);
+    y += 18;
+  }
+  y = dibujarLeyendaFiscal(ctx, padX, ancho - padX * 2, y, { tamano: 11, centrado: true });
+  y += 14;
+  return y;
+}
+
+export async function compartirEstadoCuenta(datos: DatosEstadoCuenta): Promise<'compartido' | 'descargado'> {
+  const blob = await generarPNG(ANCHO_TICKET, ctx => dibujarEstadoCuentaTicket(ctx, datos));
+  return compartirArchivo(blob, 'estado-de-cuenta.png', 'Estado de cuenta');
+}
+
+export async function compartirReciboAbono(datos: DatosReciboAbono): Promise<'compartido' | 'descargado'> {
+  const blob = await generarPNG(ANCHO_TICKET, ctx => dibujarReciboAbonoTicket(ctx, datos));
+  return compartirArchivo(blob, 'recibo-abono.png', 'Recibo de abono');
 }

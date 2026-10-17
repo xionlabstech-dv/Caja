@@ -6,6 +6,7 @@ import { getClientesFiado, actualizarSaldoFiadoLocal, saveMovimientoFiado, getMo
 import { getMovimientosFiadoPorClienteRemoto } from '@/lib/sync';
 import { encolarAplicarMovimientoFiado, onFalloPermanente } from '@/lib/outbox';
 import { formatBS, formatUSD } from '@/lib/precio';
+import { compartirEstadoCuenta, compartirReciboAbono, splitItemsFiado } from '@/lib/comprobante';
 import { METODOS_PAGO } from '@/lib/metodos';
 import { useApp } from '@/components/Providers';
 import { useGuardarRuta } from '@/lib/useGuardarRuta';
@@ -52,14 +53,6 @@ function fmtFechaExacta(iso: string): string {
   return new Date(iso).toLocaleDateString('es-VE', { day: '2-digit', month: 'short' });
 }
 
-// detalleItems llega como texto plano separado por coma, con la cantidad
-// adelante ("240g Cebolla, 1× Ace las llaves económico 900g"). Se parte por
-// un lookahead sobre el token de cantidad (no por cualquier coma) para no
-// romper nombres de producto que también tengan comas.
-function splitItems(detalle: string): string[] {
-  return detalle.split(/,\s+(?=\d+(?:\s*×|\s*g)\s)/);
-}
-
 // Separa la cantidad del nombre dentro de un ítem ya partido, para pintarlas
 // en dos tonos distintos — null si el ítem no matchea el formato esperado
 // (se pinta tal cual, sin partir).
@@ -88,7 +81,7 @@ function estaVencido(saldoUsd: number, ultimoMovimientoEn: string | null): boole
 
 export default function FiadoPage() {
   const permitida = useGuardarRuta();
-  const { tasa, isOnline, negocioId, user, userNombre, productosVersion } = useApp();
+  const { tasa, isOnline, negocioId, user, userNombre, productosVersion, negocioNombre, datosNegocio } = useApp();
 
   const [clientes, setClientes] = useState<ClienteFiado[]>([]);
   // Conteo de movimientos + fecha del último, por cliente_id — decorativo
@@ -116,6 +109,16 @@ export default function FiadoPage() {
   const [montoAbono, setMontoAbono] = useState('');
   const [guardandoAbono, setGuardandoAbono] = useState(false);
   const [errorAbono, setErrorAbono] = useState('');
+  const [abonoConfirmado, setAbonoConfirmado] = useState<{
+    clienteNombre: string;
+    montoUsd: number;
+    montoBs: number;
+    metodoPago: MetodoAbono;
+    saldoAnteriorUsd: number;
+    saldoNuevoUsd: number;
+    ocurridoEn: string;
+  } | null>(null);
+  const [compartiendo, setCompartiendo] = useState(false);
   const [toast, setToast] = useState('');
 
   const showToast = (msg: string) => {
@@ -177,6 +180,41 @@ export default function FiadoPage() {
       setReintentando(null);
     }
   }
+
+  const compartirEstado = async (c: ClienteFiado) => {
+    setCompartiendo(true);
+    try {
+      await compartirEstadoCuenta({
+        negocioNombre: negocioNombre || '',
+        datosNegocio,
+        clienteNombre: c.nombre,
+        saldoUsd: c.saldo_usd,
+        tasa,
+        // Lo que esté cargado en pantalla y nada más — ver §6.2.
+        movimientos: detalleMovimientos[c.id] ?? [],
+        emitidoPor: userNombre || undefined,
+        emitidoEn: new Date().toISOString(),
+      });
+    } finally {
+      setCompartiendo(false);
+    }
+  };
+
+  const compartirRecibo = async () => {
+    if (!abonoConfirmado) return;
+    setCompartiendo(true);
+    try {
+      await compartirReciboAbono({
+        negocioNombre: negocioNombre || '',
+        datosNegocio,
+        ...abonoConfirmado,
+        tasa,
+        recibidoPor: userNombre || undefined,
+      });
+    } finally {
+      setCompartiendo(false);
+    }
+  };
 
   // Recién ahora, con todos los hooks ya llamados, se puede cortar el
   // render sin violar el orden de hooks — evita el frame de contenido
@@ -294,8 +332,16 @@ export default function FiadoPage() {
     await encolarAplicarMovimientoFiado(movimiento.id, negocioId, abonando.id);
 
     setGuardandoAbono(false);
+    setAbonoConfirmado({
+      clienteNombre: abonando.nombre,
+      montoUsd: movimiento.monto_usd,
+      montoBs: movimiento.monto_bs,
+      metodoPago: metodoAbono,
+      saldoAnteriorUsd: abonando.saldo_usd,
+      saldoNuevoUsd: nuevoSaldo,
+      ocurridoEn: now,
+    });
     cerrarAbonar();
-    showToast('Abono registrado');
   };
 
   const quedaEnCero = Math.max(0, restanteDespues ?? 0) <= EPSILON_SALDO;
@@ -501,7 +547,7 @@ export default function FiadoPage() {
                             {movimientos.map((m, i) => {
                               const saldado = indiceSaldado !== -1 && i >= indiceSaldado;
                               const esCargo = m.tipo === 'cargo';
-                              const items = esCargo && m.detalleItems ? splitItems(m.detalleItems) : [];
+                              const items = esCargo && m.detalleItems ? splitItemsFiado(m.detalleItems) : [];
                               const metodoLabel = m.metodoPago
                                 ? METODOS_PAGO.find(x => x.id === m.metodoPago)?.label ?? m.metodoPago
                                 : null;
@@ -557,12 +603,23 @@ export default function FiadoPage() {
                           </div>
                         );
                       })()}
-                      {debe && (
-                        <Button variante="primario" onClick={() => abrirAbonar(c)} className="w-full">
-                          <Icon nombre="confirmar" tamano={TAMANO_ICONO.secundario} />
-                          Registrar abono
+                      <div className="flex flex-col gap-2">
+                        {debe && (
+                          <Button variante="primario" onClick={() => abrirAbonar(c)} className="w-full">
+                            <Icon nombre="confirmar" tamano={TAMANO_ICONO.secundario} />
+                            Registrar abono
+                          </Button>
+                        )}
+                        <Button
+                          variante="secundario"
+                          onClick={() => compartirEstado(c)}
+                          disabled={compartiendo}
+                          className="w-full"
+                        >
+                          <Icon nombre="compartir" tamano={TAMANO_ICONO.secundario} />
+                          {compartiendo ? 'Generando...' : 'Compartir estado de cuenta'}
                         </Button>
-                      )}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -677,6 +734,37 @@ export default function FiadoPage() {
             >
               {textoConfirmar}
             </Button>
+          </div>
+        )}
+      </BottomSheet>
+
+      {/* Confirmación de abono */}
+      <BottomSheet abierto={!!abonoConfirmado} onCerrar={() => setAbonoConfirmado(null)}>
+        {abonoConfirmado && (
+          <div className="text-center space-y-5">
+            <div>
+              <div className="w-16 h-16 bg-marca-suave rounded-full flex items-center justify-center mx-auto mb-3">
+                <Icon nombre="confirmar" tamano={32} className="text-marca-suave-texto" />
+              </div>
+              <h2 className="text-lg font-bold text-texto">Abono registrado</h2>
+              <p className="text-2xl font-bold text-marca mt-1 tabular-nums">
+                {formatUSD(abonoConfirmado.montoUsd)}
+              </p>
+              <p className="text-texto-4 text-sm tabular-nums">
+                {abonoConfirmado.saldoNuevoUsd <= EPSILON_SALDO
+                  ? 'Quedó al día'
+                  : `Le queda ${formatUSD(abonoConfirmado.saldoNuevoUsd)}`}
+              </p>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Button variante="primario" onClick={() => setAbonoConfirmado(null)}>
+                Listo
+              </Button>
+              <Button variante="secundario" onClick={compartirRecibo} disabled={compartiendo}>
+                <Icon nombre="compartir" tamano={TAMANO_ICONO.secundario} />
+                {compartiendo ? 'Generando...' : 'Compartir recibo'}
+              </Button>
+            </div>
           </div>
         )}
       </BottomSheet>
