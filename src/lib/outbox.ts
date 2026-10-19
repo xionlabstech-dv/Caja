@@ -243,8 +243,14 @@ export async function encolarActualizarPresupuesto(presupuestoId: string, negoci
   const payload: PayloadActualizarPresupuesto = { presupuestoId, negocioId };
   // id fijo distinto del propio presupuesto: si se llega a encolar crear y
   // luego convertir/anular casi seguido sin red, deben quedar como dos
-  // operaciones separadas (la cola procesa en orden, primero llega el alta).
-  await encolar('actualizar_presupuesto', payload, `presupuesto-estado-${presupuestoId}`);
+  // operaciones separadas.
+  //
+  // dependeDe = presupuestoId (que es el id de la operación 'crear_presupuesto'):
+  // el orden por timestamp NO alcanza, porque una operación en espera de
+  // backoff se saltea y las de atrás avanzan igual. Sin esto, el cambio de
+  // estado puede llegar antes que el alta, encontrar 0 filas y quedar
+  // descartado como permanente. Mismo criterio que 'editar_acreedor'.
+  await encolar('actualizar_presupuesto', payload, `presupuesto-estado-${presupuestoId}`, presupuestoId);
 }
 
 // Mismo criterio que ya usan 'aplicar_movimiento_stock'/'aplicar_movimiento_fiado'
@@ -410,15 +416,18 @@ async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
       // se sabe de este presupuesto en el momento de sincronizar.
       const presupuesto = await getPresupuesto(presupuestoId);
       if (!presupuesto) return true; // no hay nada que sincronizar
-      const ok = await actualizarPresupuestoSupabase(presupuesto.id, {
+      const resultado = await actualizarPresupuestoSupabase(presupuesto.id, {
         estado: presupuesto.estado,
         convertido_en: presupuesto.convertido_en,
         venta_id: presupuesto.venta_id,
         anulado_en: presupuesto.anulado_en,
         motivo_anulacion: presupuesto.motivo_anulacion,
       });
-      if (ok) await marcarPresupuestoSincronizado(presupuesto.id);
-      return ok;
+      if (resultado.ok) await marcarPresupuestoSincronizado(presupuesto.id);
+      return resolverResultadoEscritura(
+        resultado,
+        'No se pudo guardar el cambio de estado de un presupuesto',
+      );
     }
     case 'crear_acreedor': {
       const { acreedor, negocioId } = op.payload as PayloadCrearAcreedor;

@@ -1467,17 +1467,31 @@ export async function getPresupuestoItemsRemoto(presupuestoId: string): Promise<
 export async function actualizarPresupuestoSupabase(
   id: string,
   cambios: Partial<Pick<Presupuesto, 'estado' | 'convertido_en' | 'venta_id' | 'anulado_en' | 'motivo_anulacion'>>
-): Promise<boolean> {
+): Promise<ResultadoEscritura> {
+  let data: unknown[] | null;
+  let error: { message?: string; code?: string } | null;
+  let status: number;
   try {
-    const { data, error } = await supabase
+    ({ data, error, status } = await supabase
       .from('presupuestos')
       .update(cambios)
       .eq('id', id)
       .select('id')
-      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
-    if (error) throw error;
-    return !!data && data.length > 0;
-  } catch {
-    return false;
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS)));
+  } catch (err) {
+    // Nunca hubo respuesta real (sin señal, timeout, DNS): transitorio.
+    return { ok: false, mensaje: (err as { message?: string }).message, permanente: false };
   }
+
+  if (error) {
+    if (status === 0) return { ok: false, mensaje: error.message, permanente: false };
+    return { ok: false, mensaje: error.message, permanente: true };
+  }
+  // Sin error y sin filas: el presupuesto no está en el servidor (lo borró
+  // un reseteo de datos de prueba, o RLS lo esconde). Reintentar no lo va a
+  // traer de vuelta — es permanente, no un fallo de red.
+  if (!data || data.length === 0) {
+    return { ok: false, permanente: true, mensaje: 'El presupuesto ya no existe en el servidor' };
+  }
+  return { ok: true };
 }
