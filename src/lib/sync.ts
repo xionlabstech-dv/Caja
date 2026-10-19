@@ -820,25 +820,49 @@ export async function sincronizarVenta(venta: Venta, negocioId: string): Promise
   }
 }
 
-export async function actualizarCierreIdVentas(ventaIds: string[], cierreId: string): Promise<boolean> {
-  if (ventaIds.length === 0) return true;
+// Tres desenlaces posibles, y el llamador necesita distinguirlos:
+//  - ok: todas las ventas recibieron el cierre_id.
+//  - error real del servidor (o de red): con su `permanente` como siempre.
+//  - faltantes: el UPDATE corrió bien pero no tocó todas las filas. NO es
+//    un error por sí mismo — una venta que todavía no subió no está ahí
+//    todavía, y va a recibir el cierre_id en su propio envío. Solo el
+//    outbox, que ve la cola, puede saber si falta porque está en camino o
+//    porque ya no existe.
+export type ResultadoCierreVentas =
+  | { ok: true }
+  | { ok: false; permanente: boolean; mensaje?: string }
+  | { ok: false; faltantes: string[] };
+
+export async function actualizarCierreIdVentas(
+  ventaIds: string[],
+  cierreId: string,
+): Promise<ResultadoCierreVentas> {
+  if (ventaIds.length === 0) return { ok: true };
+
+  let data: { id: string }[] | null;
+  let error: { message?: string; code?: string } | null;
+  let status: number;
   try {
-    const { data, error } = await supabase
+    ({ data, error, status } = await supabase
       .from('ventas')
       .update({ cierre_id: cierreId })
       .in('id', ventaIds)
       .select('id')
-      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
-    if (error) throw error;
-    // Update masivo: RLS puede bloquear algunas filas del lote y dejar pasar
-    // otras sin lanzar error — se compara cuántas se pidieron contra cuántas
-    // realmente se tocaron. Un reintento completo es seguro: re-aplicar
-    // cierre_id sobre una fila ya actualizada es un no-op idempotente.
-    const actualizadas = new Set((data ?? []).map(v => v.id as string));
-    return ventaIds.every(id => actualizadas.has(id));
-  } catch {
-    return false;
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS)));
+  } catch (err) {
+    // Nunca hubo respuesta real: transitorio.
+    return { ok: false, permanente: false, mensaje: (err as { message?: string }).message };
   }
+
+  if (error) {
+    if (status === 0) return { ok: false, permanente: false, mensaje: error.message };
+    return { ok: false, permanente: true, mensaje: error.message };
+  }
+
+  const actualizadas = new Set((data ?? []).map(v => v.id));
+  const faltantes = ventaIds.filter(id => !actualizadas.has(id));
+  if (faltantes.length === 0) return { ok: true };
+  return { ok: false, faltantes };
 }
 
 // Trae las ventas del NEGOCIO ENTERO sin cerrar (cierre_id is null), no solo
@@ -1491,7 +1515,7 @@ export async function actualizarPresupuestoSupabase(
   // un reseteo de datos de prueba, o RLS lo esconde). Reintentar no lo va a
   // traer de vuelta — es permanente, no un fallo de red.
   if (!data || data.length === 0) {
-    return { ok: false, permanente: true, mensaje: 'El presupuesto ya no existe en el servidor' };
+    return { ok: false, permanente: true, mensaje: 'ya no existe en el servidor' };
   }
   return { ok: true };
 }

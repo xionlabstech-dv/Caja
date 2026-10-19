@@ -167,7 +167,11 @@ export async function encolarRegistrarVenta(ventaId: string, negocioId: string):
 export async function encolarActualizarCierreVentas(ventaIds: string[], cierreId: string): Promise<void> {
   if (ventaIds.length === 0) return;
   const payload: PayloadActualizarCierreVentas = { ventaIds, cierreId };
-  await encolar('actualizar_cierre_ventas', payload, `cierre-ventas-${cierreId}`);
+  // dependeDe = cierreId (el id de la operación 'cerrar_caja'): ventas.cierre_id
+  // tiene FK contra cierres_caja, así que este UPDATE no puede correr antes de
+  // que el cierre exista en el servidor. El orden por timestamp NO alcanza: una
+  // operación esperando su backoff se saltea y las de atrás avanzan igual.
+  await encolar('actualizar_cierre_ventas', payload, `cierre-ventas-${cierreId}`, cierreId);
 }
 
 export async function encolarActualizarUsaCostos(usaCostos: boolean, negocioId: string): Promise<void> {
@@ -307,7 +311,32 @@ async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
     }
     case 'actualizar_cierre_ventas': {
       const { ventaIds, cierreId } = op.payload as PayloadActualizarCierreVentas;
-      return await actualizarCierreIdVentas(ventaIds, cierreId);
+      const resultado = await actualizarCierreIdVentas(ventaIds, cierreId);
+      if (resultado.ok) return true;
+
+      // Error real del servidor o de red: el criterio de siempre.
+      if ('permanente' in resultado) {
+        return resolverResultadoEscritura(
+          resultado,
+          'No se pudieron asociar las ventas a un cierre de caja',
+        );
+      }
+
+      // El UPDATE corrió bien pero no tocó todas las ventas. Si alguna de las
+      // que faltan todavía tiene su 'registrar_venta' en la cola, no es un
+      // fallo: está en camino y va a recibir el cierre_id en su propio envío
+      // (ver el comentario de resumen/page.tsx). Se espera, como hasta ahora.
+      const idsEnCola = new Set((await getPendientes()).map(o => o.id));
+      const enCamino = resultado.faltantes.some(id => idsEnCola.has(id));
+      if (enCamino) return false;
+
+      // Ninguna de las que faltan está en la cola: ya no existen en el servidor
+      // (las borró un reseteo de datos de prueba) o RLS las está escondiendo.
+      // Reintentar no las va a traer de vuelta.
+      notificarFalloPermanente(
+        `${resultado.faltantes.length} venta(s) del cierre no se pudieron asociar: ya no están en el servidor.`,
+      );
+      return true;
     }
     case 'actualizar_usa_costos': {
       const { usaCostos, negocioId } = op.payload as PayloadActualizarUsaCostos;
