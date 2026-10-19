@@ -571,6 +571,10 @@ async function procesarColaUnaPasada(): Promise<number> {
     clearTimeout(timeoutId!);
     if (resultado) {
       await eliminarPendiente(op.id);
+      // El conjunto tiene que seguir reflejando lo que QUEDA en la cola: si
+      // no se actualiza acá, una operación que ya se resolvió en esta misma
+      // pasada sigue "presente" para sus dependientes, y los saltea de más.
+      idsEnCola.delete(op.id);
       procesados++;
     } else {
       await encolarPendiente({
