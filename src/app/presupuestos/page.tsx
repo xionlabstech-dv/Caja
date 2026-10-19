@@ -118,7 +118,13 @@ export default function PresupuestosPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { cargar(); }, [productosVersion]);
 
-  useEffect(() => onFalloPermanente(() => { cargar(); }), []);
+  // Relee sin tocar `cargando`: este aviso llega de la cola, en segundo
+  // plano, y prender el spinner acá taparía toda la lista por un instante
+  // ante cualquier fallo permanente de la app —incluso uno de fiado, que no
+  // tiene nada que ver con esta pantalla. Mismo criterio que fiado/page.tsx.
+  useEffect(() => onFalloPermanente(() => {
+    getPresupuestos().then(setPresupuestos);
+  }), []);
 
   if (!permitida) return null;
 

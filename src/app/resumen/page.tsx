@@ -347,12 +347,18 @@ export default function ResumenPage() {
     // El id del cierre se reutiliza como id de la operación en cola, así que
     // reintentos duplicados nunca crean un cierre repetido en el servidor.
     await encolarCerrarCaja(cierre, negocioId!);
-    // Encolado DESPUÉS del cierre a propósito: la cola procesa en orden
-    // cronológico, así que el cierre siempre se sincroniza primero. Esto
-    // cubre las ventas que ya estaban en Supabase (les asigna cierre_id).
-    // Las que todavía no habían sincronizado lo reciben directo en su propio
-    // envío, porque 'registrar_venta' relee el estado actual de la venta
-    // (incluido cierre_id) justo antes de enviarla.
+    // Encolado DESPUÉS del cierre a propósito: así esta operación queda
+    // detrás de 'cerrar_caja' en la cola, que además es su dependencia
+    // declarada. Cubre las ventas que ya estaban en Supabase (les asigna
+    // cierre_id).
+    //
+    // Las que todavía NO habían sincronizado también se cubren por acá, no
+    // en su propio envío: su 'registrar_venta' se encoló cuando se hizo la
+    // venta, o sea ANTES de este cierre, así que por timestamp se procesa
+    // primero —cuando el cierre todavía no existe en el servidor— y manda
+    // la venta sin cierre_id a propósito para no chocar con la FK (ver el
+    // caso 'registrar_venta' en outbox.ts). El cierre_id les llega en este
+    // UPDATE.
     await encolarActualizarCierreVentas(ventas.map(v => v.id), cierre.id);
 
     setVentas([]);

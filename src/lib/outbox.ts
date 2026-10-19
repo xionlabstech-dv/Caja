@@ -312,7 +312,23 @@ async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
       // ya asignado localmente viaja con la venta en su primer envío.
       const venta = await getVenta(ventaId);
       if (!venta) return true; // no hay nada que sincronizar
-      const ok = await sincronizarVenta(venta, negocioId);
+      // Si esta venta ya tiene cierre_id local pero el cierre todavía está
+      // en la cola, mandarlo haría que la FK ventas.cierre_id rechace el
+      // insert entero: se perdería el primer intento de una venta por un
+      // dato accesorio. Se manda sin cierre_id y listo — el
+      // 'actualizar_cierre_ventas' de ese mismo cierre ya tiene a esta
+      // venta en su lista, ya depende de 'cerrar_caja', y ya sabe esperar a
+      // las ventas que están en camino, así que el cierre_id llega por ahí.
+      let aEnviar = venta;
+      if (venta.cierre_id) {
+        const idsEnCola = new Set((await getPendientes()).map(o => o.id));
+        if (idsEnCola.has(venta.cierre_id)) {
+          aEnviar = { ...venta, cierre_id: undefined };
+        }
+      }
+      const ok = await sincronizarVenta(aEnviar, negocioId);
+      // La marca va sobre la venta LOCAL completa, no sobre la copia
+      // recortada: localmente el cierre_id sigue siendo correcto.
       if (ok) await saveVenta({ ...venta, sincronizada: true });
       return ok;
     }
