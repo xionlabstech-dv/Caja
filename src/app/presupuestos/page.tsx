@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Presupuesto, Producto, ItemCarrito } from '@/types';
 import { getPresupuestos, savePresupuesto, getProductos } from '@/lib/db';
 import { getPresupuestoItemsRemoto } from '@/lib/sync';
-import { encolarActualizarPresupuesto } from '@/lib/outbox';
+import { encolarActualizarPresupuesto, onFalloPermanente } from '@/lib/outbox';
 import { formatBS, formatUSD } from '@/lib/precio';
 import { compartirPresupuesto } from '@/lib/comprobante';
 import { useApp } from '@/components/Providers';
@@ -95,6 +95,7 @@ export default function PresupuestosPage() {
   const [expandido, setExpandido] = useState<string | null>(null);
   const [cargandoItems, setCargandoItems] = useState<string | null>(null);
   const [convirtiendo, setConvirtiendo] = useState<string | null>(null);
+  const [reintentando, setReintentando] = useState<string | null>(null);
   const [compartiendo, setCompartiendo] = useState<string | null>(null);
   const [toast, setToast] = useState('');
 
@@ -117,11 +118,26 @@ export default function PresupuestosPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { cargar(); }, [productosVersion]);
 
+  useEffect(() => onFalloPermanente(() => { cargar(); }), []);
+
   if (!permitida) return null;
 
   const abrirAnular = (p: Presupuesto) => {
     setAnulando(p);
     setMotivoAnular('');
+  };
+
+  const reintentarPresupuesto = async (p: Presupuesto) => {
+    if (!negocioId) return;
+    setReintentando(p.id);
+    try {
+      const { falloPermanente: _descartado, ...limpio } = p;
+      await savePresupuesto(limpio);
+      await encolarActualizarPresupuesto(p.id, negocioId, p.estado === 'convertido' ? p.venta_id : undefined);
+      await cargar();
+    } finally {
+      setReintentando(null);
+    }
   };
 
   const confirmarAnular = async () => {
@@ -513,6 +529,20 @@ export default function PresupuestosPage() {
                             El precio en dólares es el que se cotizó. El bolívar se recalcula con la tasa de hoy al
                             convertirlo en venta.
                           </p>
+                        </div>
+                      )}
+                      {p.falloPermanente && (
+                        <div className="p-3 rounded-[12px] bg-negativo-fondo border border-negativo-borde flex flex-col gap-2">
+                          <p className="text-sm text-negativo">
+                            No se pudo confirmar con el servidor: {p.falloPermanente}
+                          </p>
+                          <button
+                            onClick={() => reintentarPresupuesto(p)}
+                            disabled={reintentando === p.id}
+                            className="w-full h-10 rounded-[10px] text-sm font-semibold bg-negativo text-white disabled:opacity-50"
+                          >
+                            {reintentando === p.id ? 'Reintentando...' : 'Reintentar'}
+                          </button>
                         </div>
                       )}
                       {p.estado === 'convertido' && (

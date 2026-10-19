@@ -421,6 +421,12 @@ export interface Presupuesto {
   // como 'vigente' si el sync corría antes de que la cola confirmara el
   // cambio con el servidor — mismo bug que ya se corrigió para fiado.
   sincronizado?: boolean;
+  // Mismo patrón que MovimientoFiado.falloPermanente: el servidor rechazó
+  // de forma DEFINITIVA el último cambio de estado (convertir/anular) de
+  // este presupuesto. Se conserva el estado local tal cual quedó (no se
+  // revierte a 'vigente') para que el comerciante vea lo que intentó hacer,
+  // junto con el motivo y un botón para reintentarlo.
+  falloPermanente?: string;
 }
 
 // Datos de contacto del negocio (quien emite), todos opcionales — un
@@ -587,5 +593,10 @@ export interface OperacionPendiente {
   // Los ids ya coinciden: crear_cliente_fiado usa cliente.id como id de
   // operación y crear_acreedor usa acreedor.id, así que acá va el id del
   // cliente o del acreedor.
-  dependeDe?: string;
+  // Puede ser más de un id cuando una operación tiene que esperar a dos
+  // cosas distintas a la vez (ej. actualizar_presupuesto al convertir:
+  // espera a que exista el presupuesto Y a que exista la venta que lo
+  // convierte). Un string sigue siendo válido — los call sites existentes
+  // no cambian.
+  dependeDe?: string | string[];
 }

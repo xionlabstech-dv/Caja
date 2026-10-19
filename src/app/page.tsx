@@ -662,7 +662,7 @@ export default function CajaPage() {
           sincronizado: false,
         };
         await savePresupuesto(actualizado);
-        await encolarActualizarPresupuesto(actualizado.id, negocioId);
+        await encolarActualizarPresupuesto(actualizado.id, negocioId, venta.id);
       }
       setPresupuestoConvirtiendoId(null);
     }

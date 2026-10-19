@@ -12,6 +12,7 @@ import {
   eliminarMovimientoFiado,
   actualizarSaldoFiadoLocal,
   getPresupuesto,
+  savePresupuesto,
   marcarPresupuestoSincronizado,
   getMovimientoAcreedor,
   saveMovimientoAcreedor,
@@ -116,7 +117,7 @@ async function encolar(
   tipo: TipoPendiente,
   payload: PayloadPendiente,
   idFijo?: string,
-  dependeDe?: string,
+  dependeDe?: string | string[],
 ): Promise<void> {
   const op: OperacionPendiente = {
     id: idFijo ?? crypto.randomUUID(),
@@ -243,18 +244,24 @@ export async function encolarCrearPresupuesto(presupuesto: Presupuesto, negocioI
   await encolar('crear_presupuesto', payload, presupuesto.id);
 }
 
-export async function encolarActualizarPresupuesto(presupuestoId: string, negocioId: string): Promise<void> {
+export async function encolarActualizarPresupuesto(presupuestoId: string, negocioId: string, ventaId?: string): Promise<void> {
   const payload: PayloadActualizarPresupuesto = { presupuestoId, negocioId };
   // id fijo distinto del propio presupuesto: si se llega a encolar crear y
   // luego convertir/anular casi seguido sin red, deben quedar como dos
   // operaciones separadas.
   //
-  // dependeDe = presupuestoId (que es el id de la operación 'crear_presupuesto'):
-  // el orden por timestamp NO alcanza, porque una operación en espera de
-  // backoff se saltea y las de atrás avanzan igual. Sin esto, el cambio de
-  // estado puede llegar antes que el alta, encontrar 0 filas y quedar
-  // descartado como permanente. Mismo criterio que 'editar_acreedor'.
-  await encolar('actualizar_presupuesto', payload, `presupuesto-estado-${presupuestoId}`, presupuestoId);
+  // dependeDe = presupuestoId SIEMPRE (espera a 'crear_presupuesto' — sin
+  // esto, el cambio de estado puede llegar antes que el alta y quedar
+  // descartado como permanente, mismo bug que arregló f347d40). Cuando esta
+  // llamada viene de convertir un presupuesto en venta, ventaId también se
+  // pasa, y entonces TAMBIÉN espera a 'registrar_venta' de esa venta — sin
+  // esto, un error transitorio y rápido de la venta (no el candado de 25s,
+  // que sí corta toda la pasada) deja que este UPDATE se intente con un
+  // venta_id que el servidor todavía no conoce, y la FK de
+  // presupuestos.venta_id lo rechaza como si fuera definitivo cuando en
+  // realidad la venta sincroniza bien en la pasada siguiente.
+  const dependeDe = ventaId ? [presupuestoId, ventaId] : presupuestoId;
+  await encolar('actualizar_presupuesto', payload, `presupuesto-estado-${presupuestoId}`, dependeDe);
 }
 
 // Mismo criterio que ya usan 'aplicar_movimiento_stock'/'aplicar_movimiento_fiado'
@@ -452,11 +459,26 @@ async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
         anulado_en: presupuesto.anulado_en,
         motivo_anulacion: presupuesto.motivo_anulacion,
       });
-      if (resultado.ok) await marcarPresupuestoSincronizado(presupuesto.id);
-      return resolverResultadoEscritura(
-        resultado,
-        'No se pudo guardar el cambio de estado de un presupuesto',
-      );
+      if (resultado.ok) {
+        await marcarPresupuestoSincronizado(presupuesto.id);
+        return true;
+      }
+      if (resultado.permanente) {
+        // Se conserva el presupuesto con el estado que ya tenía local
+        // (convertido/anulado), marcado — igual que Fiado conserva el
+        // cargo rechazado. sincronizado se queda en false: ya lo estaba, y
+        // savePresupuestosResumen (db.ts) ya sabe no pisar un registro con
+        // sincronizado === false, así que el sync periódico no lo revive.
+        await savePresupuesto({
+          ...presupuesto,
+          falloPermanente: resultado.mensaje ?? 'el servidor lo rechazó',
+        });
+        notificarFalloPermanente(
+          `No se pudo confirmar que el presupuesto quedó ${presupuesto.estado === 'convertido' ? 'convertido' : 'anulado'}: ${resultado.mensaje ?? 'el servidor lo rechazó'}.`
+        );
+        return true;
+      }
+      return false;
     }
     case 'crear_acreedor': {
       const { acreedor, negocioId } = op.payload as PayloadCrearAcreedor;
@@ -528,7 +550,16 @@ async function procesarColaUnaPasada(): Promise<number> {
     // Se saltea sin contar intento ni tocar el backoff, y se vuelve a mirar
     // en la pasada siguiente. Si la dependencia ya salió de la cola —porque
     // se resolvió, o porque se descartó— esta operación avanza normal.
-    if (op.dependeDe && idsEnCola.has(op.dependeDe)) continue;
+    //
+    // Normaliza a arreglo: un id suelto (como usan hoy editar_acreedor,
+    // aplicar_movimiento_fiado, aplicar_movimiento_acreedor y
+    // actualizar_cierre_ventas) se trata como un arreglo de uno — se
+    // comportan exactamente igual que antes. Si CUALQUIERA de las
+    // dependencias sigue en la cola, esta operación espera.
+    const dependencias = op.dependeDe
+      ? (Array.isArray(op.dependeDe) ? op.dependeDe : [op.dependeDe])
+      : [];
+    if (dependencias.some(id => idsEnCola.has(id))) continue;
 
     if (op.ultimoIntento) {
       const espera = backoffMs(op.intentos);
