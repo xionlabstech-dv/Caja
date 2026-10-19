@@ -309,7 +309,9 @@ async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
       const { ventaId, negocioId } = op.payload as PayloadRegistrarVenta;
       // Se relee la venta actual de IndexedDB en vez de usar una copia
       // congelada al encolar: si mientras tanto se cerró caja, el cierre_id
-      // ya asignado localmente viaja con la venta en su primer envío.
+      // ya quedó asignado localmente. Si ese cierre ya subió, viaja con la
+      // venta en este mismo envío; si no, el chequeo de abajo lo recorta y
+      // llega después por 'actualizar_cierre_ventas' (ver ese comentario).
       const venta = await getVenta(ventaId);
       if (!venta) return true; // no hay nada que sincronizar
       // Si esta venta ya tiene cierre_id local pero el cierre todavía está
