@@ -101,18 +101,25 @@ function lineasDatosNegocio(datos?: DatosNegocio): string[] {
   return lineas;
 }
 
-// "N productos · M unidades[ + peso]" — productos cuenta líneas distintas
-// (items.length), unidades suma cantidad solo de los items que NO son por
-// peso, y "+ peso" se agrega como sufijo literal (nunca mezclado en el
-// número) en cuanto haya al menos un item por peso.
+// "N productos · M unidades[ + K por peso]" — productos cuenta líneas
+// distintas (items.length), unidades suma cantidad solo de los items que NO
+// son por peso, y "+ K por peso" dice cuántos de esos N renglones van por
+// peso (K es la cantidad de renglones, nunca la suma de gramos: "+ 460 por
+// peso" sería absurdo). Antes decía solo "+ peso", sin número — no se
+// entendía si contradecía o complementaba las unidades. Una venta SOLO de
+// productos por peso omite "0 unidades" (ruido) y queda "N productos · K por
+// peso".
 function resumenProductosUnidades(items: { cantidad: number; gramos?: number }[]): string {
   const unidades = items
     .filter(i => i.gramos === undefined)
     .reduce((s, i) => s + i.cantidad, 0);
-  const conPeso = items.some(i => i.gramos !== undefined);
+  const porPeso = items.filter(i => i.gramos !== undefined).length;
   const productosTxto = `${items.length} producto${items.length === 1 ? '' : 's'}`;
+  const pesoTxto = `${porPeso} por peso`;
+  // Una venta que es SOLO de productos pesados no debe decir "0 unidades".
+  if (unidades === 0 && porPeso > 0) return `${productosTxto} · ${pesoTxto}`;
   const unidadesTxto = `${unidades} unidad${unidades === 1 ? '' : 'es'}`;
-  return `${productosTxto} · ${unidadesTxto}${conPeso ? ' + peso' : ''}`;
+  return `${productosTxto} · ${unidadesTxto}${porPeso > 0 ? ` + ${pesoTxto}` : ''}`;
 }
 
 // La leyenda de no-validez-fiscal va SIEMPRE en un recuadro con borde de
@@ -471,6 +478,11 @@ function dibujarComprobanteTicket(ctx: CanvasRenderingContext2D, datos: DatosCom
   ctx.fillStyle = COLOR_TEXTO_SUAVE;
   ctx.textAlign = 'left';
   ctx.fillText(resumenProductosUnidades(venta.items), padX, y);
+  // Renglón propio: compartirlo con el subtotal hacía que los dos textos se
+  // superpusieran apenas el monto pasaba de ~Bs 100.000 (medido: 270 px
+  // útiles contra 157 px del resumen y hasta 124 px del subtotal). En un
+  // ticket térmico el alto es libre, así que separarlos no cuesta nada.
+  y += 15;
   ctx.textAlign = 'right';
   ctx.fillText(`Subtotal ${formatBS(venta.total_bs)}`, ancho - padX, y);
   y += 18;
