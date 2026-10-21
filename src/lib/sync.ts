@@ -1,6 +1,8 @@
 import { supabase } from './supabase';
 import {
   saveProductos,
+  reconciliarProductos,
+  getPendientes,
   saveConfiguracion,
   getConfiguracion as getConfigDB,
   setCachedUsaCostos,
@@ -33,6 +35,8 @@ import {
   Acreedor,
   TipoAcreedor,
   MovimientoAcreedor,
+  PayloadEditarProducto,
+  PayloadEliminarProducto,
 } from '@/types';
 
 // Límite de tiempo para llamadas RPC que no pueden quedarse esperando para
@@ -70,6 +74,11 @@ export async function syncFromSupabase(
     const PAGE_SIZE = 1000;
     let from = 0;
     const allProducts: Producto[] = [];
+    // Si una página falla, lo que juntamos es un pedazo del catálogo, no el
+    // catálogo. La diferencia importa: con un pedazo se puede actualizar,
+    // pero NO se puede borrar — "no vino" dejaría de significar "ya no
+    // existe" y pasaría a significar "no se pudo traer".
+    let catalogoCompleto = true;
 
     while (true) {
       const { data, error } = await supabase
@@ -78,15 +87,40 @@ export async function syncFromSupabase(
         .eq('activo', true)
         .range(from, from + PAGE_SIZE - 1);
 
-      if (error || !data?.length) break;
+      // postgrest-js NO lanza ante un fallo de red: lo devuelve acá, con
+      // status 0 y data en null. Por eso este caso hay que distinguirlo a
+      // mano del fin legítimo de la paginación — el try/catch de más afuera
+      // no se entera de nada.
+      if (error) { catalogoCompleto = false; break; }
+      if (!data?.length) break;
       allProducts.push(...(data as Producto[]));
       if (data.length < PAGE_SIZE) break;
       from += PAGE_SIZE;
     }
 
-    if (allProducts.length > 0) {
-      await saveProductos(allProducts);
-    }
+    // Se lee la cola UNA vez: lo que está pendiente es lo que el servidor
+    // todavía no sabe, y es justo lo que no hay que pisar ni borrar.
+    const pendientes = await getPendientes();
+    const creadosPendientes = new Set(
+      pendientes.filter(o => o.tipo === 'crear_producto').map(o => o.id),
+    );
+    const editadosPendientes = new Set(
+      pendientes
+        .filter(o => o.tipo === 'editar_producto')
+        .map(o => (o.payload as PayloadEditarProducto).id),
+    );
+    const borradosPendientes = new Set(
+      pendientes
+        .filter(o => o.tipo === 'eliminar_producto')
+        .map(o => (o.payload as PayloadEliminarProducto).id),
+    );
+    await reconciliarProductos(
+      allProducts,
+      creadosPendientes,
+      editadosPendientes,
+      borradosPendientes,
+      catalogoCompleto,
+    );
 
     // Clientes de fiado: mismo patrón paginado que productos, para que el
     // saldo de cada uno (quién debe y cuánto) esté disponible sin conexión —

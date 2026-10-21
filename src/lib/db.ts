@@ -158,6 +158,59 @@ export async function saveProductos(productos: Producto[]) {
   await Promise.all([...productos.map(p => tx.store.put(p)), tx.done]);
 }
 
+// Reconcilia el catálogo local contra lo que el servidor considera activo
+// HOY. No alcanza con `put` de lo que llega, que es lo que hacía
+// saveProductos: un producto borrado deja de venir y su copia local se
+// quedaba para siempre.
+//
+// Pero el servidor va atrás del teléfono: lo que el comerciante hizo sin
+// conexión todavía está en la cola, y el servidor contesta como si no hubiera
+// pasado. Por eso hay tres conjuntos de ids intocables, cada uno por su
+// motivo. Ver el brief: sin esto, borrar un producto sin señal lo hacía
+// reaparecer, y editarlo lo revertía.
+//
+// catalogoCompleto distingue "no vino" de "no se pudo traer": con la
+// paginación de sync.ts interrumpida por un fallo de red, `delServidor` es
+// un pedazo del catálogo, no el catálogo — ahí no se puede borrar nada,
+// porque un producto ausente del pedazo puede seguir existiendo de verdad.
+// La mitad aditiva (agregar/actualizar) sí es segura con datos parciales:
+// lo peor que pasa es refrescar de menos.
+export async function reconciliarProductos(
+  delServidor: Producto[],
+  creadosPendientes: Set<string>,
+  editadosPendientes: Set<string>,
+  borradosPendientes: Set<string>,
+  catalogoCompleto: boolean,
+): Promise<void> {
+  const db = await getDB();
+  const tx = db.transaction('productos', 'readwrite');
+  const idsDelServidor = new Set(delServidor.map(p => p.id));
+  const idsLocales = (await tx.store.getAllKeys()) as string[];
+
+  const ops: Promise<unknown>[] = [];
+
+  // Mitad aditiva: corre SIEMPRE, también con datos parciales. Lo peor que
+  // puede pasar es refrescar de menos.
+  for (const p of delServidor) {
+    // Su borrado o su edición siguen en cola: la versión del servidor es la
+    // vieja. Pisarla con ella desharía lo que la persona ya vio hecho.
+    if (borradosPendientes.has(p.id) || editadosPendientes.has(p.id)) continue;
+    ops.push(tx.store.put(p));
+  }
+
+  // Mitad destructiva: SOLO con el catálogo completo. Si una página falló,
+  // la ausencia de un producto en `delServidor` no prueba nada.
+  if (catalogoCompleto) {
+    for (const id of idsLocales) {
+      if (idsDelServidor.has(id)) continue;       // sigue activo en el servidor
+      if (creadosPendientes.has(id)) continue;    // creado sin conexión, aún sin subir
+      ops.push(tx.store.delete(id));
+    }
+  }
+
+  await Promise.all([...ops, tx.done]);
+}
+
 export async function getProductos(): Promise<Producto[]> {
   const db = await getDB();
   const all = await db.getAll('productos');
