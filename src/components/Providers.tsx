@@ -420,6 +420,15 @@ export default function Providers({ children }: { children: ReactNode }) {
   // sobrevivir el salto entre el efecto de auth (que llama aplicarPerfil) y
   // el efecto de datos (que llama init()).
   const negocioIdPrevioRef = useRef<string | null>(null);
+  // Candado de solapamiento: el setInterval dispara cada 30 s sin preguntar si
+  // la corrida anterior terminó. En una conexión lenta un sync puede tardar
+  // más que eso, y sin esto se apilaban corridas que bajan el catálogo
+  // completo cada una — cada una empeorando la conexión que las hace lentas.
+  // Un ref y no un estado: esto no pinta nada, y setState no es inmediato.
+  // A nivel de componente (no dentro de un efecto) para que sincronizar() y
+  // sincronizarAhora() —dos caminos distintos hacia el mismo sync— vean y
+  // respeten el mismo candado.
+  const sincronizandoRef = useRef(false);
   const [pendientesCount, setPendientesCount] = useState(0);
   const [colaAtascada, setColaAtascada] = useState(false);
   const [sincronizando, setSincronizando] = useState(false);
@@ -718,6 +727,11 @@ export default function Providers({ children }: { children: ReactNode }) {
     // Procesa la cola de pendientes y refresca desde Supabase para reconciliar.
     const sincronizar = async () => {
       if (!navigator.onLine) return;
+      // Ya hay una corrida en curso: esta se descarta. No se encola una
+      // repasada como en procesarCola, porque acá no hay nada que perder —
+      // el próximo tick llega en 30 s y vuelve a traer lo mismo.
+      if (sincronizandoRef.current) return;
+      sincronizandoRef.current = true;
       setSincronizando(true);
       try {
         await procesarCola();
@@ -731,6 +745,7 @@ export default function Providers({ children }: { children: ReactNode }) {
         const diagnostico = await getDiagnosticoCola();
         setColaAtascada(navigator.onLine && diagnostico.maxIntentos >= UMBRAL_INTENTOS_COLA_ATASCADA);
         setSincronizando(false);
+        sincronizandoRef.current = false;
       }
     };
 
@@ -891,6 +906,12 @@ export default function Providers({ children }: { children: ReactNode }) {
 
   const sincronizarAhora = () => {
     if (!negocioId || !navigator.onLine) return;
+    // Mismo candado que sincronizar(): esta puerta entra por otro lado
+    // (anular una venta con stock activo, desde Resumen) y sin esto podía
+    // arrancar una descarga completa del catálogo en paralelo con la del
+    // tick de 30 s.
+    if (sincronizandoRef.current) return;
+    sincronizandoRef.current = true;
     setSincronizando(true);
     procesarCola()
       .then(() => syncFromSupabase(negocioId, rol === 'admin', usaCuentasPagar))
@@ -905,6 +926,7 @@ export default function Providers({ children }: { children: ReactNode }) {
         const ultima = await getCachedUltimaSincronizacion();
         if (ultima) setUltimaSincronizacion(ultima);
         setSincronizando(false);
+        sincronizandoRef.current = false;
       });
   };
 

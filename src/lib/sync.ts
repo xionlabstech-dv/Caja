@@ -47,6 +47,23 @@ import {
 // porque usuarios.ts y reportes.ts la reusan — una sola fuente del valor.
 export const TIMEOUT_RPC_MS = 10000;
 
+// Timeout propio para la descarga paginada del catálogo, aparte del de las
+// RPC. Una página son 1.000 productos ≈ 450 kB (medido en producción:
+// ~455 bytes por producto). Con los 10 s de TIMEOUT_RPC_MS haría falta
+// 360 kbit/s sostenidos para que entre, y la conexión típica de estos
+// comercios está muy por debajo — cortaría siempre y el catálogo no se
+// sincronizaría nunca.
+//
+// 45 s cubre hasta ~80 kbit/s. Por debajo de eso la app ya es inusable para
+// todo lo demás, y además cortar no cuesta nada: con la reconciliación de
+// ee00857, una página que falla deja `catalogoCompleto` en false y no se
+// borra nada; a los 30 s hay otro intento.
+//
+// También la usa el bucle de clientes_fiado: es la otra descarga paginada de
+// esta función, y sin timeout podía colgar el sync entero (ver el caso real
+// de Chrome 94 citado en Providers.tsx).
+export const TIMEOUT_CATALOGO_MS = 45000;
+
 // Candado genérico para llamadas que no pasan por postgrest-js (ej.
 // supabase.auth.*) y por lo tanto no tienen .abortSignal() nativo — mismo
 // patrón que el candado de procesarColaUnaPasada() en outbox.ts:
@@ -85,7 +102,8 @@ export async function syncFromSupabase(
         .from('productos')
         .select('*')
         .eq('activo', true)
-        .range(from, from + PAGE_SIZE - 1);
+        .range(from, from + PAGE_SIZE - 1)
+        .abortSignal(AbortSignal.timeout(TIMEOUT_CATALOGO_MS));
 
       // postgrest-js NO lanza ante un fallo de red: lo devuelve acá, con
       // status 0 y data en null. Por eso este caso hay que distinguirlo a
@@ -133,9 +151,14 @@ export async function syncFromSupabase(
       const { data, error } = await supabase
         .from('clientes_fiado')
         .select('*')
-        .range(fromFiado, fromFiado + PAGE_SIZE - 1);
+        .range(fromFiado, fromFiado + PAGE_SIZE - 1)
+        .abortSignal(AbortSignal.timeout(TIMEOUT_CATALOGO_MS));
 
-      if (error || !data?.length) break;
+      // Un corte por timeout llega como `error`, igual que en productos. Acá
+      // no hay reconciliación que proteger (saveClientesFiado solo agrega),
+      // pero se separan los dos casos para que el bucle diga lo que hace.
+      if (error) break;
+      if (!data?.length) break;
       allClientesFiado.push(...(data as ClienteFiado[]));
       if (data.length < PAGE_SIZE) break;
       fromFiado += PAGE_SIZE;
@@ -185,6 +208,7 @@ export async function syncFromSupabase(
       .from('configuracion')
       .select('*')
       .eq('negocio_id', negocioId)
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS))
       .single();
 
     if (configData) {
