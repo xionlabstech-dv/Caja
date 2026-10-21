@@ -231,12 +231,28 @@ export async function encolarCrearClienteFiado(cliente: ClienteFiado, negocioId:
   await encolar('crear_cliente_fiado', payload, cliente.id);
 }
 
-export async function encolarAplicarMovimientoFiado(movimientoId: string, negocioId: string, clienteId?: string): Promise<void> {
+export async function encolarAplicarMovimientoFiado(
+  movimientoId: string,
+  negocioId: string,
+  clienteId?: string,
+  ventaId?: string,
+): Promise<void> {
   const payload: PayloadAplicarMovimientoFiado = { movimientoId, negocioId };
   // id fijo = id del movimiento: mismo criterio que aplicar_movimiento_stock.
-  // clienteId como dependencia: si el alta de ese cliente sigue en la cola,
-  // este movimiento espera — el servidor lo rechazaría por no encontrarlo.
-  await encolar('aplicar_movimiento_fiado', payload, movimientoId, clienteId);
+  //
+  // Dos dependencias posibles, las dos por la misma razón —el servidor
+  // rechaza el movimiento si lo que referencia todavía no existe—:
+  //   clienteId → el alta del cliente (fiado_movimientos_cliente_id_fkey)
+  //   ventaId   → la venta que originó el cargo (fiado_movimientos_venta_id_fkey)
+  // Un abono no tiene venta, así que ahí ventaId viene undefined y queda
+  // solo la dependencia del cliente, igual que antes.
+  const dependencias = [clienteId, ventaId].filter((x): x is string => !!x);
+  await encolar(
+    'aplicar_movimiento_fiado',
+    payload,
+    movimientoId,
+    dependencias.length > 0 ? dependencias : undefined,
+  );
 }
 
 export async function encolarCrearPresupuesto(presupuesto: Presupuesto, negocioId: string): Promise<void> {

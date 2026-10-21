@@ -642,7 +642,7 @@ export default function CajaPage() {
           await actualizarSaldoFiadoLocal(clienteId, nuevoSaldo);
           setClientesFiado(prev => prev.map(c => (c.id === clienteId ? { ...c, saldo_usd: nuevoSaldo } : c)));
         }
-        await encolarAplicarMovimientoFiado(movimientoFiado.id, negocioId, clienteId);
+        await encolarAplicarMovimientoFiado(movimientoFiado.id, negocioId, clienteId, venta.id);
       }
     }
 

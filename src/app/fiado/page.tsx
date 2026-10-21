@@ -168,7 +168,10 @@ export default function FiadoPage() {
       // con el cliente ya creado en el servidor, entra sin problema.
       const { falloPermanente: _descartado, ...limpio } = m;
       await saveMovimientoFiado({ ...limpio, sincronizado: false });
-      await encolarAplicarMovimientoFiado(m.id, negocioId, m.cliente_id);
+      // m.venta_id va de nuevo como dependencia: si la venta TODAVÍA no subió,
+      // este reintento espera en vez de volver a chocar con la FK y marcarse
+      // permanente otra vez — que es justo lo que hace hoy.
+      await encolarAplicarMovimientoFiado(m.id, negocioId, m.cliente_id, m.venta_id);
       cargarFallosPermanentes();
     } finally {
       setReintentando(null);
