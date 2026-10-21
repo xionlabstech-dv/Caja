@@ -737,6 +737,12 @@ export default function Providers({ children }: { children: ReactNode }) {
         await procesarCola();
         await refrescarConfig();
       } finally {
+        // El candado se suelta ANTES que nada: lo que sigue toca IndexedDB y
+        // puede rechazar (conexión cerrándose, cuota, memoria). Soltarlo al
+        // final dejaba el sync apagado para siempre si algo de eso fallaba.
+        // Soltarlo acá no adelanta nada riesgoso: lo que queda son lecturas
+        // locales y estado de React, sin red.
+        sincronizandoRef.current = false;
         setPendientesCount(await contarPendientes());
         // Se relee navigator.onLine acá (no el isOnline de arriba, que
         // puede estar un tick viejo): colaAtascada solo tiene sentido con
@@ -745,7 +751,6 @@ export default function Providers({ children }: { children: ReactNode }) {
         const diagnostico = await getDiagnosticoCola();
         setColaAtascada(navigator.onLine && diagnostico.maxIntentos >= UMBRAL_INTENTOS_COLA_ATASCADA);
         setSincronizando(false);
-        sincronizandoRef.current = false;
       }
     };
 
@@ -922,11 +927,13 @@ export default function Providers({ children }: { children: ReactNode }) {
         }
       })
       .finally(async () => {
+        // Mismo criterio que sincronizar(): el candado primero, antes de
+        // cualquier await que pueda rechazar.
+        sincronizandoRef.current = false;
         setPendientesCount(await contarPendientes());
         const ultima = await getCachedUltimaSincronizacion();
         if (ultima) setUltimaSincronizacion(ultima);
         setSincronizando(false);
-        sincronizandoRef.current = false;
       });
   };
 
