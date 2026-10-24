@@ -526,7 +526,19 @@ export async function getMarcaCatalogo(): Promise<string | null> {
 
 export async function setMarcaCatalogo(ts: string): Promise<void> {
   const db = await getDB();
-  await db.put('meta', { key: 'marca_catalogo', value: ts });
+  // Lectura y escritura en UNA transacción: si se leyera fuera, la carrera
+  // que esto viene a cerrar simplemente se movería de lugar.
+  const tx = db.transaction('meta', 'readwrite');
+  const actual = await tx.store.get('marca_catalogo');
+  // La marca solo avanza. Dos pestañas con corridas superpuestas podían
+  // pisar una marca nueva con una vieja: no se perdían datos (la ventana
+  // quedaba más ancha, nunca más angosta), pero que la función no pueda
+  // retroceder es una garantía más simple de sostener que un razonamiento
+  // sobre quién llama.
+  if (!actual?.value || Date.parse(ts) > Date.parse(actual.value)) {
+    await tx.store.put({ key: 'marca_catalogo', value: ts });
+  }
+  await tx.done;
 }
 
 // --- Movimientos de stock ---

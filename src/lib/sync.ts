@@ -80,11 +80,31 @@ export const TIMEOUT_CATALOGO_MS = 45000;
 // transacción tarde más de un minuto — cosa que en esta app no pasa.
 export const COLCHON_MARCA_MS = 60000;
 
-// Una pasada completa por carga de la app, aunque ya haya marca. Si el camino
-// incremental se desincronizara por cualquier motivo, recargar la app lo
-// sana. El ritmo periódico va en el commit siguiente; esto es el piso mínimo
-// para que este commit sea seguro por sí solo.
-let yaHizoPasadaCompleta = false;
+// Cada cuánto se fuerza una pasada completa aunque haya marca.
+//
+// La completa es la red de seguridad del sync incremental: cubre lo que el
+// incremental no puede ver por diseño (una transacción más lenta que el
+// colchón, un borrado físico, cualquier desajuste que agreguemos sin querer
+// más adelante). No tiene que ser frecuente, tiene que existir.
+//
+// 30 minutos le cuestan a Mayga —el catálogo más grande, 1,1 MB— unos
+// 2,2 MB por hora, contra los 132 MB/hora que bajaba antes de este cambio.
+export const INTERVALO_PASADA_COMPLETA_MS = 30 * 60 * 1000;
+
+// Cuándo fue la última pasada completa de ESTA carga de la app, medido con
+// performance.now().
+//
+// performance.now() y no Date.now() a propósito: es monótono y no lo mueve
+// un ajuste de hora del sistema. Date.now() podía saltar hacia adelante o
+// atrás con una sincronización de NTP o con el usuario cambiando la hora, y
+// este valor existe justamente para medir un intervalo, no para ubicar un
+// momento. (Es el mismo criterio por el que la marca del catálogo sale del
+// servidor y no del reloj del teléfono.)
+//
+// Variable de módulo y no IndexedDB: en null significa "esta carga de la app
+// todavía no hizo ninguna completa", que es exactamente la condición que
+// queremos al arrancar. Guardarlo entre recargas sería peor, no mejor.
+let ultimaPasadaCompletaMs: number | null = null;
 
 // Candado genérico para llamadas que no pasan por postgrest-js (ej.
 // supabase.auth.*) y por lo tanto no tienen .abortSignal() nativo — mismo
@@ -111,10 +131,15 @@ export async function syncFromSupabase(
 ): Promise<Configuracion | null> {
   try {
     const marcaPrevia = await getMarcaCatalogo();
+    // Toca completa si todavía no hubo ninguna en esta carga de la app, o si
+    // pasó el intervalo desde la última.
+    const tocaCompleta =
+      ultimaPasadaCompletaMs === null ||
+      performance.now() - ultimaPasadaCompletaMs >= INTERVALO_PASADA_COMPLETA_MS;
+
     // Sin marca no hay desde dónde pedir (teléfono nuevo, o recién cambiado
-    // de negocio). Y la primera corrida de cada carga de la app va completa
-    // igual, como red de seguridad.
-    const incremental = marcaPrevia !== null && yaHizoPasadaCompleta;
+    // de negocio): ahí la completa es obligatoria, no una elección.
+    const incremental = marcaPrevia !== null && !tocaCompleta;
 
     const desde = incremental
       ? new Date(new Date(marcaPrevia!).getTime() - COLCHON_MARCA_MS).toISOString()
@@ -201,7 +226,19 @@ export async function syncFromSupabase(
         }
       }
       if (marcaNueva) await setMarcaCatalogo(marcaNueva);
-      if (!incremental) yaHizoPasadaCompleta = true;
+    }
+
+    // Fuera del if de arriba: se anota el INTENTO, no el éxito. Si la
+    // completa falla por conexión, volver al incremental y reintentar la
+    // completa en media hora es mucho mejor que insistir con el catálogo
+    // entero cada 30 segundos.
+    //
+    // Cuando todavía no hay marca esto no afloja nada: `incremental` sigue
+    // dando false por `marcaPrevia === null`, así que se sigue reintentando
+    // la completa hasta que una salga bien. Que es lo correcto: sin marca no
+    // existe el camino incremental.
+    if (!incremental) {
+      ultimaPasadaCompletaMs = performance.now();
     }
 
     // Clientes de fiado: mismo patrón paginado que productos, para que el
