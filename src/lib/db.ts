@@ -535,7 +535,11 @@ export async function setMarcaCatalogo(ts: string): Promise<void> {
   // quedaba más ancha, nunca más angosta), pero que la función no pueda
   // retroceder es una garantía más simple de sostener que un razonamiento
   // sobre quién llama.
-  if (!actual?.value || Date.parse(ts) > Date.parse(actual.value)) {
+  // Si el valor guardado no parsea, Date.parse da NaN y toda comparación
+  // contra NaN es falsa: la marca quedaría trabada para siempre. Se trata
+  // como si no hubiera marca y se escribe la nueva.
+  const actualMs = actual?.value ? Date.parse(actual.value) : NaN;
+  if (Number.isNaN(actualMs) || Date.parse(ts) > actualMs) {
     await tx.store.put({ key: 'marca_catalogo', value: ts });
   }
   await tx.done;

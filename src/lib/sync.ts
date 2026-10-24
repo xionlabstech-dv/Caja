@@ -184,6 +184,24 @@ export async function syncFromSupabase(
       from += PAGE_SIZE;
     }
 
+    // Se anota el INTENTO, no el éxito — por eso no depende de huboError. Si
+    // la completa falla por conexión, volver al incremental y reintentar la
+    // completa en media hora es mucho mejor que insistir con el catálogo
+    // entero cada 30 segundos. Cuando todavía no hay marca esto no afloja
+    // nada: `incremental` sigue dando false por `marcaPrevia === null`, así
+    // que se sigue reintentando la completa hasta que una salga bien.
+    //
+    // Y se anota apenas termina la descarga, antes de tocar IndexedDB. Si
+    // getPendientes() o reconciliarProductos() lanzan (cuota, versionchange),
+    // el catch de afuera se come la excepción y esta línea no correría: la
+    // app volvería a intentar una pasada completa cada 30 s, habiendo ya
+    // descargado el catálogo entero cada vez. Acá arriba, además, es más
+    // fiel a lo que la variable significa: cuándo fue la última descarga
+    // completa, no cuándo se terminó de reconciliar.
+    if (!incremental) {
+      ultimaPasadaCompletaMs = performance.now();
+    }
+
     // Se lee la cola UNA vez: lo que está pendiente es lo que el servidor
     // todavía no sabe, y es justo lo que no hay que pisar ni borrar.
     const pendientes = await getPendientes();
@@ -226,19 +244,6 @@ export async function syncFromSupabase(
         }
       }
       if (marcaNueva) await setMarcaCatalogo(marcaNueva);
-    }
-
-    // Fuera del if de arriba: se anota el INTENTO, no el éxito. Si la
-    // completa falla por conexión, volver al incremental y reintentar la
-    // completa en media hora es mucho mejor que insistir con el catálogo
-    // entero cada 30 segundos.
-    //
-    // Cuando todavía no hay marca esto no afloja nada: `incremental` sigue
-    // dando false por `marcaPrevia === null`, así que se sigue reintentando
-    // la completa hasta que una salga bien. Que es lo correcto: sin marca no
-    // existe el camino incremental.
-    if (!incremental) {
-      ultimaPasadaCompletaMs = performance.now();
     }
 
     // Clientes de fiado: mismo patrón paginado que productos, para que el
