@@ -32,6 +32,10 @@ export interface Producto {
   // stock es Movimientos, nunca un UPDATE directo que no deja rastro.
   // Ausente/false = producto sin movimientos, existencia editable.
   tiene_movimientos?: boolean;
+  // La escribe el trigger trg_productos_actualizado en cada UPDATE — de solo
+  // lectura para el cliente, nunca se manda desde acá. Es la marca sobre la
+  // que se apoya el sync incremental.
+  actualizado_en?: string;
 }
 
 export interface Configuracion {

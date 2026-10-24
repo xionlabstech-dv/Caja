@@ -195,7 +195,11 @@ export async function reconciliarProductos(
     // Su borrado o su edición siguen en cola: la versión del servidor es la
     // vieja. Pisarla con ella desharía lo que la persona ya vio hecho.
     if (borradosPendientes.has(p.id) || editadosPendientes.has(p.id)) continue;
-    ops.push(tx.store.put(p));
+    // En la pasada incremental llegan también los inactivos: ESA es la
+    // notificación de borrado, porque ahí la ausencia ya no prueba nada. En
+    // la pasada completa nunca llegan, porque la consulta filtra por activo.
+    if (p.activo) ops.push(tx.store.put(p));
+    else ops.push(tx.store.delete(p.id));
   }
 
   // Mitad destructiva: SOLO con el catálogo completo. Si una página falló,
@@ -506,6 +510,23 @@ export async function getCachedUltimaSincronizacion(): Promise<string | null> {
 export async function setCachedUltimaSincronizacion(ts: string): Promise<void> {
   const db = await getDB();
   await db.put('meta', { key: 'ultima_sincronizacion', value: ts });
+}
+
+// Marca del sync incremental: el `actualizado_en` MÁS ALTO que el servidor
+// mandó. NO es la hora del teléfono, y la diferencia es crítica — ver el
+// comentario en sync.ts.
+//
+// Vive en `meta`, que clearTenantData ya limpia: al cambiar de negocio la
+// marca desaparece sola y el negocio nuevo arranca con una pasada completa.
+export async function getMarcaCatalogo(): Promise<string | null> {
+  const db = await getDB();
+  const item = await db.get('meta', 'marca_catalogo');
+  return item?.value ?? null;
+}
+
+export async function setMarcaCatalogo(ts: string): Promise<void> {
+  const db = await getDB();
+  await db.put('meta', { key: 'marca_catalogo', value: ts });
 }
 
 // --- Movimientos de stock ---

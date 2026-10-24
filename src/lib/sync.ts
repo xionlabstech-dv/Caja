@@ -8,6 +8,8 @@ import {
   setCachedUsaCostos,
   setCachedUsaStock,
   setCachedUltimaSincronizacion,
+  getMarcaCatalogo,
+  setMarcaCatalogo,
   actualizarStockLocal,
   saveClientesFiado,
   actualizarSaldoFiadoLocal,
@@ -64,6 +66,26 @@ export const TIMEOUT_RPC_MS = 10000;
 // de Chrome 94 citado en Providers.tsx).
 export const TIMEOUT_CATALOGO_MS = 45000;
 
+// Colchón hacia atrás del sync incremental.
+//
+// `now()` dentro de un trigger devuelve la hora en que ARRANCÓ la
+// transacción, no en que se confirmó. Entonces una fila puede escribirse con
+// `actualizado_en = 10:00:00`, confirmarse recién a las 10:00:05, y para
+// entonces la marca ya pasó por las 10:00:02 — esa fila no vuelve a aparecer
+// NUNCA. Es la forma clásica en que estas implementaciones se comen cambios
+// en silencio.
+//
+// Pedir 60 s hacia atrás vuelve a traer unas pocas filas ya conocidas, que se
+// guardan iguales y no cuestan nada, y cierra la ventana salvo que una
+// transacción tarde más de un minuto — cosa que en esta app no pasa.
+export const COLCHON_MARCA_MS = 60000;
+
+// Una pasada completa por carga de la app, aunque ya haya marca. Si el camino
+// incremental se desincronizara por cualquier motivo, recargar la app lo
+// sana. El ritmo periódico va en el commit siguiente; esto es el piso mínimo
+// para que este commit sea seguro por sí solo.
+let yaHizoPasadaCompleta = false;
+
 // Candado genérico para llamadas que no pasan por postgrest-js (ej.
 // supabase.auth.*) y por lo tanto no tienen .abortSignal() nativo — mismo
 // patrón que el candado de procesarColaUnaPasada() en outbox.ts:
@@ -88,28 +110,49 @@ export async function syncFromSupabase(
   usaCuentasPagar: boolean
 ): Promise<Configuracion | null> {
   try {
+    const marcaPrevia = await getMarcaCatalogo();
+    // Sin marca no hay desde dónde pedir (teléfono nuevo, o recién cambiado
+    // de negocio). Y la primera corrida de cada carga de la app va completa
+    // igual, como red de seguridad.
+    const incremental = marcaPrevia !== null && yaHizoPasadaCompleta;
+
+    const desde = incremental
+      ? new Date(new Date(marcaPrevia!).getTime() - COLCHON_MARCA_MS).toISOString()
+      : null;
+
     const PAGE_SIZE = 1000;
     let from = 0;
     const allProducts: Producto[] = [];
-    // Si una página falla, lo que juntamos es un pedazo del catálogo, no el
-    // catálogo. La diferencia importa: con un pedazo se puede actualizar,
-    // pero NO se puede borrar — "no vino" dejaría de significar "ya no
-    // existe" y pasaría a significar "no se pudo traer".
-    let catalogoCompleto = true;
+    // En la pasada incremental la ausencia NO prueba un borrado: casi nada
+    // viene, y lo que no vino simplemente no cambió. Por eso arranca en false
+    // y la mitad destructiva de reconciliarProductos no corre.
+    let catalogoCompleto = !incremental;
+    let huboError = false;
 
     while (true) {
-      const { data, error } = await supabase
-        .from('productos')
-        .select('*')
-        .eq('activo', true)
+      let consulta = supabase.from('productos').select('*');
+
+      if (desde) {
+        // La incremental NO filtra por activo: una fila con activo=false es
+        // exactamente el aviso de que ese producto se borró.
+        consulta = consulta.gte('actualizado_en', desde);
+      } else {
+        consulta = consulta.eq('activo', true);
+      }
+
+      const { data, error } = await consulta
+        // El orden tiene que ser estable y total. `actualizado_en` sola no es
+        // única (un UPDATE masivo marca varias filas con la misma hora), y
+        // sin desempate .range() puede repetir o saltear filas entre páginas.
+        // Hay índice para esto: idx_productos_negocio_actualizado.
+        .order('actualizado_en', { ascending: true })
+        .order('id', { ascending: true })
         .range(from, from + PAGE_SIZE - 1)
         .abortSignal(AbortSignal.timeout(TIMEOUT_CATALOGO_MS));
 
       // postgrest-js NO lanza ante un fallo de red: lo devuelve acá, con
-      // status 0 y data en null. Por eso este caso hay que distinguirlo a
-      // mano del fin legítimo de la paginación — el try/catch de más afuera
-      // no se entera de nada.
-      if (error) { catalogoCompleto = false; break; }
+      // status 0 y data en null.
+      if (error) { catalogoCompleto = false; huboError = true; break; }
       if (!data?.length) break;
       allProducts.push(...(data as Producto[]));
       if (data.length < PAGE_SIZE) break;
@@ -139,6 +182,27 @@ export async function syncFromSupabase(
       borradosPendientes,
       catalogoCompleto,
     );
+
+    // La marca nueva sale del dato del servidor, NUNCA del reloj del
+    // teléfono. Los teléfonos de estos comercios tienen la hora mal, y unos
+    // minutos de adelanto saltearían cambios para siempre y sin un solo
+    // error visible. (Ojo: `ultima_sincronizacion`, que ya existe, SÍ se
+    // escribe con la hora del teléfono — es para mostrar "sincronizado hace
+    // X" y no sirve para esto.)
+    //
+    // Solo se mueve si la corrida terminó sin errores: con una página caída
+    // faltan filas, y adelantar la marca las perdería para siempre.
+    if (!huboError) {
+      let marcaNueva = marcaPrevia;
+      for (const p of allProducts) {
+        if (!p.actualizado_en) continue;
+        if (marcaNueva === null || Date.parse(p.actualizado_en) > Date.parse(marcaNueva)) {
+          marcaNueva = p.actualizado_en;
+        }
+      }
+      if (marcaNueva) await setMarcaCatalogo(marcaNueva);
+      if (!incremental) yaHizoPasadaCompleta = true;
+    }
 
     // Clientes de fiado: mismo patrón paginado que productos, para que el
     // saldo de cada uno (quién debe y cuánto) esté disponible sin conexión —
