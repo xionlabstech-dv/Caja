@@ -217,6 +217,17 @@ export default function CajaPage() {
     [productos, configuracion?.producto_bolsa_id],
   );
 
+  // Inserta una línea nueva respetando que la bolsa, si está presente,
+  // tiene que quedar siempre última (3bis del brief de bolsa-presupuestos)
+  // — nunca al final del arreglo a secas, sino antes de la posición de la
+  // bolsa si ya está ahí. El arreglo mismo queda ordenado así (no solo la
+  // vista), para que el comprobante — que respeta el orden del carrito tal
+  // cual — salga bien solo.
+  const insertarAntesDeLaBolsa = useCallback((arr: ItemCarrito[], nueva: ItemCarrito): ItemCarrito[] => {
+    const idxBolsa = productoBolsa ? arr.findIndex(i => i.lineId === productoBolsa.id) : -1;
+    return idxBolsa === -1 ? [...arr, nueva] : [...arr.slice(0, idxBolsa), nueva, ...arr.slice(idxBolsa)];
+  }, [productoBolsa]);
+
   const agregarAlCarrito = useCallback((producto: Producto) => {
     if (producto.por_peso) {
       setProductoPeso(producto);
@@ -232,7 +243,7 @@ export default function CajaPage() {
           i.lineId === producto.id ? { ...i, cantidad: i.cantidad + 1 } : i
         );
       } else {
-        next = [...prev, { lineId: producto.id, producto, cantidad: 1 }];
+        next = insertarAntesDeLaBolsa(prev, { lineId: producto.id, producto, cantidad: 1 });
       }
       // Una sola bolsa por venta, no por producto: solo se agrega sola
       // cuando ESTE agregado es el primero de un carrito vacío, nunca en
@@ -247,7 +258,7 @@ export default function CajaPage() {
     });
     showToast(sinExistencia(producto) ? 'Sin existencia registrada' : `${producto.nombre} agregado`);
     reproducirBeep();
-  }, [sinExistencia, productoBolsa, bolsaDescartada]);
+  }, [sinExistencia, productoBolsa, bolsaDescartada, insertarAntesDeLaBolsa]);
 
   const agregarPorPeso = () => {
     if (!productoPeso) return;
@@ -255,20 +266,20 @@ export default function CajaPage() {
     if (!g || g <= 0) return;
     const precioCalculadoBase = productoPeso.precio * (g / 1000);
     setCarrito(prev => {
-      const next: ItemCarrito[] = [...prev, {
+      let next = insertarAntesDeLaBolsa(prev, {
         lineId: crypto.randomUUID(),
         producto: productoPeso,
         cantidad: 1,
         esPorPeso: true,
         gramos: g,
         precioCalculadoBase,
-      }];
+      });
       // Una venta puede empezar con un producto por peso — este camino
       // también tiene que disparar la bolsa (trampa 4 del brief). Nunca es
       // "la bolsa misma" porque la bolsa nunca es por_peso (excluida del
       // selector en /perfil).
       if (prev.length === 0 && !bolsaDescartada && productoBolsa) {
-        next.push({ lineId: productoBolsa.id, producto: productoBolsa, cantidad: 1 });
+        next = [...next, { lineId: productoBolsa.id, producto: productoBolsa, cantidad: 1 }];
       }
       return next;
     });

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Producto, PresupuestoItem, Presupuesto } from '@/types';
 import { getProductos, getProductoPorCodigo, savePresupuesto, getPresupuestos } from '@/lib/db';
@@ -64,7 +64,7 @@ function stockBadge(
 export default function NuevoPresupuestoPage() {
   const permitida = useGuardarRuta();
   const router = useRouter();
-  const { tasa, isOnline, usaStock, usaIva, ultimaSincronizacion, negocioId, user, userNombre, negocioNombre, datosNegocio, productosVersion } = useApp();
+  const { tasa, isOnline, usaStock, usaIva, ultimaSincronizacion, negocioId, user, userNombre, negocioNombre, datosNegocio, productosVersion, configuracion } = useApp();
 
   const [productos, setProductos] = useState<Producto[]>([]);
   const [busqueda, setBusqueda] = useState('');
@@ -111,6 +111,50 @@ export default function NuevoPresupuestoPage() {
       )
     : productos;
 
+  // El producto configurado como bolsa, buscado entre los que ya están en
+  // memoria — mismo criterio que productoBolsa en page.tsx (Caja). Si no
+  // aparece (borrado), está inactivo o es por_peso, queda undefined y la
+  // función no actúa, en silencio.
+  const productoBolsa = useMemo(
+    () => productos.find(p => p.id === configuracion?.producto_bolsa_id && p.activo && !p.por_peso),
+    [productos, configuracion?.producto_bolsa_id],
+  );
+
+  // A diferencia de page.tsx (Caja), acá no hace falta vivir en
+  // Providers.tsx: items es useState local de esta pantalla (no del
+  // contexto), así que si se navega afuera el borrador se pierde entero —
+  // la bandera puede nacer y morir junto con él, en el mismo useState.
+  const [bolsaDescartada, setBolsaDescartada] = useState(false);
+  // Presupuesto vacío = presupuesto nuevo, sin importar por qué camino
+  // quedó vacío (mismo criterio centralizado que terminamos armando en
+  // Providers.tsx para el carrito de Caja, pero acá no hace falta un
+  // componente separado: esta pantalla entera es ese "componente").
+  useEffect(() => {
+    if (items.length === 0) setBolsaDescartada(false);
+  }, [items]);
+
+  // Inserta una línea nueva respetando que la bolsa, si está presente,
+  // tiene que quedar siempre última (3bis del brief) — nunca al final del
+  // arreglo a secas, sino antes de la posición de la bolsa si ya está ahí.
+  const insertarAntesDeLaBolsa = useCallback(
+    (arr: PresupuestoItem[], nuevo: PresupuestoItem): PresupuestoItem[] => {
+      const idxBolsa = productoBolsa ? arr.findIndex(i => i.producto_id === productoBolsa.id) : -1;
+      return idxBolsa === -1 ? [...arr, nuevo] : [...arr.slice(0, idxBolsa), nuevo, ...arr.slice(idxBolsa)];
+    },
+    [productoBolsa],
+  );
+
+  const itemDeProducto = useCallback((producto: Producto, extra?: { gramos?: number }): PresupuestoItem => ({
+    id: crypto.randomUUID(),
+    producto_id: producto.id,
+    nombre: producto.nombre,
+    cantidad: 1,
+    gramos: extra?.gramos,
+    precioUnitarioUsd: precioUSD(producto, tasa),
+    precioUnitarioBs: precioBS(producto, tasa),
+    ivaTasa: usaIva ? producto.iva_tasa : undefined,
+  }), [tasa, usaIva]);
+
   // Precio ya congelado al momento de agregar — un presupuesto es una foto
   // del catálogo en ese instante, igual que VentaItem: si el precio del
   // producto cambia después en Inventario, esto no se entera ni se
@@ -124,53 +168,60 @@ export default function NuevoPresupuestoPage() {
     }
     setItems(prev => {
       const existente = prev.find(i => i.producto_id === producto.id && i.gramos === undefined);
+      let next: PresupuestoItem[];
       if (existente) {
-        return prev.map(i => (i.id === existente.id ? { ...i, cantidad: i.cantidad + 1 } : i));
+        next = prev.map(i => (i.id === existente.id ? { ...i, cantidad: i.cantidad + 1 } : i));
+      } else {
+        next = insertarAntesDeLaBolsa(prev, itemDeProducto(producto));
       }
-      return [...prev, {
-        id: crypto.randomUUID(),
-        producto_id: producto.id,
-        nombre: producto.nombre,
-        cantidad: 1,
-        precioUnitarioUsd: precioUSD(producto, tasa),
-        precioUnitarioBs: precioBS(producto, tasa),
-        // Se congela al agregar, igual que el precio — si mañana cambia la
-        // tasa del producto, este renglón no se entera. undefined si el
-        // negocio no cotiza con IVA.
-        ivaTasa: usaIva ? producto.iva_tasa : undefined,
-      }];
+      // Una sola bolsa por presupuesto, solo en el primer renglón de uno
+      // vacío, y nunca si lo que se agrega es la bolsa misma (ya quedó
+      // agregada arriba como renglón normal, sin duplicar).
+      const esLaBolsaMisma = productoBolsa?.id === producto.id;
+      if (prev.length === 0 && !bolsaDescartada && productoBolsa && !esLaBolsaMisma) {
+        next = [...next, itemDeProducto(productoBolsa)];
+      }
+      return next;
     });
     showToast(`${producto.nombre} agregado`);
-  }, [tasa, usaIva]);
+  }, [productoBolsa, bolsaDescartada, insertarAntesDeLaBolsa, itemDeProducto]);
 
   const agregarPorPeso = () => {
     if (!productoPeso) return;
     const g = parseFloat(gramos);
     if (!g || g <= 0) return;
-    setItems(prev => [...prev, {
-      id: crypto.randomUUID(),
-      producto_id: productoPeso.id,
-      nombre: productoPeso.nombre,
-      cantidad: 1,
-      gramos: g,
-      // Precio por kg — mismo criterio que VentaItem.precioUnitarioBs/Usd
-      // para items por peso.
-      precioUnitarioUsd: precioUSD(productoPeso, tasa),
-      precioUnitarioBs: precioBS(productoPeso, tasa),
-      ivaTasa: usaIva ? productoPeso.iva_tasa : undefined,
-    }]);
+    setItems(prev => {
+      let next = insertarAntesDeLaBolsa(prev, itemDeProducto(productoPeso, { gramos: g }));
+      // Un presupuesto puede empezar por un producto por peso — este
+      // camino también tiene que disparar la bolsa (nunca es "la bolsa
+      // misma": la bolsa nunca es por_peso, excluida del selector en
+      // /perfil).
+      if (prev.length === 0 && !bolsaDescartada && productoBolsa) {
+        next = [...next, itemDeProducto(productoBolsa)];
+      }
+      return next;
+    });
     setShowPeso(false);
     showToast(`${productoPeso.nombre} ${g}g agregado`);
     setProductoPeso(null);
   };
 
   const actualizarCantidad = (id: string, delta: number) => {
+    // Marca la bandera con el estado actual (closure), antes de despachar
+    // el cambio — mismo criterio que page.tsx, para no depender de que el
+    // updater de setItems corra de forma síncrona.
+    const item = items.find(i => i.id === id);
+    if (productoBolsa && item?.producto_id === productoBolsa.id && item.cantidad + delta <= 0) {
+      setBolsaDescartada(true);
+    }
     setItems(prev =>
       prev.map(i => (i.id === id ? { ...i, cantidad: i.cantidad + delta } : i)).filter(i => i.cantidad > 0)
     );
   };
 
   const quitarItem = (id: string) => {
+    const item = items.find(i => i.id === id);
+    if (productoBolsa && item?.producto_id === productoBolsa.id) setBolsaDescartada(true);
     setItems(prev => prev.filter(i => i.id !== id));
   };
 
