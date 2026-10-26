@@ -224,7 +224,11 @@ export default function CajaPage() {
   // vista), para que el comprobante — que respeta el orden del carrito tal
   // cual — salga bien solo.
   const insertarAntesDeLaBolsa = useCallback((arr: ItemCarrito[], nueva: ItemCarrito): ItemCarrito[] => {
-    const idxBolsa = productoBolsa ? arr.findIndex(i => i.lineId === productoBolsa.id) : -1;
+    // Por producto y no por lineId: un carrito que vino de convertir un
+    // presupuesto trae lineId aleatorios (presupuestos/page.tsx:272 y 279),
+    // así que buscar por lineId no encontraría la bolsa y los renglones
+    // nuevos quedarían después de ella.
+    const idxBolsa = productoBolsa ? arr.findIndex(i => i.producto.id === productoBolsa.id) : -1;
     return idxBolsa === -1 ? [...arr, nueva] : [...arr.slice(0, idxBolsa), nueva, ...arr.slice(idxBolsa)];
   }, [productoBolsa]);
 
