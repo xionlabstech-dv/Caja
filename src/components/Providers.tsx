@@ -454,6 +454,20 @@ export default function Providers({ children }: { children: ReactNode }) {
   // Carrito de la pantalla de Caja — ver comentario en AppContextType.
   const [carrito, setCarrito] = useState<ItemCarrito[]>([]);
   const [bolsaDescartada, setBolsaDescartada] = useState(false);
+  // Carrito vacío = venta nueva, sin importar por qué camino quedó vacío
+  // (vaciar explícito, confirmar la venta, o sacar las líneas una por una
+  // hasta cero) — centralizado acá en vez de en cada lugar de page.tsx que
+  // puede dejar el carrito en cero, para no depender de que cada uno se
+  // acuerde de resetear la bandera. Nota sobre el orden: useEffect corre
+  // después del pintado, así que hay una ventana de un cuadro donde el
+  // carrito ya se ve vacío en pantalla pero bolsaDescartada todavía está en
+  // true — si alguien lograra agregar un producto en esos milisegundos, esa
+  // venta arrancaría sin bolsa. Es humanamente inalcanzable y el fallo es
+  // benigno (una bolsa de menos, no de más), así que se acepta a propósito:
+  // useLayoutEffect acá sería peor que el problema que evita.
+  useEffect(() => {
+    if (carrito.length === 0) setBolsaDescartada(false);
+  }, [carrito]);
   const [showCarrito, setShowCarrito] = useState(false);
   const [presupuestoConvirtiendoId, setPresupuestoConvirtiendoId] = useState<string | null>(null);
   const [presupuestoClienteNombre, setPresupuestoClienteNombre] = useState<string | null>(null);
@@ -561,7 +575,6 @@ export default function Providers({ children }: { children: ReactNode }) {
     setPendientesCount(0);
     setColaAtascada(false);
     setCarrito([]);
-    setBolsaDescartada(false);
     setShowCarrito(false);
     setPresupuestoConvirtiendoId(null);
     setPresupuestoClienteNombre(null);
@@ -617,7 +630,6 @@ export default function Providers({ children }: { children: ReactNode }) {
       setLimiteUsuarios(2);
       setDatosNegocio({});
       setCarrito([]);
-      setBolsaDescartada(false);
       setShowCarrito(false);
       setPresupuestoConvirtiendoId(null);
       setPresupuestoClienteNombre(null);
@@ -834,7 +846,6 @@ export default function Providers({ children }: { children: ReactNode }) {
             setLimiteUsuarios(2);
             setDatosNegocio({});
             setCarrito([]);
-            setBolsaDescartada(false);
             setShowCarrito(false);
             setPresupuestoConvirtiendoId(null);
             setPresupuestoClienteNombre(null);
@@ -855,7 +866,6 @@ export default function Providers({ children }: { children: ReactNode }) {
           }
           await clearTenantData();
           setCarrito([]);
-          setBolsaDescartada(false);
           setShowCarrito(false);
           setPresupuestoConvirtiendoId(null);
           setPresupuestoClienteNombre(null);
@@ -884,7 +894,6 @@ export default function Providers({ children }: { children: ReactNode }) {
         setLimiteUsuarios(2);
         setDatosNegocio({});
         setCarrito([]);
-        setBolsaDescartada(false);
         setShowCarrito(false);
         setPresupuestoConvirtiendoId(null);
         setPresupuestoClienteNombre(null);

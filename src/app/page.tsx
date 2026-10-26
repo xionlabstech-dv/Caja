@@ -303,7 +303,6 @@ export default function CajaPage() {
 
   const confirmarVaciarCarrito = () => {
     setCarrito([]);
-    setBolsaDescartada(false);
     // Vaciar el carrito rompe el vínculo con el presupuesto que lo había
     // cargado — una venta futura desde un carrito armado desde cero nunca
     // debe marcar ese presupuesto como convertido.
@@ -712,7 +711,6 @@ export default function CajaPage() {
     }
 
     setCarrito([]);
-    setBolsaDescartada(false);
     cerrarPago();
 
     // Número correlativo dentro del período abierto — el mismo criterio que
