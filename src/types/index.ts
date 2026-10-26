@@ -53,6 +53,9 @@ export interface Configuracion {
   // no dice desde cuándo, solo si el intento más reciente no se pudo
   // completar. Ver src/app/tasa/page.tsx para el chip que la usa.
   tasa_actualizacion_fallida?: boolean;
+  // Producto que se agrega solo al empezar una venta (la bolsa).
+  // null/ausente = la función está apagada para este negocio.
+  producto_bolsa_id?: string | null;
 }
 
 export interface VentaItem {
@@ -457,6 +460,7 @@ export type TipoPendiente =
   | 'editar_producto'
   | 'eliminar_producto'
   | 'actualizar_tasa'
+  | 'actualizar_producto_bolsa'
   | 'cerrar_caja'
   | 'registrar_venta'
   | 'actualizar_cierre_ventas'
@@ -488,6 +492,11 @@ export interface PayloadEliminarProducto {
 
 export interface PayloadActualizarTasa {
   tasa: number;
+  negocioId: string;
+}
+
+export interface PayloadActualizarProductoBolsa {
+  productoId: string | null;
   negocioId: string;
 }
 
@@ -566,6 +575,7 @@ export type PayloadPendiente =
   | PayloadEditarProducto
   | PayloadEliminarProducto
   | PayloadActualizarTasa
+  | PayloadActualizarProductoBolsa
   | PayloadCerrarCaja
   | PayloadRegistrarVenta
   | PayloadActualizarCierreVentas

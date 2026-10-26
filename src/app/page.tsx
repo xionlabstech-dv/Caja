@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Producto, ItemCarrito, MetodoPago, MetodoPagoVenta, PagoVenta, Venta, VentaItem, MovimientoStock, ClienteFiado, MovimientoFiado, Presupuesto } from '@/types';
 import { METODOS_PAGO } from '@/lib/metodos';
@@ -73,8 +73,8 @@ function reproducirBeep() {
 export default function CajaPage() {
   const {
     tasa, isOnline, negocioNombre, datosNegocio, user, pendientesCount, colaAtascada, negocioId, rol, userNombre,
-    productosVersion, usaStock, ultimaSincronizacion, tutorialVisto,
-    carrito, setCarrito, showCarrito, setShowCarrito,
+    productosVersion, usaStock, ultimaSincronizacion, tutorialVisto, configuracion,
+    carrito, setCarrito, bolsaDescartada, setBolsaDescartada, showCarrito, setShowCarrito,
     presupuestoConvirtiendoId, setPresupuestoConvirtiendoId,
     presupuestoClienteNombre,
   } = useApp();
@@ -206,6 +206,17 @@ export default function CajaPage() {
     usaStock && producto.controla_stock !== false && producto.stock != null && producto.stock <= 0,
   [usaStock]);
 
+  // El producto configurado como bolsa, buscado entre los que ya están en
+  // memoria. Si no aparece (borrado) o está inactivo o es por_peso, queda
+  // undefined y la función de agregarla sola no actúa — en silencio, sin
+  // avisos (regla 6 del brief). productos ya viene filtrado a activo=true
+  // desde getProductos(), pero se revisa igual por si este estado quedó
+  // desactualizado un instante frente al próximo sync.
+  const productoBolsa = useMemo(
+    () => productos.find(p => p.id === configuracion?.producto_bolsa_id && p.activo && !p.por_peso),
+    [productos, configuracion?.producto_bolsa_id],
+  );
+
   const agregarAlCarrito = useCallback((producto: Producto) => {
     if (producto.por_peso) {
       setProductoPeso(producto);
@@ -215,30 +226,52 @@ export default function CajaPage() {
     }
     setCarrito(prev => {
       const existing = prev.find(i => i.lineId === producto.id);
+      let next: ItemCarrito[];
       if (existing) {
-        return prev.map(i =>
+        next = prev.map(i =>
           i.lineId === producto.id ? { ...i, cantidad: i.cantidad + 1 } : i
         );
+      } else {
+        next = [...prev, { lineId: producto.id, producto, cantidad: 1 }];
       }
-      return [...prev, { lineId: producto.id, producto, cantidad: 1 }];
+      // Una sola bolsa por venta, no por producto: solo se agrega sola
+      // cuando ESTE agregado es el primero de un carrito vacío, nunca en
+      // los siguientes. Si la quitaron a propósito (bolsaDescartada) no
+      // vuelve. Si lo que se está agregando es la bolsa misma, no se
+      // duplica (ya quedó agregada arriba como línea normal).
+      const esLaBolsaMisma = productoBolsa?.id === producto.id;
+      if (prev.length === 0 && !bolsaDescartada && productoBolsa && !esLaBolsaMisma) {
+        next = [...next, { lineId: productoBolsa.id, producto: productoBolsa, cantidad: 1 }];
+      }
+      return next;
     });
     showToast(sinExistencia(producto) ? 'Sin existencia registrada' : `${producto.nombre} agregado`);
     reproducirBeep();
-  }, [sinExistencia]);
+  }, [sinExistencia, productoBolsa, bolsaDescartada]);
 
   const agregarPorPeso = () => {
     if (!productoPeso) return;
     const g = parseFloat(gramos);
     if (!g || g <= 0) return;
     const precioCalculadoBase = productoPeso.precio * (g / 1000);
-    setCarrito(prev => [...prev, {
-      lineId: crypto.randomUUID(),
-      producto: productoPeso,
-      cantidad: 1,
-      esPorPeso: true,
-      gramos: g,
-      precioCalculadoBase,
-    }]);
+    setCarrito(prev => {
+      const next: ItemCarrito[] = [...prev, {
+        lineId: crypto.randomUUID(),
+        producto: productoPeso,
+        cantidad: 1,
+        esPorPeso: true,
+        gramos: g,
+        precioCalculadoBase,
+      }];
+      // Una venta puede empezar con un producto por peso — este camino
+      // también tiene que disparar la bolsa (trampa 4 del brief). Nunca es
+      // "la bolsa misma" porque la bolsa nunca es por_peso (excluida del
+      // selector en /perfil).
+      if (prev.length === 0 && !bolsaDescartada && productoBolsa) {
+        next.push({ lineId: productoBolsa.id, producto: productoBolsa, cantidad: 1 });
+      }
+      return next;
+    });
     setShowPeso(false);
     showToast(sinExistencia(productoPeso) ? 'Sin existencia registrada' : `${productoPeso.nombre} ${g}g agregado`);
     setProductoPeso(null);
@@ -246,6 +279,15 @@ export default function CajaPage() {
   };
 
   const actualizarCantidad = (lineId: string, delta: number) => {
+    // actualizarCantidad también saca la línea cuando la cantidad llega a
+    // cero (trampa 3 del brief) — si esa línea es la bolsa, hay que marcar
+    // bolsaDescartada igual que en removerItem. Se decide con el carrito
+    // actual (closure), antes de despachar el cambio, para no depender de
+    // que el updater de setCarrito corra de forma síncrona.
+    const item = carrito.find(i => i.lineId === lineId);
+    if (productoBolsa && item?.lineId === productoBolsa.id && item.cantidad + delta <= 0) {
+      setBolsaDescartada(true);
+    }
     setCarrito(prev => {
       const updated = prev.map(i =>
         i.lineId === lineId ? { ...i, cantidad: i.cantidad + delta } : i
@@ -255,11 +297,13 @@ export default function CajaPage() {
   };
 
   const removerItem = (lineId: string) => {
+    if (productoBolsa && lineId === productoBolsa.id) setBolsaDescartada(true);
     setCarrito(prev => prev.filter(i => i.lineId !== lineId));
   };
 
   const confirmarVaciarCarrito = () => {
     setCarrito([]);
+    setBolsaDescartada(false);
     // Vaciar el carrito rompe el vínculo con el presupuesto que lo había
     // cargado — una venta futura desde un carrito armado desde cero nunca
     // debe marcar ese presupuesto como convertido.
@@ -668,6 +712,7 @@ export default function CajaPage() {
     }
 
     setCarrito([]);
+    setBolsaDescartada(false);
     cerrarPago();
 
     // Número correlativo dentro del período abierto — el mismo criterio que

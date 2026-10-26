@@ -25,6 +25,7 @@ import {
   updateProductoSupabase,
   softDeleteProducto,
   updateTasa,
+  updateProductoBolsa,
   updateUsaCostos,
   updateUsaStock,
   sincronizarCierre,
@@ -51,6 +52,7 @@ import {
   PayloadEditarProducto,
   PayloadEliminarProducto,
   PayloadActualizarTasa,
+  PayloadActualizarProductoBolsa,
   PayloadCerrarCaja,
   PayloadRegistrarVenta,
   PayloadActualizarCierreVentas,
@@ -153,6 +155,13 @@ export async function encolarActualizarTasa(tasa: number, negocioId: string): Pr
   // id fijo: si el usuario cambia la tasa varias veces sin red, solo la
   // última queda en cola (last-write-wins ya desde el encolado).
   await encolar('actualizar_tasa', payload, 'tasa-pendiente');
+}
+
+export async function encolarActualizarProductoBolsa(productoId: string | null, negocioId: string): Promise<void> {
+  const payload: PayloadActualizarProductoBolsa = { productoId, negocioId };
+  // Mismo criterio que la tasa: id fijo para que, si el admin cambia el
+  // producto varias veces sin red, solo la última elección quede en cola.
+  await encolar('actualizar_producto_bolsa', payload, 'producto-bolsa-pendiente');
 }
 
 export async function encolarCerrarCaja(cierre: CierreCaja, negocioId: string): Promise<void> {
@@ -316,6 +325,11 @@ async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
       const { tasa, negocioId } = op.payload as PayloadActualizarTasa;
       const resultado = await updateTasa(tasa, negocioId);
       return resolverResultadoEscritura(resultado, 'No se pudo actualizar la tasa');
+    }
+    case 'actualizar_producto_bolsa': {
+      const { productoId, negocioId } = op.payload as PayloadActualizarProductoBolsa;
+      const resultado = await updateProductoBolsa(productoId, negocioId);
+      return resolverResultadoEscritura(resultado, 'No se pudo actualizar el producto de la bolsa');
     }
     case 'cerrar_caja': {
       const { cierre, negocioId } = op.payload as PayloadCerrarCaja;

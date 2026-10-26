@@ -1,15 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useApp } from '@/components/Providers';
 import { useGuardarRuta } from '@/lib/useGuardarRuta';
 import { usernameDe } from '@/lib/usuarios';
-import { setCachedUsaCostos, setCachedUsaStock, setCachedDatosNegocio } from '@/lib/db';
-import { encolarActualizarUsaCostos, encolarActualizarUsaStock } from '@/lib/outbox';
-import { updateUsaCostos, updateUsaStock, solicitarEliminacionNegocio, cancelarEliminacionNegocio, conCandado } from '@/lib/sync';
+import { setCachedUsaCostos, setCachedUsaStock, setCachedDatosNegocio, getProductos, getConfiguracion, saveConfiguracion, deleteConfiguracion } from '@/lib/db';
+import { encolarActualizarUsaCostos, encolarActualizarUsaStock, encolarActualizarProductoBolsa } from '@/lib/outbox';
+import { updateUsaCostos, updateUsaStock, updateProductoBolsa, solicitarEliminacionNegocio, cancelarEliminacionNegocio, conCandado } from '@/lib/sync';
 import { supabase } from '@/lib/supabase';
-import { DatosNegocio } from '@/types';
+import { DatosNegocio, Producto, Configuracion } from '@/types';
 import ThemeToggle from '@/components/ThemeToggle';
 import ChecklistBienvenida from '@/components/ChecklistBienvenida';
 import Icon from '@/components/ui/Icon';
@@ -34,7 +34,7 @@ export default function PerfilPage() {
   const router = useRouter();
   const {
     user, userNombre, negocioNombre, rol, negocioId, isOnline,
-    usaCostos, setUsaCostos, usaStock, setUsaStock,
+    usaCostos, setUsaCostos, usaStock, setUsaStock, configuracion, productosVersion,
     datosNegocio, setDatosNegocio, signOut,
   } = useApp();
 
@@ -55,6 +55,26 @@ export default function PerfilPage() {
   const [passCargando, setPassCargando] = useState(false);
 
   const [showConfirmStock, setShowConfirmStock] = useState(false);
+
+  // Selector de producto de la bolsa — mismo criterio que tasa/page.tsx: el
+  // valor vive en configuracion (contexto), pero configuracion no se
+  // actualiza sola en memoria tras un guardado optimista (solo tasa/
+  // usaCostos/usaStock tienen su propio setter dedicado), así que esta
+  // pantalla lleva su propio estado local y lo sincroniza con el contexto
+  // cuando este llega o cambia (carga inicial, sync periódico).
+  const [productoBolsaId, setProductoBolsaId] = useState<string | null>(configuracion?.producto_bolsa_id ?? null);
+  useEffect(() => {
+    setProductoBolsaId(configuracion?.producto_bolsa_id ?? null);
+  }, [configuracion?.producto_bolsa_id]);
+  const [showSelectorBolsa, setShowSelectorBolsa] = useState(false);
+  const [busquedaBolsa, setBusquedaBolsa] = useState('');
+  const [productosBolsa, setProductosBolsa] = useState<Producto[]>([]);
+  useEffect(() => {
+    if (rol !== 'admin') return;
+    let cancelado = false;
+    getProductos().then(ps => { if (!cancelado) setProductosBolsa(ps); });
+    return () => { cancelado = true; };
+  }, [rol, productosVersion]);
 
   // Reabrir el checklist de bienvenida a demanda — estado local propio de
   // esta pantalla, no atado a tutorialVisto del contexto: debe poder abrirse
@@ -191,6 +211,64 @@ export default function PerfilPage() {
       return;
     }
     showToast(nuevo ? 'Control de inventario activado' : 'Control de inventario desactivado');
+  };
+
+  // Excluye por_peso (3.5 del brief: una bolsa nunca se vende por peso, y
+  // elegir una abriría el diálogo de gramos a mitad de la venta).
+  const productosSeleccionablesBolsa = useMemo(
+    () => productosBolsa.filter(p => !p.por_peso),
+    [productosBolsa],
+  );
+  const busquedaBolsaNormalizada = busquedaBolsa.trim().toLowerCase();
+  // Solo se filtra (y se renderiza) con texto escrito — con el catálogo
+  // real de Mayga (2.524 productos) listar todo de una sin buscador
+  // trabaría la pantalla; así nunca se renderizan más de unos pocos.
+  const resultadosBolsa = busquedaBolsaNormalizada
+    ? productosSeleccionablesBolsa.filter(p => p.nombre.toLowerCase().includes(busquedaBolsaNormalizada)).slice(0, 50)
+    : [];
+  const productoBolsaActual = productosBolsa.find(p => p.id === productoBolsaId) ?? null;
+
+  // Selector de la bolsa — producto_bolsa_id vive en configuracion (igual
+  // que tasa), no en el meta key aparte que usan usaCostos/usaStock, así
+  // que el guardado local sigue el patrón de tasa/page.tsx: leer y mezclar
+  // antes del put(), y restaurar el snapshot completo (no solo el campo) si
+  // el servidor rechaza el cambio de forma definitiva.
+  const handleElegirProductoBolsa = async (producto: Producto | null) => {
+    if (!negocioId) return;
+    const idAnterior = productoBolsaId;
+    const configAnterior = configuracion;
+    const nuevoId = producto ? producto.id : null;
+
+    const actual = await getConfiguracion();
+    // Mismo supuesto implícito que ya tiene tasa/page.tsx con updateTasa:
+    // actual existe en la práctica (ya se cargó esta pantalla con negocioId
+    // resuelto), el cast solo hace falta porque producto_bolsa_id no aporta
+    // los campos requeridos de Configuracion si actual fuera undefined.
+    await saveConfiguracion({ ...actual, id: 1, producto_bolsa_id: nuevoId } as Configuracion);
+    setProductoBolsaId(nuevoId);
+    setShowSelectorBolsa(false);
+    setBusquedaBolsa('');
+
+    if (!isOnline) {
+      await encolarActualizarProductoBolsa(nuevoId, negocioId);
+      showToast('Guardado localmente — se sincronizará cuando haya conexión');
+      return;
+    }
+
+    const resultado = await updateProductoBolsa(nuevoId, negocioId);
+    if (!resultado.ok) {
+      if (resultado.permanente === false) {
+        await encolarActualizarProductoBolsa(nuevoId, negocioId);
+        showToast('Guardado localmente — se sincronizará cuando haya conexión');
+        return;
+      }
+      if (configAnterior) await saveConfiguracion(configAnterior);
+      else await deleteConfiguracion();
+      setProductoBolsaId(idAnterior);
+      showToast('No se pudo guardar el cambio. Intenta de nuevo.');
+      return;
+    }
+    showToast(nuevoId ? 'Bolsa configurada' : 'Bolsa desactivada');
   };
 
   // Zona de riesgo — solicitud_eliminacion_en es de solo lectura desde acá
@@ -330,6 +408,20 @@ export default function PerfilPage() {
                   <span className={`inline-block w-5 h-5 m-0.5 bg-white rounded-full shadow-sm transition-transform ${usaStock ? 'translate-x-5' : 'translate-x-0'}`} />
                 </button>
               </div>
+              <button
+                type="button"
+                onClick={() => setShowSelectorBolsa(true)}
+                className="flex items-center justify-between gap-3 min-h-[56px] px-3.5 py-3 bg-tarjeta text-left"
+              >
+                <div className="min-w-0">
+                  <p className="text-[15px] font-semibold text-texto">Bolsa automática</p>
+                  <p className="text-xs text-texto-3 mt-0.5">Se agrega sola al empezar cada venta. La cajera la puede quitar si el cliente no la quiere.</p>
+                </div>
+                <span className="flex-none flex items-center gap-1.5 max-w-[42%]">
+                  <span className="text-xs font-semibold text-texto-3 truncate">{productoBolsaActual ? productoBolsaActual.nombre : 'Ninguno'}</span>
+                  <Icon nombre="flechaDerecha" tamano={16} className="flex-none text-texto-4" />
+                </span>
+              </button>
             </div>
           </div>
         )}
@@ -468,6 +560,54 @@ export default function PerfilPage() {
               <button onClick={confirmarActivarStock} className="flex-1 py-3 rounded-xl bg-marca text-texto-invertido font-bold">
                 Sí, activar
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Hoja: elegir producto de la bolsa */}
+      {showSelectorBolsa && (
+        <div className="fixed inset-0 z-50 flex items-end">
+          <div className="absolute inset-0 bg-overlay" onClick={() => { setShowSelectorBolsa(false); setBusquedaBolsa(''); }} />
+          <div className="relative w-full max-w-lg mx-auto bg-tarjeta rounded-t-2xl max-h-[90vh] flex flex-col">
+            <div className="flex-none flex items-center justify-center px-4 pt-4 pb-2">
+              <div className="w-8 h-1 bg-borde-tarjeta rounded-full" />
+            </div>
+            <div className="flex-none px-4 pb-3">
+              <p className="text-base font-bold text-texto mb-1">Elegir producto de la bolsa</p>
+              <p className="text-xs text-texto-3 mb-3">Se agrega sola al empezar cada venta. La cajera la puede quitar si el cliente no la quiere.</p>
+              <input
+                type="text"
+                value={busquedaBolsa}
+                onChange={e => setBusquedaBolsa(e.target.value)}
+                placeholder="Buscar producto"
+                className="w-full h-[52px] px-3.5 rounded-xl bg-tarjeta-hundida border border-borde-campo text-base text-texto focus:outline-none focus:border-foco"
+                maxLength={60}
+                autoFocus
+              />
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-6 space-y-1.5">
+              <button
+                onClick={() => handleElegirProductoBolsa(null)}
+                className={`w-full text-left px-3.5 py-2.5 rounded-xl font-semibold ${productoBolsaId === null ? 'bg-marca-suave text-marca-suave-texto' : 'bg-tarjeta-hundida text-texto'}`}
+              >
+                Ninguno — apagar la función
+              </button>
+              {resultadosBolsa.map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => handleElegirProductoBolsa(p)}
+                  className={`w-full text-left px-3.5 py-2.5 rounded-xl truncate font-medium ${p.id === productoBolsaId ? 'bg-marca-suave text-marca-suave-texto' : 'bg-tarjeta-hundida text-texto'}`}
+                >
+                  {p.nombre}
+                </button>
+              ))}
+              {!busquedaBolsaNormalizada && (
+                <p className="text-xs text-texto-4 text-center py-2">Escribe para buscar un producto</p>
+              )}
+              {busquedaBolsaNormalizada && resultadosBolsa.length === 0 && (
+                <p className="text-xs text-texto-4 text-center py-2">Sin resultados</p>
+              )}
             </div>
           </div>
         </div>

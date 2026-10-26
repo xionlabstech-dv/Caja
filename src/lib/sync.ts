@@ -391,6 +391,43 @@ export async function updateTasa(tasa: number, negocioId: string): Promise<Resul
   return { ok: true };
 }
 
+export async function updateProductoBolsa(productoId: string | null, negocioId: string): Promise<ResultadoEscritura> {
+  let data: unknown[] | null;
+  let error: { message?: string } | null;
+  let status: number;
+  try {
+    ({ data, error, status } = await supabase
+      .from('configuracion')
+      .update({ producto_bolsa_id: productoId })
+      .eq('negocio_id', negocioId)
+      .select('negocio_id')
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS)));
+  } catch (err) {
+    return { ok: false, mensaje: (err as { message?: string }).message, permanente: false };
+  }
+
+  if (error) {
+    if (status === 0) return { ok: false, mensaje: error.message, permanente: false };
+    return { ok: false, mensaje: error.message, permanente: true };
+  }
+  if (!data || data.length === 0) {
+    return { ok: false, permanente: true, mensaje: 'No se pudo guardar el producto de la bolsa' };
+  }
+
+  // Mismo criterio que updateTasa: leer lo que ya había en caché y mezclar
+  // antes de guardar, para no perder el resto de configuracion (tasa,
+  // tasa_oficial, usa_costos no vive acá, etc.) con un put() que reemplaza
+  // el registro completo.
+  const actual = await getConfigDB();
+  // El cast es el mismo supuesto implícito que ya tiene updateTasa (actual
+  // siempre existe en la práctica porque esta escritura ya confirmó una
+  // fila real en el servidor) — acá hace falta explícito porque, a
+  // diferencia de tasa, producto_bolsa_id no aporta los campos requeridos
+  // de Configuracion si actual fuera undefined.
+  await saveConfiguracion({ ...actual, id: 1, producto_bolsa_id: productoId } as Configuracion);
+  return { ok: true };
+}
+
 export async function updateUsaCostos(usaCostos: boolean, negocioId: string): Promise<ResultadoEscritura> {
   let data: unknown[] | null;
   let error: { message?: string } | null;

@@ -163,6 +163,17 @@ interface AppContextType {
   // teléfono no herede el carrito del anterior.
   carrito: ItemCarrito[];
   setCarrito: Dispatch<SetStateAction<ItemCarrito[]>>;
+  // Si la cajera quitó a propósito la bolsa automática de esta venta — ver
+  // agregarAlCarrito/agregarPorPeso en page.tsx. Vive acá, junto a carrito, y
+  // no un nivel más abajo (useState local de Caja): una bandera que protege
+  // un estado tiene que vivir al menos tanto como ese estado, si no,
+  // navegar a cualquier otra pantalla y volver (el botón de perfil en el
+  // header, por ejemplo) la hace desaparecer mientras el carrito sigue
+  // ahí, y la bolsa que quitaron vuelve. Se reinicia en los mismos lugares
+  // que carrito: al vaciarlo, al confirmar una venta, y en todos los resets
+  // de sesión/negocio de este archivo.
+  bolsaDescartada: boolean;
+  setBolsaDescartada: Dispatch<SetStateAction<boolean>>;
   showCarrito: boolean;
   setShowCarrito: Dispatch<SetStateAction<boolean>>;
   // Igual que carrito: vive acá para sobrevivir a la navegación desde
@@ -215,6 +226,8 @@ const AppContext = createContext<AppContextType>({
   productosVersion: 0,
   carrito: [],
   setCarrito: () => {},
+  bolsaDescartada: false,
+  setBolsaDescartada: () => {},
   showCarrito: false,
   setShowCarrito: () => {},
   presupuestoConvirtiendoId: null,
@@ -440,6 +453,7 @@ export default function Providers({ children }: { children: ReactNode }) {
   const [updateDisponible, setUpdateDisponible] = useState(false);
   // Carrito de la pantalla de Caja — ver comentario en AppContextType.
   const [carrito, setCarrito] = useState<ItemCarrito[]>([]);
+  const [bolsaDescartada, setBolsaDescartada] = useState(false);
   const [showCarrito, setShowCarrito] = useState(false);
   const [presupuestoConvirtiendoId, setPresupuestoConvirtiendoId] = useState<string | null>(null);
   const [presupuestoClienteNombre, setPresupuestoClienteNombre] = useState<string | null>(null);
@@ -547,6 +561,7 @@ export default function Providers({ children }: { children: ReactNode }) {
     setPendientesCount(0);
     setColaAtascada(false);
     setCarrito([]);
+    setBolsaDescartada(false);
     setShowCarrito(false);
     setPresupuestoConvirtiendoId(null);
     setPresupuestoClienteNombre(null);
@@ -602,6 +617,7 @@ export default function Providers({ children }: { children: ReactNode }) {
       setLimiteUsuarios(2);
       setDatosNegocio({});
       setCarrito([]);
+      setBolsaDescartada(false);
       setShowCarrito(false);
       setPresupuestoConvirtiendoId(null);
       setPresupuestoClienteNombre(null);
@@ -818,6 +834,7 @@ export default function Providers({ children }: { children: ReactNode }) {
             setLimiteUsuarios(2);
             setDatosNegocio({});
             setCarrito([]);
+            setBolsaDescartada(false);
             setShowCarrito(false);
             setPresupuestoConvirtiendoId(null);
             setPresupuestoClienteNombre(null);
@@ -838,6 +855,7 @@ export default function Providers({ children }: { children: ReactNode }) {
           }
           await clearTenantData();
           setCarrito([]);
+          setBolsaDescartada(false);
           setShowCarrito(false);
           setPresupuestoConvirtiendoId(null);
           setPresupuestoClienteNombre(null);
@@ -866,6 +884,7 @@ export default function Providers({ children }: { children: ReactNode }) {
         setLimiteUsuarios(2);
         setDatosNegocio({});
         setCarrito([]);
+        setBolsaDescartada(false);
         setShowCarrito(false);
         setPresupuestoConvirtiendoId(null);
         setPresupuestoClienteNombre(null);
@@ -1013,7 +1032,7 @@ export default function Providers({ children }: { children: ReactNode }) {
       user, negocioId, negocioNombre, rol, userNombre, usaCostos, setUsaCostos,
       usaStock, setUsaStock, usaIva, tutorialVisto, marcarTutorialVisto, usaCuentasPagar, estado, fechaProximoPago, limiteUsuarios, datosNegocio, setDatosNegocio, ultimaSincronizacion, authLoading, signOut,
       pendientesCount, syncStatus, sincronizarAhora, colaAtascada, productosVersion,
-      carrito, setCarrito, showCarrito, setShowCarrito,
+      carrito, setCarrito, bolsaDescartada, setBolsaDescartada, showCarrito, setShowCarrito,
       presupuestoConvirtiendoId, setPresupuestoConvirtiendoId,
       presupuestoClienteNombre, setPresupuestoClienteNombre,
     }}>
