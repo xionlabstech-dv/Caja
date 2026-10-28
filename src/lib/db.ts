@@ -644,23 +644,6 @@ function sortearCodigoDispositivo(): string {
   return caracterAleatorioDispositivo() + caracterAleatorioDispositivo() + caracterAleatorioDispositivo();
 }
 
-// Identidad de ESTE dispositivo para el número de documento. Sobrevive a
-// clearTenantData() a propósito (ver ahí): no es dato del negocio, es de
-// la instalación. Lectura simple, sin transacción propia — quien necesita
-// la garantía atómica de leer-y-avanzar es proximoNumeroDocumento(), que no
-// reusa esta función porque esa atomicidad exige su propia transacción.
-export async function getIdentidadDocumento(): Promise<{ codigo: string; secuencia: number }> {
-  const db = await getDB();
-  const [codigoItem, secuenciaItem] = await Promise.all([
-    db.get('meta', 'codigo_dispositivo'),
-    db.get('meta', 'secuencia_documento'),
-  ]);
-  return {
-    codigo: codigoItem?.value ?? '',
-    secuencia: secuenciaItem?.value ? (parseInt(secuenciaItem.value, 10) || 0) : 0,
-  };
-}
-
 // Reserva el próximo número de documento de este dispositivo. Lee y
 // escribe en UNA sola transacción, igual que setMarcaCatalogo — dos ventas
 // casi simultáneas (doble tap, cajera rápida) no pueden sacar el mismo
@@ -668,13 +651,14 @@ export async function getIdentidadDocumento(): Promise<{ codigo: string; secuenc
 // corren intercaladas, la segunda espera a que la primera termine.
 //
 // La invariante que hace el fallo seguro: el código y la secuencia se
-// escriben juntos, se leen juntos y se pierden juntos. Si falta el código
-// (primera vez en este dispositivo, o se perdió junto con todo `meta` por
-// cualquier motivo que no sea clearTenantData, que ya lo preserva), se
-// sortea uno nuevo Y la secuencia arranca en 1 — las dos cosas, nunca una
-// sin la otra. Así, perder las claves nunca puede repetir un número: la
-// secuencia vuelve a 1 pero bajo un código distinto, y "XYZ-0001" no choca
-// con "K7X-0001".
+// escriben juntos, se leen juntos y se pierden juntos. Si falta CUALQUIERA
+// de las dos claves, o la secuencia guardada no es un número válido (meta
+// corrupto, valor manipulado), se tratan las dos como perdidas: se sortea
+// un código NUEVO y la secuencia arranca en 1 — nunca se mantiene el
+// código viejo con la secuencia reiniciada, porque eso sí podría repetir
+// un número ya emitido bajo ese mismo código. Así, perder las claves por
+// cualquier motivo nunca puede repetir un número: la secuencia vuelve a 1
+// pero bajo un código distinto, y "XYZ-0001" no choca con "K7X-0001".
 export async function proximoNumeroDocumento(): Promise<string> {
   const db = await getDB();
   const tx = db.transaction('meta', 'readwrite');
@@ -683,13 +667,14 @@ export async function proximoNumeroDocumento(): Promise<string> {
     tx.store.get('secuencia_documento'),
   ]);
 
+  const secuenciaGuardada = secuenciaItem?.value ? parseInt(secuenciaItem.value, 10) : NaN;
   let codigo = codigoItem?.value;
   let secuencia: number;
-  if (!codigo) {
+  if (!codigo || Number.isNaN(secuenciaGuardada)) {
     codigo = sortearCodigoDispositivo();
     secuencia = 1;
   } else {
-    secuencia = (parseInt(secuenciaItem?.value ?? '0', 10) || 0) + 1;
+    secuencia = secuenciaGuardada + 1;
   }
 
   await Promise.all([
@@ -745,10 +730,20 @@ export async function clearTenantData(): Promise<void> {
   // ANTES del clear() y se reescribe después, dentro de la MISMA
   // transacción: leerla fuera dejaría una ventana sin estas claves donde
   // otro camino podría sortear un código nuevo (ver proximoNumeroDocumento).
+  //
+  // Se escriben juntas o no se escribe ninguna — misma invariante que
+  // proximoNumeroDocumento(): si solo una de las dos sobrevivió hasta acá
+  // (meta ya venía inconsistente por algún motivo ajeno a este borrado), no
+  // tiene sentido preservar la mitad. Dejarlas las dos ausentes es seguro
+  // (proximoNumeroDocumento sortea un código nuevo en el próximo llamado);
+  // preservar solo el código con la secuencia reiniciada en 1 sí podría
+  // repetir un número ya emitido bajo ese mismo código.
   const [codigoPrevio, secuenciaPrevia] = await Promise.all([
     metaStore.get('codigo_dispositivo'),
     metaStore.get('secuencia_documento'),
   ]);
+  const secuenciaPreviaValida = secuenciaPrevia?.value != null && !Number.isNaN(parseInt(secuenciaPrevia.value, 10));
+  const preservarIdentidad = !!codigoPrevio && secuenciaPreviaValida;
 
   await Promise.all([
     tx.objectStore('productos').clear(),
@@ -767,8 +762,7 @@ export async function clearTenantData(): Promise<void> {
   ]);
 
   await Promise.all([
-    ...(codigoPrevio ? [metaStore.put(codigoPrevio)] : []),
-    ...(secuenciaPrevia ? [metaStore.put(secuenciaPrevia)] : []),
+    ...(preservarIdentidad ? [metaStore.put(codigoPrevio!), metaStore.put(secuenciaPrevia!)] : []),
     tx.done,
   ]);
 }
@@ -1003,7 +997,16 @@ export async function savePresupuestosResumen(
   for (const r of resumenes) {
     const local = await tx.store.get(r.id);
     if (local && local.sincronizado === false) continue;
-    await tx.store.put({ ...r, items: local?.items, sincronizado: true });
+    // numero_documento: presupuestos_listar todavía no lo trae (la
+    // migración que lo agrega a su RETURNS TABLE está pendiente de
+    // aprobación), así que `r.numero_documento` siempre llega undefined
+    // hoy. Sin este fallback, el put() de abajo (reemplazo completo, como
+    // ya hace con items) borraría el número que este mismo dispositivo le
+    // puso al crear el presupuesto, en el primer sync después de crearlo.
+    // Una vez que la RPC lo traiga, r.numero_documento manda (así llega el
+    // número a un dispositivo que no creó este presupuesto); hasta
+    // entonces, el local es lo único que puede tenerlo.
+    await tx.store.put({ ...r, items: local?.items, numero_documento: r.numero_documento ?? local?.numero_documento, sincronizado: true });
   }
   await tx.done;
 }

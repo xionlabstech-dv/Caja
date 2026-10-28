@@ -1645,6 +1645,12 @@ export async function getPresupuestosRemoto(
       venta_id: string | null;
       anulado_en: string | null;
       motivo_anulacion: string | null;
+      // Todavía no viaja en presupuestos_listar — la migración que la
+      // agrega al RETURNS TABLE está pendiente de aprobación. El campo
+      // queda igual acá, listo: ?? undefined funciona tanto si la columna
+      // no viene (hoy, p.numero_documento es undefined) como si viene
+      // (cuando la migración entre), sin tocar este archivo de nuevo.
+      numero_documento?: string | null;
     }
     return ((data ?? []) as FilaPresupuesto[]).map(p => ({
       id: p.id,
@@ -1662,6 +1668,7 @@ export async function getPresupuestosRemoto(
       venta_id: p.venta_id ?? undefined,
       anulado_en: p.anulado_en ?? undefined,
       motivo_anulacion: p.motivo_anulacion ?? undefined,
+      numero_documento: p.numero_documento ?? undefined,
     }));
   } catch {
     return null;
