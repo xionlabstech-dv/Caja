@@ -1,5 +1,5 @@
-import { getTodasLasVentas, getMovimientos, getMovimientosFiado } from './db';
-import { Venta, VentaItem, MovimientoStock, MovimientoFiado, Rol, EstadoNegocio } from '@/types';
+import { getTodasLasVentas, getMovimientos, getMovimientosFiado, getProductos, getConfiguracion } from './db';
+import { Venta, VentaItem, MovimientoStock, MovimientoFiado, Producto, Configuracion, Rol, EstadoNegocio } from '@/types';
 import {
   TotalesPeriodo,
   DesglosePorMetodo,
@@ -93,11 +93,15 @@ function diaSemanaCaracas(fecha: Date): number {
 let cacheVentas: Promise<Venta[]> | null = null;
 let cacheMovimientos: Promise<MovimientoStock[]> | null = null;
 let cacheMovimientosFiado: Promise<MovimientoFiado[]> | null = null;
+let cacheProductos: Promise<Producto[]> | null = null;
+let cacheConfiguracion: Promise<Configuracion | undefined> | null = null;
 
 export function invalidarCacheReportesLocal(): void {
   cacheVentas = null;
   cacheMovimientos = null;
   cacheMovimientosFiado = null;
+  cacheProductos = null;
+  cacheConfiguracion = null;
 }
 
 function ventasCache(): Promise<Venta[]> {
@@ -113,6 +117,20 @@ function movimientosCache(): Promise<MovimientoStock[]> {
 function movimientosFiadoCache(): Promise<MovimientoFiado[]> {
   if (!cacheMovimientosFiado) cacheMovimientosFiado = getMovimientosFiado();
   return cacheMovimientosFiado;
+}
+
+// Para valor_usd de mermas/consumo propio/faltantes por conteo (ver
+// valorUsdDeMovimientos) — solo se piden si hay permiso de ganancia, así
+// que estos dos no se leen en la mayoría de las cargas (cajero, o negocio
+// sin usa_costos).
+function productosCache(): Promise<Producto[]> {
+  if (!cacheProductos) cacheProductos = getProductos();
+  return cacheProductos;
+}
+
+function configuracionCache(): Promise<Configuracion | undefined> {
+  if (!cacheConfiguracion) cacheConfiguracion = getConfiguracion();
+  return cacheConfiguracion;
 }
 
 // Ventas vigentes (not anulada) del período — la base de reportes_totales,
@@ -306,24 +324,75 @@ export async function fetchPorDiaSemanaLocal(
   return resultado.sort((a, b) => a.dia_semana - b.dia_semana);
 }
 
+// valor_usd de mermas/consumo propio/faltantes por conteo: el servidor usa
+// el COSTO ACTUAL del producto y la TASA ACTUAL (join contra productos +
+// configuracion), no un snapshot histórico — así que, a diferencia de lo
+// que decía la primera versión de este archivo, SÍ se puede reproducir
+// igual offline: Producto.costo/moneda y Configuracion.tasa ya están en
+// IndexedDB.
+//
+// sum(abs(cantidad) * (moneda='USD' ? costo : costo/nullif(tasa,0)))
+// filter (where costo is not null) — dos semánticas NULL distintas, las
+// dos replicadas acá:
+//   - costo null (o producto ausente) → esa fila queda AFUERA del sum, no
+//     cuenta ni como 0.
+//   - costo en VES con tasa <= 0 → nullif(tasa,0) da NULL en SQL, y sum
+//     ignora los NULL individuales sin envenenar el resto (a diferencia de
+//     costo/0 en JS, que da Infinity). Esa fila tampoco suma nada, pero
+//     las demás filas del grupo sí.
+// Si NINGUNA fila termina aportando un número real, el resultado es null
+// (sum sobre cero contribuciones), no 0 — mismo criterio que ya corregiste
+// en fetchTotalesLocal.
+//
+// Divergencia aceptada, no corregida: el join de la RPC contra `productos`
+// encuentra también los INACTIVOS. El store local ya no los tiene — desde
+// el sync incremental, reconciliarProductos (db.ts) borra la fila cuando
+// activo=false, que es lo que bajó el tráfico de 1,32 GB a 22 MB/día. Un
+// producto dado de baja después de generar una merma hace que esa fila
+// quede afuera del sum acá (mismo efecto que "sin costo"): el número local
+// puede quedar por DEBAJO del servidor, nunca por encima ni inventado. No
+// se arregla trayendo inactivos de vuelta al store — ese canje no vale una
+// fila de merma.
+function valorUsdDeMovimientos(movimientos: MovimientoStock[], productosPorId: Map<string, Producto>, tasa: number): number | null {
+  let suma: number | null = null;
+  for (const m of movimientos) {
+    const producto = productosPorId.get(m.producto_id);
+    if (!producto || producto.costo == null) continue;
+    const valorUnitario = producto.moneda === 'USD' ? producto.costo : (tasa > 0 ? producto.costo / tasa : null);
+    if (valorUnitario == null) continue;
+    suma = (suma ?? 0) + Math.abs(m.cantidad) * valorUnitario;
+  }
+  return suma;
+}
+
 export async function fetchMermasLocal(
   _negocioId: string, desde: Date, hasta: Date, permisos: PermisosReporte,
 ): Promise<MermaPorMotivo[]> {
   if (!activo(permisos)) return [];
   const movimientos = await movimientosCache();
   // reportes_mermas: tipo='salida' and motivo in ('dano','vencido','perdida').
-  // valor_usd necesita el costo ACTUAL del producto (join contra productos
-  // del lado del servidor) — MovimientoStock no guarda un snapshot de costo,
-  // así que offline no hay forma de reproducir ese número sin arriesgar que
-  // no coincida con el del servidor (el costo de hoy puede no ser el de
-  // entonces). Va null siempre acá, nunca aproximado.
   const motivos = ['dano', 'vencido', 'perdida'];
-  const porMotivo = new Map<string, number>();
-  for (const m of movimientos) {
-    if (m.tipo !== 'salida' || !motivos.includes(m.motivo) || !enRango(m.ocurrido_en, desde, hasta)) continue;
-    porMotivo.set(m.motivo, (porMotivo.get(m.motivo) ?? 0) + Math.abs(m.cantidad));
+  const filtrados = movimientos.filter(m => m.tipo === 'salida' && motivos.includes(m.motivo) && enRango(m.ocurrido_en, desde, hasta));
+
+  // Compuerta de valor_usd: permitido.ok (admin + usa_costos), igual que
+  // ganancia_usd en los demás reportes — cantidad no depende de esto, solo
+  // de activo (ya aplicado arriba).
+  const permiso = permiteGanancia(permisos);
+  const productosPorId = permiso ? new Map((await productosCache()).map(p => [p.id, p])) : null;
+  const tasa = permiso ? (await configuracionCache())?.tasa ?? 0 : 0;
+
+  const porMotivo = new Map<string, MovimientoStock[]>();
+  for (const m of filtrados) {
+    const lista = porMotivo.get(m.motivo) ?? [];
+    lista.push(m);
+    porMotivo.set(m.motivo, lista);
   }
-  return Array.from(porMotivo.entries()).map(([motivo, cantidad]) => ({ motivo, cantidad, valor_usd: null }));
+
+  return Array.from(porMotivo.entries()).map(([motivo, lista]) => ({
+    motivo,
+    cantidad: lista.reduce((s, m) => s + Math.abs(m.cantidad), 0),
+    valor_usd: productosPorId ? valorUsdDeMovimientos(lista, productosPorId, tasa) : null,
+  }));
 }
 
 export async function fetchAbonosFiadoLocal(
@@ -374,12 +443,13 @@ async function perdidaAgregadaLocal(
 ): Promise<PerdidaAgregada> {
   if (!activo(permisos)) return { cantidad: 0, valor_usd: null };
   const movimientos = await movimientosCache();
-  const cantidad = movimientos
-    .filter(m => filtro(m) && enRango(m.ocurrido_en, desde, hasta))
-    .reduce((s, m) => s + Math.abs(m.cantidad), 0);
-  // Mismo motivo que en mermas: sin snapshot de costo en MovimientoStock,
-  // valor_usd no se puede reproducir igual que el servidor. null siempre.
-  return { cantidad, valor_usd: null };
+  const filtrados = movimientos.filter(m => filtro(m) && enRango(m.ocurrido_en, desde, hasta));
+  const cantidad = filtrados.reduce((s, m) => s + Math.abs(m.cantidad), 0);
+
+  if (!permiteGanancia(permisos)) return { cantidad, valor_usd: null };
+  const productosPorId = new Map((await productosCache()).map(p => [p.id, p]));
+  const tasa = (await configuracionCache())?.tasa ?? 0;
+  return { cantidad, valor_usd: valorUsdDeMovimientos(filtrados, productosPorId, tasa) };
 }
 
 export async function fetchConsumoPropioLocal(
