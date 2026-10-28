@@ -130,6 +130,16 @@ interface AppContextType {
   // presupuesto los usa para mostrar quién emite la cotización.
   datosNegocio: DatosNegocio;
   setDatosNegocio: (d: DatosNegocio) => void;
+  // Para que una pantalla que acaba de escribir configuracion en IndexedDB
+  // (perfil, tasa) lo vea reflejado en memoria al instante, en vez de
+  // esperar al próximo tick de sync (hasta 30s) o una recarga. Lee de
+  // IndexedDB en vez de recibir el objeto por parámetro: las dos pantallas
+  // ya escriben el registro completo y mezclado ahí, así que IndexedDB es
+  // la única fuente de verdad — un objeto parcial empujado directo abriría
+  // la puerta a dejar la memoria con un Configuracion incompleto. No
+  // confundir con refrescarConfig() (el de adentro del efecto de sync, que
+  // va a la red) — ver comentario ahí.
+  refrescarConfiguracionLocal: () => Promise<void>;
   // Última vez que se refrescó el catálogo con éxito desde Supabase (ISO) —
   // null si nunca se ha logrado sincronizar en este dispositivo. La usa la
   // regla de confiabilidad del stock (Parte 5, ver src/lib/stock.ts).
@@ -216,6 +226,7 @@ const AppContext = createContext<AppContextType>({
   limiteUsuarios: 2,
   datosNegocio: {},
   setDatosNegocio: () => {},
+  refrescarConfiguracionLocal: async () => {},
   ultimaSincronizacion: null,
   authLoading: true,
   signOut: async () => {},
@@ -937,6 +948,22 @@ export default function Providers({ children }: { children: ReactNode }) {
 
   const setTasa = (newTasa: number) => setTasaState(newTasa);
 
+  // Contraparte LOCAL de refrescarConfig() (más arriba, dentro del efecto
+  // de sync): esa va a la red; esta solo relee lo que una pantalla
+  // (perfil, tasa) ya escribió en IndexedDB, para que la memoria no se
+  // quede con el valor viejo hasta el próximo tick de 30s. El else cubre
+  // el caso de deleteConfiguracion() en un rollback: si ya no hay
+  // registro, el contexto va a null, no se queda con el anterior.
+  const refrescarConfiguracionLocal = async () => {
+    const config = await getConfiguracion();
+    if (config) {
+      setConfiguracion(config);
+      setTasaState(config.tasa);
+    } else {
+      setConfiguracion(null);
+    }
+  };
+
   const sincronizarAhora = () => {
     if (!negocioId || !navigator.onLine) return;
     // Mismo candado que sincronizar(): esta puerta entra por otro lado
@@ -1039,7 +1066,7 @@ export default function Providers({ children }: { children: ReactNode }) {
     <AppContext.Provider value={{
       tasa, setTasa, isOnline, configuracion, theme, toggleTheme,
       user, negocioId, negocioNombre, rol, userNombre, usaCostos, setUsaCostos,
-      usaStock, setUsaStock, usaIva, tutorialVisto, marcarTutorialVisto, usaCuentasPagar, estado, fechaProximoPago, limiteUsuarios, datosNegocio, setDatosNegocio, ultimaSincronizacion, authLoading, signOut,
+      usaStock, setUsaStock, usaIva, tutorialVisto, marcarTutorialVisto, usaCuentasPagar, estado, fechaProximoPago, limiteUsuarios, datosNegocio, setDatosNegocio, refrescarConfiguracionLocal, ultimaSincronizacion, authLoading, signOut,
       pendientesCount, syncStatus, sincronizarAhora, colaAtascada, productosVersion,
       carrito, setCarrito, bolsaDescartada, setBolsaDescartada, showCarrito, setShowCarrito,
       presupuestoConvirtiendoId, setPresupuestoConvirtiendoId,

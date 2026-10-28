@@ -35,7 +35,7 @@ export default function PerfilPage() {
   const {
     user, userNombre, negocioNombre, rol, negocioId, isOnline,
     usaCostos, setUsaCostos, usaStock, setUsaStock, configuracion, productosVersion,
-    datosNegocio, setDatosNegocio, signOut,
+    datosNegocio, setDatosNegocio, signOut, refrescarConfiguracionLocal,
   } = useApp();
 
   const [toast, setToast] = useState('');
@@ -245,6 +245,7 @@ export default function PerfilPage() {
     // resuelto), el cast solo hace falta porque producto_bolsa_id no aporta
     // los campos requeridos de Configuracion si actual fuera undefined.
     await saveConfiguracion({ ...actual, id: 1, producto_bolsa_id: nuevoId } as Configuracion);
+    await refrescarConfiguracionLocal();
     setProductoBolsaId(nuevoId);
     setShowSelectorBolsa(false);
     setBusquedaBolsa('');
@@ -264,6 +265,7 @@ export default function PerfilPage() {
       }
       if (configAnterior) await saveConfiguracion(configAnterior);
       else await deleteConfiguracion();
+      await refrescarConfiguracionLocal();
       setProductoBolsaId(idAnterior);
       showToast('No se pudo guardar el cambio. Intenta de nuevo.');
       return;

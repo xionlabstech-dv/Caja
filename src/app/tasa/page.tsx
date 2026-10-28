@@ -16,7 +16,7 @@ import { TAMANO_ICONO } from '@/components/ui/iconos';
 export default function TasaPage() {
   const router = useRouter();
   const permitida = useGuardarRuta();
-  const { tasa, setTasa, configuracion, isOnline, negocioId } = useApp();
+  const { tasa, setTasa, configuracion, isOnline, negocioId, refrescarConfiguracionLocal } = useApp();
   const [input, setInput] = useState('');
   const [guardando, setGuardando] = useState(false);
   const [mensaje, setMensaje] = useState('');
@@ -53,6 +53,7 @@ export default function TasaPage() {
     // tasa_actualizacion_fallida hasta el próximo sync completo.
     const actual = await getConfiguracion();
     await saveConfiguracion({ ...actual, id: 1, tasa: nueva, tasa_actualizada_en: now });
+    await refrescarConfiguracionLocal();
     setTasa(nueva);
 
     if (!isOnline) {
@@ -85,6 +86,7 @@ export default function TasaPage() {
       }
       if (configAnterior) await saveConfiguracion(configAnterior);
       else await deleteConfiguracion();
+      await refrescarConfiguracionLocal();
       setTasa(tasaAnterior);
       // Un trigger en Supabase rechaza el UPDATE si la tasa manual queda
       // por debajo de la tasa oficial del día (la que carga /api/actualizar-tasa
