@@ -276,6 +276,14 @@ export async function getVentasSinCerrar(): Promise<Venta[]> {
   return all.filter(v => !v.cierre_id);
 }
 
+// Todas las ventas de este dispositivo, archivadas o no — a diferencia de
+// getVentasSinCerrar, para Reportes sin conexión (reportes-local.ts), que
+// necesita rangos históricos que ya pueden estar en un cierre cerrado.
+export async function getTodasLasVentas(): Promise<Venta[]> {
+  const db = await getDB();
+  return db.getAll('ventas');
+}
+
 export async function tagVentasConCierre(ventaIds: string[], cierreId: string): Promise<void> {
   const db = await getDB();
   const tx = db.transaction('ventas', 'readwrite');

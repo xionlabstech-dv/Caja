@@ -24,6 +24,19 @@ import {
   VentaAnulada,
   PerdidaAgregada,
 } from '@/lib/reportes';
+import {
+  fetchTotalesLocal,
+  fetchPorMetodoLocal,
+  fetchTopProductosLocal,
+  fetchPorDiaSemanaLocal,
+  fetchMermasLocal,
+  fetchAbonosFiadoLocal,
+  fetchAnulacionesLocal,
+  fetchConsumoPropioLocal,
+  fetchFaltantesConteoLocal,
+  invalidarCacheReportesLocal,
+  PermisosReporte,
+} from '@/lib/reportes-local';
 import { formatBS, formatUSD } from '@/lib/precio';
 import { useGuardarRuta } from '@/lib/useGuardarRuta';
 import ThemeToggle from '@/components/ThemeToggle';
@@ -155,13 +168,19 @@ const ATAJOS_RANGO: { label: string; calcular: () => { desde: Date; hasta: Date 
 export default function ReportesPage() {
   const permitida = useGuardarRuta();
   const router = useRouter();
-  const { negocioId, isOnline, rol, usaCostos, usaStock, tasa } = useApp();
+  const { negocioId, isOnline, rol, estado, usaCostos, usaStock, tasa } = useApp();
 
   const [periodoTipo, setPeriodoTipo] = useState<TipoPeriodo>('hoy');
   const [rangoPersonalizado, setRangoPersonalizado] = useState<{ desde: Date; hasta: Date } | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [huboError, setHuboError] = useState(false);
+  // Mismo patrón que Resumen: true cuando lo que se ve es el cálculo local
+  // de este dispositivo (sin conexión), no la foto completa del negocio
+  // que da el servidor. Se fija junto con los datos en cada carga — nunca
+  // queda pegado mostrando "solo este dispositivo" después de reconectar,
+  // porque isOnline dispara una recarga que lo vuelve a fijar en false.
+  const [soloDispositivo, setSoloDispositivo] = useState(false);
   const [totales, setTotales] = useState<TotalesPeriodo | null>(null);
   const [porMetodo, setPorMetodo] = useState<DesglosePorMetodo[]>([]);
   const [topProductos, setTopProductos] = useState<TopProducto[]>([]);
@@ -180,7 +199,7 @@ export default function ReportesPage() {
   const [hastaInput, setHastaInput] = useState('');
 
   useEffect(() => {
-    if (!isOnline || !negocioId) {
+    if (!negocioId) {
       setLoading(false);
       return;
     }
@@ -197,19 +216,32 @@ export default function ReportesPage() {
 
     const { desde, hasta } = calcularRango(periodoTipo, rangoPersonalizado);
 
+    // Con señal: el servidor, autoritativo (ve el negocio completo). Sin
+    // ella: reportes-local.ts, calculando desde IndexedDB — mismo criterio
+    // exacto que cada RPC, solo que "local" es lo que ESTE dispositivo vio,
+    // nunca lo del negocio entero (ver soloDispositivo más abajo). mi_rol()/
+    // mi_estado_negocio()/negocios.usa_costos no tienen sesión de Postgres
+    // que resolver acá, así que se pasan explícitos.
+    const permisos: PermisosReporte = { estado, rol, usaCostos };
+    if (!isOnline) invalidarCacheReportesLocal();
+
     Promise.all([
-      fetchTotales(negocioId, desde, hasta),
-      fetchPorMetodo(negocioId, desde, hasta),
-      fetchTopProductos(negocioId, desde, hasta, 10, ordenTop),
-      fetchPorDiaSemana(negocioId, desde, hasta),
+      isOnline ? fetchTotales(negocioId, desde, hasta) : fetchTotalesLocal(negocioId, desde, hasta, permisos),
+      isOnline ? fetchPorMetodo(negocioId, desde, hasta) : fetchPorMetodoLocal(negocioId, desde, hasta, permisos),
+      isOnline
+        ? fetchTopProductos(negocioId, desde, hasta, 10, ordenTop)
+        : fetchTopProductosLocal(negocioId, desde, hasta, permisos, 10, ordenTop),
+      isOnline ? fetchPorDiaSemana(negocioId, desde, hasta) : fetchPorDiaSemanaLocal(negocioId, desde, hasta, permisos),
       // Mermas sigue atado a usa_stock (igual que hoy) — a diferencia de
       // abonos/anulaciones/consumo propio/faltantes, que se muestran
       // siempre, tenga o no el negocio control de inventario activado.
-      usaStock ? fetchMermas(negocioId, desde, hasta) : Promise.resolve(null),
-      fetchAbonosFiado(negocioId, desde, hasta),
-      fetchAnulaciones(negocioId, desde, hasta),
-      fetchConsumoPropio(negocioId, desde, hasta),
-      fetchFaltantesConteo(negocioId, desde, hasta),
+      usaStock
+        ? (isOnline ? fetchMermas(negocioId, desde, hasta) : fetchMermasLocal(negocioId, desde, hasta, permisos))
+        : Promise.resolve(null),
+      isOnline ? fetchAbonosFiado(negocioId, desde, hasta) : fetchAbonosFiadoLocal(negocioId, desde, hasta, permisos),
+      isOnline ? fetchAnulaciones(negocioId, desde, hasta) : fetchAnulacionesLocal(negocioId, desde, hasta, permisos),
+      isOnline ? fetchConsumoPropio(negocioId, desde, hasta) : fetchConsumoPropioLocal(negocioId, desde, hasta, permisos),
+      isOnline ? fetchFaltantesConteo(negocioId, desde, hasta) : fetchFaltantesConteoLocal(negocioId, desde, hasta, permisos),
     ]).then(([tot, metodo, top, dias, mermasData, abonos, anuls, consumo, faltantes]) => {
       if (cancelado) return;
       if (tot === null) {
@@ -226,11 +258,16 @@ export default function ReportesPage() {
       setAnulaciones(anuls ?? []);
       setConsumoPropio(consumo);
       setFaltantesConteo(faltantes);
+      // Se fija junto con los datos que acaban de llegar, nunca aparte: si
+      // isOnline cambia, este mismo efecto vuelve a correr y lo recalcula
+      // de cero — no puede quedar pegado mostrando un cartel que ya no es
+      // cierto.
+      setSoloDispositivo(!isOnline);
       setLoading(false);
     });
 
     return () => { cancelado = true; };
-  }, [periodoTipo, rangoPersonalizado, isOnline, negocioId, ordenTop, usaStock]);
+  }, [periodoTipo, rangoPersonalizado, isOnline, negocioId, ordenTop, usaStock, estado, rol, usaCostos]);
 
   if (!permitida) return null;
 
@@ -357,13 +394,7 @@ export default function ReportesPage() {
       </div>
 
       <div className="p-4 space-y-4">
-        {!isOnline ? (
-          <div className="text-center text-texto-3 py-16">
-            <Icon nombre="sinConexion" tamano={48} className="mx-auto mb-3 text-texto-4" />
-            <p className="font-medium">Los reportes necesitan conexión a internet</p>
-            <p className="text-sm mt-1">Se muestran apenas recuperes la señal</p>
-          </div>
-        ) : loading ? (
+        {loading ? (
           <div className="text-center text-texto-3 py-16">
             <Icon nombre="cargando" tamano={32} className="mx-auto mb-3 text-marca animate-spin" />
             <p className="font-medium">Calculando...</p>
@@ -375,6 +406,15 @@ export default function ReportesPage() {
           </div>
         ) : (
           <>
+            {/* Mismo patrón y tono que el cartel de soloDispositivo en
+                Resumen — arriba del informe, no al pie: un número parcial
+                sin esta etiqueta visible es peor que no tenerlo. */}
+            {soloDispositivo && (
+              <div className="p-3 rounded-[12px] bg-aviso-fondo border border-aviso-borde text-aviso text-sm">
+                Sin conexión: mostrando solo lo que vio este dispositivo — puede haber ventas de otros usuarios sin contar todavía
+              </div>
+            )}
+
             {/* Total vendido — único elemento "en tinta" de la pantalla */}
             <div className="p-5 rounded-2xl bg-tinta">
               <p className="text-[11px] font-bold uppercase tracking-wide text-tinta-etiqueta">
