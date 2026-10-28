@@ -1218,43 +1218,51 @@ export async function getCierresRemoto(negocioId: string): Promise<CierreCaja[] 
 }
 
 // Anula una venta vía la RPC (SECURITY DEFINER, exige admin del lado
-// servidor). No pasa por el outbox ni por IndexedDB — a diferencia de
-// registrar una venta, anular requiere conexión: es una acción
-// administrativa sobre algo que ya ocurrió, no el flujo de cobro, así que
-// no aplica la regla de "nunca bloquear". Devuelve null ante cualquier
-// fallo (sin red, RPC rechazada) para que quien llama NUNCA actualice el
-// estado local como si hubiera funcionado.
-export interface ResultadoAnulacion {
-  anulada: boolean;
-  anulada_en: string;
-  // true si la venta ya estaba anulada de antes (RPC idempotente) — un
-  // reintento (doble tap, mala señal) no vuelve a reversar el stock.
-  ya_estaba_anulada: boolean;
+// servidor). Ahora pasa por el outbox — ver encolarAnularVenta y el caso
+// 'anular_venta' en outbox.ts — así que, igual que aplicarMovimientoStockRemoto,
+// tiene que distinguir "no hubo respuesta" (transitorio, reintentar) de "el
+// servidor dijo no" (definitivo, sacar de la cola y revertir el estado local).
+// Sin esa distinción, un fallo de red saca de la cola algo que iba a
+// funcionar en el próximo intento.
+export interface ResultadoAnularRemoto {
+  ok: boolean;
+  anulada_en?: string;
+  // true si la venta ya estaba anulada de antes (RPC idempotente, ver su
+  // `select ... for update` + early return) — un reintento (doble tap, mala
+  // señal, o dos dispositivos anulando la misma venta) no vuelve a reversar
+  // el stock ni el fiado.
+  ya_estaba_anulada?: boolean;
+  mensaje?: string;
+  permanente?: boolean;
 }
 
-// Un fallo de anulación no siempre vale la pena reintentarlo: el servidor
-// puede rechazar por algo definitivo (el cliente ya abonó parte de la venta
-// a crédito, el negocio no está activo, no sos admin) y esos mensajes están
-// escritos para mostrarse tal cual, igual que los del trigger de piso de
-// tasa en updateTasa. mensaje en null = nunca hubo respuesta (sin red).
-export interface FalloAnulacion {
-  ok: false;
-  mensaje: string | null;
-}
-
-export async function anularVenta(
-  ventaId: string,
-  motivo: string,
-): Promise<ResultadoAnulacion | FalloAnulacion> {
+export async function anularVenta(ventaId: string, motivo: string): Promise<ResultadoAnularRemoto> {
+  let data: { anulada: boolean; anulada_en: string; ya_estaba_anulada: boolean } | null;
+  let error: { message?: string } | null;
+  let status: number;
   try {
-    const { data, error } = await supabase
+    ({ data, error, status } = await supabase
       .rpc('anular_venta', { p_venta_id: ventaId, p_motivo: motivo })
-      .single();
-    if (error) return { ok: false, mensaje: error.message ?? null };
-    return data as ResultadoAnulacion;
-  } catch {
-    return { ok: false, mensaje: null };
+      .abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS))
+      .single());
+  } catch (err) {
+    return { ok: false, mensaje: (err as { message?: string }).message, permanente: false };
   }
+  if (error) {
+    if (status === 0) {
+      // Nunca hubo respuesta HTTP real — postgrest-js devuelve status 0 ante
+      // cualquier fallo de conexión, sin lanzar excepción. Siempre
+      // transitorio, mismo camino que un fallo de red normal.
+      return { ok: false, mensaje: error.message, permanente: false };
+    }
+    // El servidor sí respondió y rechazó la operación (sin perfil activo,
+    // negocio no activo, no es admin, motivo vacío, venta no existe, o el
+    // cliente ya abonó parte de la venta a crédito) — esos mensajes están
+    // escritos para mostrarse tal cual, igual que los del piso de tasa en
+    // updateTasa. Definitivo: no vale la pena reintentar.
+    return { ok: false, mensaje: error.message, permanente: true };
+  }
+  return { ok: true, anulada_en: data?.anulada_en, ya_estaba_anulada: data?.ya_estaba_anulada };
 }
 
 // Aplica un movimiento de stock vía la RPC atómica e idempotente — nunca un

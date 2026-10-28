@@ -19,6 +19,8 @@ import {
   eliminarMovimientoAcreedor,
   actualizarSaldoAcreedorLocal,
   getAcreedor,
+  marcarAnulacionSincronizada,
+  revertirAnulacionLocal,
 } from './db';
 import {
   createProductoSupabase,
@@ -42,6 +44,7 @@ import {
   aplicarMovimientoAcreedorRemoto,
   getSaldoAcreedorRemoto,
   editarAcreedorRemoto,
+  anularVenta,
   ResultadoEscritura,
 } from './sync';
 import {
@@ -67,6 +70,7 @@ import {
   PayloadCrearAcreedor,
   PayloadAplicarMovimientoAcreedor,
   PayloadEditarAcreedor,
+  PayloadAnularVenta,
   Producto,
   CierreCaja,
   ClienteFiado,
@@ -172,6 +176,17 @@ export async function encolarCerrarCaja(cierre: CierreCaja, negocioId: string): 
 export async function encolarRegistrarVenta(ventaId: string, negocioId: string): Promise<void> {
   const payload: PayloadRegistrarVenta = { ventaId, negocioId };
   await encolar('registrar_venta', payload, ventaId);
+}
+
+export async function encolarAnularVenta(ventaId: string, motivo: string): Promise<void> {
+  const payload: PayloadAnularVenta = { ventaId, motivo };
+  // dependeDe = ventaId: 'registrar_venta' usa el id de la venta como id de
+  // operación (ver encolarRegistrarVenta arriba), así que si la venta se
+  // hizo sin red y se anula enseguida, la anulación espera a que la venta
+  // exista en el servidor. El orden por timestamp NO alcanza — una
+  // operación en backoff se saltea y las de atrás avanzan igual (mismo caso
+  // ya documentado en encolarActualizarPresupuesto).
+  await encolar('anular_venta', payload, `anular-${ventaId}`, ventaId);
 }
 
 export async function encolarActualizarCierreVentas(ventaIds: string[], cierreId: string): Promise<void> {
@@ -578,6 +593,26 @@ async function procesarOperacion(op: OperacionPendiente): Promise<boolean> {
         acreedor.activo, acreedor.es_recurrente, acreedor.dia_pago,
       );
       return resolverResultadoEscritura(resultado, 'No se pudo guardar el cambio del acreedor');
+    }
+    case 'anular_venta': {
+      const { ventaId, motivo } = op.payload as PayloadAnularVenta;
+      const resultado = await anularVenta(ventaId, motivo);
+      if (resultado.ok) {
+        await marcarAnulacionSincronizada(ventaId);
+        return true;
+      }
+      if (resultado.permanente) {
+        // Casi imposible con la compuerta local de confirmarAnular (mismos
+        // cinco chequeos que el servidor, salvo el del fiado ya abonado,
+        // que esa compuerta excluye del camino offline) — pero si pasa, la
+        // venta vuelve a vigente en vez de quedar mintiendo que se anuló.
+        await revertirAnulacionLocal(ventaId, resultado.mensaje ?? 'el servidor lo rechazó');
+        notificarFalloPermanente(
+          `No se pudo anular una venta: ${resultado.mensaje ?? 'el servidor lo rechazó'}. La venta volvió a vigente.`
+        );
+        return true;
+      }
+      return false;
     }
     default:
       return true;

@@ -155,6 +155,12 @@ export interface Venta {
   // nombre visible de quien anuló.
   anulada_por_nombre?: string;
   motivo_anulacion?: string;
+  // Igual que Presupuesto.sincronizado: marca el ESTADO de anulación, no la
+  // venta. Ausente = la venta nunca se anuló, o la anulación ya la confirmó
+  // el servidor. false = anulada en este dispositivo y todavía en la cola;
+  // la reconciliación no debe pisarla, y confirmarCierre no debe archivarla
+  // hasta que se resuelva (ver resumen/page.tsx).
+  anulacion_sincronizada?: boolean;
 }
 
 export interface DesgloseCierre {
@@ -474,7 +480,8 @@ export type TipoPendiente =
   | 'actualizar_datos_negocio'
   | 'crear_acreedor'
   | 'aplicar_movimiento_acreedor'
-  | 'editar_acreedor';
+  | 'editar_acreedor'
+  | 'anular_venta';
 
 export interface PayloadCrearProducto {
   producto: Producto;
@@ -565,6 +572,11 @@ export interface PayloadEditarAcreedor {
   negocioId: string;
 }
 
+export interface PayloadAnularVenta {
+  ventaId: string;
+  motivo: string;
+}
+
 export interface PayloadAplicarMovimientoAcreedor {
   movimientoId: string;
   negocioId: string;
@@ -589,7 +601,8 @@ export type PayloadPendiente =
   | PayloadActualizarDatosNegocio
   | PayloadCrearAcreedor
   | PayloadAplicarMovimientoAcreedor
-  | PayloadEditarAcreedor;
+  | PayloadEditarAcreedor
+  | PayloadAnularVenta;
 
 export interface OperacionPendiente {
   id: string;

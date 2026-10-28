@@ -286,11 +286,16 @@ export async function tagVentasConCierre(ventaIds: string[], cierreId: string): 
   await tx.done;
 }
 
-// Se llama SOLO después de que anularVenta() confirmó el éxito con el
-// servidor — nunca antes, para no dejar el estado local mostrando una
-// anulación que en realidad no se guardó (ver comentario de verificación
-// de escrituras en sync.ts). No hay "desanular": es intencional, la RPC
-// tampoco lo permite.
+// Se llama cuando anularVenta() ya confirmó el éxito con el servidor (camino
+// online de confirmarAnular, en resumen/page.tsx) — nunca antes, para no
+// dejar el estado local mostrando una anulación que en realidad no se
+// guardó (ver comentario de verificación de escrituras en sync.ts). No hay
+// "desanular": es intencional, la RPC tampoco lo permite.
+//
+// Para el camino sin conexión (anulación encolada, todavía no confirmada)
+// ver marcarVentaAnuladaLocal más abajo — esta función no marca
+// anulacion_sincronizada, así que una venta marcada acá queda sin ese campo
+// (ausente = confirmada, igual que su significado documentado en types/index.ts).
 export async function marcarVentaAnulada(
   ventaId: string,
   datos: { anulada_en: string; anulada_por?: string; anulada_por_nombre?: string; motivo_anulacion: string },
@@ -300,6 +305,68 @@ export async function marcarVentaAnulada(
   if (venta) {
     await db.put('ventas', { ...venta, anulada: true, ...datos });
   }
+}
+
+// Anulación hecha sin conexión: se marca local YA y queda con
+// anulacion_sincronizada = false hasta que la cola la confirme (ver el caso
+// 'anular_venta' en outbox.ts).
+export async function marcarVentaAnuladaLocal(
+  ventaId: string,
+  datos: { anulada_en: string; anulada_por?: string; anulada_por_nombre?: string; motivo_anulacion: string },
+): Promise<void> {
+  const db = await getDB();
+  const venta = await db.get('ventas', ventaId);
+  if (venta) {
+    await db.put('ventas', { ...venta, anulada: true, ...datos, anulacion_sincronizada: false });
+  }
+}
+
+export async function marcarAnulacionSincronizada(ventaId: string): Promise<void> {
+  const db = await getDB();
+  const venta = await db.get('ventas', ventaId);
+  if (venta) {
+    await db.put('ventas', { ...venta, anulacion_sincronizada: true });
+  }
+}
+
+// El servidor rechazó la anulación de forma definitiva. La venta vuelve a
+// vigente: dejarla marcada como anulada sería mostrar un estado que no
+// existe. Con la compuerta local de confirmarAnular (resumen/page.tsx) esto
+// debería ser casi imposible — se implementa igual: un estado que miente
+// callado es justo lo que esta arquitectura no acepta.
+export async function revertirAnulacionLocal(ventaId: string, mensaje: string): Promise<void> {
+  const db = await getDB();
+  const venta = await db.get('ventas', ventaId);
+  if (venta) {
+    const { anulada, anulada_en, anulada_por, anulada_por_nombre, motivo_anulacion, anulacion_sincronizada, ...resto } = venta;
+    await db.put('ventas', resto as Venta);
+  }
+  await setAnulacionRechazada({ venta_id: ventaId, mensaje, fecha: new Date().toISOString() });
+}
+
+// Aviso de una anulación offline que el servidor terminó rechazando — se
+// muestra una sola vez al abrir Resumen (ver cargar() en resumen/page.tsx) y
+// se borra ahí mismo, mismo store 'meta' que el resto de los campos
+// cacheados de este archivo.
+export async function getAnulacionRechazada(): Promise<{ venta_id: string; mensaje: string; fecha: string } | null> {
+  const db = await getDB();
+  const item = await db.get('meta', 'anulacion_rechazada');
+  if (!item?.value) return null;
+  try {
+    return JSON.parse(item.value);
+  } catch {
+    return null;
+  }
+}
+
+export async function setAnulacionRechazada(datos: { venta_id: string; mensaje: string; fecha: string }): Promise<void> {
+  const db = await getDB();
+  await db.put('meta', { key: 'anulacion_rechazada', value: JSON.stringify(datos) });
+}
+
+export async function borrarAnulacionRechazada(): Promise<void> {
+  const db = await getDB();
+  await db.delete('meta', 'anulacion_rechazada');
 }
 
 export async function saveCierre(cierre: CierreCaja): Promise<void> {

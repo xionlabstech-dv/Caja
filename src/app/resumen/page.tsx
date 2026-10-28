@@ -10,10 +10,13 @@ import {
   setUltimoCierre,
   getPendientes,
   marcarVentaAnulada,
+  marcarVentaAnuladaLocal,
+  getAnulacionRechazada,
+  borrarAnulacionRechazada,
   getMovimientosFiado,
 } from '@/lib/db';
 import { getVentasPendientesRemoto, reconciliarCierresLocal, anularVenta, getAbonosPeriodoRemoto, getCierresRemoto, getVentasPorCierre } from '@/lib/sync';
-import { encolarCerrarCaja, encolarActualizarCierreVentas, procesarCola } from '@/lib/outbox';
+import { encolarCerrarCaja, encolarActualizarCierreVentas, encolarAnularVenta, procesarCola } from '@/lib/outbox';
 import { formatBS, formatUSD } from '@/lib/precio';
 import { compartirComprobante } from '@/lib/comprobante';
 import { Venta, MetodoPago, MetodoPagoVenta, CierreCaja, DesgloseCierre, MovimientoFiado } from '@/types';
@@ -199,7 +202,15 @@ export default function ResumenPage() {
           // así una venta anulada desde OTRO dispositivo se refleja acá,
           // en vez de quedarse mostrando para siempre la copia local vieja
           // sin anular.
-          if (!local || local.sincronizada) porId.set(r.id, r);
+          //
+          // Pero si HAY una anulación local todavía en cola (anulacion_
+          // sincronizada === false), el remoto no la conoce todavía —
+          // pisarla la haría desaparecer acá y reaparecer recién cuando la
+          // cola termine. Mismo motivo exacto que savePresupuestosResumen y
+          // el fix de clientes_fiado.
+          if ((!local || local.sincronizada) && local?.anulacion_sincronizada !== false) {
+            porId.set(r.id, r);
+          }
         }
         ventasFinal = Array.from(porId.values());
       }
@@ -251,6 +262,19 @@ export default function ResumenPage() {
   // negocio sin que el usuario tenga que salir y volver a entrar.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { cargar(); }, [isOnline]);
+
+  // Si una anulación hecha sin conexión volvió rechazada de forma
+  // definitiva (ver revertirAnulacionLocal en db.ts y el caso 'anular_venta'
+  // en outbox.ts), avisar una sola vez al abrir esta pantalla y borrar la
+  // marca — no es un estado que deba seguir mostrándose en cada carga.
+  useEffect(() => {
+    getAnulacionRechazada().then(r => {
+      if (!r) return;
+      showToast(`No se pudo anular una venta: ${r.mensaje}. Volvió a vigente.`);
+      borrarAnulacionRechazada();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Vigentes = sin anular. Todos los totales y el desglose por método se
   // calculan de acá, nunca de `ventas` a secas — una venta anulada sigue en
@@ -336,11 +360,25 @@ export default function ResumenPage() {
     };
 
     await saveCierre(cierre);
-    // Todas las ventas del período, ANULADAS INCLUIDAS: una venta anulada
-    // igual debe archivarse (dejar de aparecer como "período actual") para
-    // no quedar atrapada ahí para siempre — solo se excluye de los NÚMEROS
-    // del cierre (arriba), nunca de qué ventas se consideran resueltas.
-    await tagVentasConCierre(ventas.map(v => v.id), cierre.id);
+
+    // Una anulación todavía en cola no decide nada: si el servidor la
+    // rechaza, esta venta vuelve a vigente y tiene que poder entrar a un
+    // cierre. Si la archiváramos acá, cierre_id la saca del período para
+    // siempre (getVentasSinCerrar filtra por !cierre_id) y su plata no
+    // quedaría contada en ningún cierre, ni este ni los próximos. Se queda
+    // en el período abierto hasta que la cola resuelva; el cierre que viene
+    // la toma como lo que resultó ser. Los totales de ESTE cierre no
+    // cambian por esto: esa venta ya estaba excluida de ellos por `anulada`
+    // (ver ventasVigentes), archivarla o no nunca afectó los números.
+    const ventasConAnulacionPendiente = ventas.filter(v => v.anulacion_sincronizada === false);
+    const ventasAArchivar = ventas.filter(v => v.anulacion_sincronizada !== false);
+
+    // El resto del período, ANULADAS CONFIRMADAS incluidas: una venta
+    // anulada (y ya resuelta con el servidor) igual debe archivarse (dejar
+    // de aparecer como "período actual") para no quedar atrapada ahí para
+    // siempre — solo se excluye de los NÚMEROS del cierre (arriba), nunca
+    // de qué ventas se consideran resueltas.
+    await tagVentasConCierre(ventasAArchivar.map(v => v.id), cierre.id);
     await setUltimoCierre(now);
     // Offline-first: el cierre ya quedó guardado localmente arriba. Se encola
     // para Supabase — ahora mismo si hay red, o al reconectar si no la hay.
@@ -359,9 +397,15 @@ export default function ResumenPage() {
     // la venta sin cierre_id a propósito para no chocar con la FK (ver el
     // caso 'registrar_venta' en outbox.ts). El cierre_id les llega en este
     // UPDATE.
-    await encolarActualizarCierreVentas(ventas.map(v => v.id), cierre.id);
+    // (encolarActualizarCierreVentas ya se autoexcluye si el arreglo queda vacío)
+    await encolarActualizarCierreVentas(ventasAArchivar.map(v => v.id), cierre.id);
 
-    setVentas([]);
+    // Las ventas con anulación pendiente se quedan visibles en el período
+    // (no [] a secas) — es el costo honesto de esta función: rara (exige
+    // cerrar caja sin red con una anulación todavía sin confirmar) y
+    // visible, en vez de un número mal guardado en silencio en un cierre ya
+    // archivado.
+    setVentas(ventasConAnulacionPendiente);
     setAbonos([]);
     setCierres(prev => [cierre, ...prev]);
     setUltimoCierreState(now);
@@ -421,19 +465,78 @@ export default function ResumenPage() {
     setErrorAnular('');
   };
 
-  // Anular requiere conexión y no pasa por el outbox ni por IndexedDB — es
-  // una acción administrativa sobre algo que ya ocurrió (a diferencia de
-  // registrar una venta), así que no aplica "nunca bloquear una venta". El
-  // estado local SOLO se actualiza después de que el servidor confirmó el
-  // éxito; si anular_venta falla, no se toca nada localmente.
+  // Una venta con un pago fiado adentro (puro o mixto) es la única frontera
+  // real: el servidor puede rechazar por algo que este dispositivo no puede
+  // saber con certeza (si el cliente ya abonó parte de esa venta), así que
+  // ese caso sigue exigiendo conexión. metodo_pago === 'fiado' no alcanza
+  // como chequeo: una venta mixta puede traer un pago fiado adentro de
+  // `pagos` sin que metodo_pago lo diga. Se mira venta.pagos (parte del
+  // registro de la venta, viaja con ella) y no el ledger de fiado_movimientos
+  // — si esta venta se hizo en otro dispositivo, el ledger local puede no
+  // haber sincronizado ese cargo todavía, y dejaría pasar una venta a
+  // crédito al camino offline por error.
+  const ventaNecesitaConexion = (venta: Venta) => venta.pagos.some(p => p.metodo === 'fiado');
+
+  // Anular pasa por el outbox con una compuerta local que replica los
+  // chequeos que sí se pueden evaluar sin red — las mismas cinco razones
+  // por las que anular_venta puede rechazar, salvo la sexta (si el cliente
+  // ya abonó parte de la venta), que solo el servidor puede saber con
+  // certeza y por eso sigue exigiendo conexión vía ventaNecesitaConexion.
+  // Todos los chequeos van ANTES de encolar nada.
   const confirmarAnular = async () => {
-    if (!anulando || !motivoAnular.trim() || !isOnline) return;
+    // 3. Motivo no vacío (y 4a, la venta elegida existe: es `anulando` mismo).
+    if (!anulando || !motivoAnular.trim()) return;
+    // 1. Rol — ya lo filtra el botón que abre esta hoja, pero se repite acá
+    // porque esta función es la autoridad real, no la visibilidad del botón.
+    if (rol !== 'admin') return;
+    // 2. Estado del negocio — equivalente a estado !== 'restringido' que ya
+    // usa el botón (un negocio 'suspendido' nunca llega a esta pantalla).
+    if (estado !== 'activo') {
+      setErrorAnular('La anulación de ventas no está disponible en este momento');
+      return;
+    }
+    // 4. La venta existe localmente (es `anulando` mismo) y no está ya anulada.
+    if (anulando.anulada) return;
+    // 5. Venta a crédito: exige conexión, sin excepción.
+    if (ventaNecesitaConexion(anulando) && !isOnline) {
+      setErrorAnular('Anular una venta a crédito necesita conexión');
+      return;
+    }
+
     setGuardandoAnulacion(true);
     setErrorAnular('');
+
+    if (!isOnline) {
+      // Compuerta pasada, sin conexión: se marca local YA y se encola — el
+      // reverso de stock lo hace el servidor dentro de anular_venta, nunca
+      // acá de forma optimista. Quedar corto en stock mientras la cola
+      // resuelve es conservador y se autocorrige solo en el próximo sync
+      // (reconciliarProductos trae el valor real); sumarlo local y que el
+      // servidor lo sume otra vez sería un error de inventario de verdad.
+      const datos = {
+        anulada_en: new Date().toISOString(),
+        anulada_por: user?.id,
+        anulada_por_nombre: userNombre || undefined,
+        motivo_anulacion: motivoAnular.trim(),
+      };
+      await marcarVentaAnuladaLocal(anulando.id, datos);
+      await encolarAnularVenta(anulando.id, motivoAnular.trim());
+      setVentas(prev => prev.map(v => (
+        v.id === anulando.id ? { ...v, anulada: true, anulacion_sincronizada: false, ...datos } : v
+      )));
+      setGuardandoAnulacion(false);
+      setAnulando(null);
+      setMotivoAnular('');
+      showToast('Anulada localmente — se confirmará cuando haya conexión');
+      return;
+    }
+
+    // Con red: camino de hoy, directo a la RPC — el estado local solo se
+    // actualiza después de que el servidor confirmó el éxito.
     const resultado = await anularVenta(anulando.id, motivoAnular.trim());
     setGuardandoAnulacion(false);
 
-    if ('ok' in resultado) {
+    if (!resultado.ok) {
       setErrorAnular(
         resultado.mensaje ?? 'No se pudo anular la venta. Revisa la conexión e intenta de nuevo.',
       );
@@ -441,7 +544,7 @@ export default function ResumenPage() {
     }
 
     const datos = {
-      anulada_en: resultado.anulada_en,
+      anulada_en: resultado.anulada_en ?? new Date().toISOString(),
       anulada_por: user?.id,
       anulada_por_nombre: userNombre || undefined,
       motivo_anulacion: motivoAnular.trim(),
@@ -700,11 +803,11 @@ export default function ResumenPage() {
                             <Button
                               variante="destructivo"
                               onClick={() => abrirAnular(venta)}
-                              disabled={!isOnline}
+                              disabled={ventaNecesitaConexion(venta) && !isOnline}
                               className="w-full mt-1"
                             >
                               <Icon nombre="anular" tamano={TAMANO_ICONO.secundario} />
-                              {isOnline ? 'Anular venta' : 'Necesitas conexión para anular'}
+                              {ventaNecesitaConexion(venta) && !isOnline ? 'Necesitas conexión para anular' : 'Anular venta'}
                             </Button>
                           )
                         )}
@@ -1016,11 +1119,16 @@ export default function ResumenPage() {
             </div>
 
             {errorAnular && <p className="text-sm text-negativo">{errorAnular}</p>}
-            {!isOnline && <p className="text-sm text-aviso">Necesitas conexión para anular</p>}
+            {ventaNecesitaConexion(anulando) && !isOnline && (
+              <p className="text-sm text-aviso">Necesitas conexión para anular una venta a crédito</p>
+            )}
+            {!ventaNecesitaConexion(anulando) && !isOnline && (
+              <p className="text-sm text-aviso">Se anulará en este dispositivo y se confirmará cuando haya conexión</p>
+            )}
 
             <Button
               variante="destructivo"
-              disabled={guardandoAnulacion || !motivoAnular.trim() || !isOnline}
+              disabled={guardandoAnulacion || !motivoAnular.trim() || (ventaNecesitaConexion(anulando) && !isOnline)}
               onClick={confirmarAnular}
               className="w-full"
             >
