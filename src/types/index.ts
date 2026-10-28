@@ -161,6 +161,13 @@ export interface Venta {
   // la reconciliación no debe pisarla, y confirmarCierre no debe archivarla
   // hasta que se resuelva (ver resumen/page.tsx).
   anulacion_sincronizada?: boolean;
+  // Etiqueta estable para humanos — código de ESTE dispositivo + secuencia
+  // propia, nunca se reinicia ni se recalcula (ver proximoNumeroDocumento
+  // en db.ts). No es la identidad (eso sigue siendo `id`): es lo que se
+  // imprime, y lo mismo sale en cada reimpresión. Ausente = documento
+  // guardado antes de este campo — no se muestra ningún número para esos,
+  // ni el calculado por posición que había antes.
+  numero_documento?: string;
 }
 
 export interface DesgloseCierre {
@@ -440,6 +447,11 @@ export interface Presupuesto {
   // revierte a 'vigente') para que el comerciante vea lo que intentó hacer,
   // junto con el motivo y un botón para reintentarlo.
   falloPermanente?: string;
+  // Mismo criterio que Venta.numero_documento: etiqueta estable (código de
+  // dispositivo + secuencia propia), nunca el calculado por posición. Un
+  // presupuesto convertido en venta genera un numero_documento PROPIO para
+  // la venta — los dos documentos quedan con el suyo, nunca se comparte.
+  numero_documento?: string;
 }
 
 // Datos de contacto del negocio (quien emite), todos opcionales — un

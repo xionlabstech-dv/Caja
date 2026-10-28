@@ -620,6 +620,87 @@ export async function setMarcaCatalogo(ts: string): Promise<void> {
   await tx.done;
 }
 
+// --- Número de documento (código de dispositivo + secuencia) ---
+
+// Sin 0/O ni 1/I/L: no se pueden confundir al dictarlo o leerlo a mano.
+// 31 caracteres, 3 posiciones → 29.791 combinaciones.
+const ALFABETO_CODIGO_DISPOSITIVO = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+
+// Un carácter uniforme del alfabeto de 31, con crypto.getRandomValues
+// (nunca Math.random). 256 no es múltiplo de 31 (256 = 31×8 + 8): un byte
+// entre 248 y 255 se descarta y se vuelve a sortear, para que ninguna
+// posición del alfabeto salga más seguido que las demás.
+function caracterAleatorioDispositivo(): string {
+  const buf = new Uint8Array(1);
+  let b: number;
+  do {
+    crypto.getRandomValues(buf);
+    b = buf[0];
+  } while (b >= 248);
+  return ALFABETO_CODIGO_DISPOSITIVO[b % 31];
+}
+
+function sortearCodigoDispositivo(): string {
+  return caracterAleatorioDispositivo() + caracterAleatorioDispositivo() + caracterAleatorioDispositivo();
+}
+
+// Identidad de ESTE dispositivo para el número de documento. Sobrevive a
+// clearTenantData() a propósito (ver ahí): no es dato del negocio, es de
+// la instalación. Lectura simple, sin transacción propia — quien necesita
+// la garantía atómica de leer-y-avanzar es proximoNumeroDocumento(), que no
+// reusa esta función porque esa atomicidad exige su propia transacción.
+export async function getIdentidadDocumento(): Promise<{ codigo: string; secuencia: number }> {
+  const db = await getDB();
+  const [codigoItem, secuenciaItem] = await Promise.all([
+    db.get('meta', 'codigo_dispositivo'),
+    db.get('meta', 'secuencia_documento'),
+  ]);
+  return {
+    codigo: codigoItem?.value ?? '',
+    secuencia: secuenciaItem?.value ? (parseInt(secuenciaItem.value, 10) || 0) : 0,
+  };
+}
+
+// Reserva el próximo número de documento de este dispositivo. Lee y
+// escribe en UNA sola transacción, igual que setMarcaCatalogo — dos ventas
+// casi simultáneas (doble tap, cajera rápida) no pueden sacar el mismo
+// número porque dos transacciones readwrite sobre el mismo store nunca
+// corren intercaladas, la segunda espera a que la primera termine.
+//
+// La invariante que hace el fallo seguro: el código y la secuencia se
+// escriben juntos, se leen juntos y se pierden juntos. Si falta el código
+// (primera vez en este dispositivo, o se perdió junto con todo `meta` por
+// cualquier motivo que no sea clearTenantData, que ya lo preserva), se
+// sortea uno nuevo Y la secuencia arranca en 1 — las dos cosas, nunca una
+// sin la otra. Así, perder las claves nunca puede repetir un número: la
+// secuencia vuelve a 1 pero bajo un código distinto, y "XYZ-0001" no choca
+// con "K7X-0001".
+export async function proximoNumeroDocumento(): Promise<string> {
+  const db = await getDB();
+  const tx = db.transaction('meta', 'readwrite');
+  const [codigoItem, secuenciaItem] = await Promise.all([
+    tx.store.get('codigo_dispositivo'),
+    tx.store.get('secuencia_documento'),
+  ]);
+
+  let codigo = codigoItem?.value;
+  let secuencia: number;
+  if (!codigo) {
+    codigo = sortearCodigoDispositivo();
+    secuencia = 1;
+  } else {
+    secuencia = (parseInt(secuenciaItem?.value ?? '0', 10) || 0) + 1;
+  }
+
+  await Promise.all([
+    tx.store.put({ key: 'codigo_dispositivo', value: codigo }),
+    tx.store.put({ key: 'secuencia_documento', value: String(secuencia) }),
+    tx.done,
+  ]);
+
+  return `${codigo}-${String(secuencia).padStart(4, '0')}`;
+}
+
 // --- Movimientos de stock ---
 
 export async function saveMovimiento(m: MovimientoStock): Promise<void> {
@@ -658,12 +739,23 @@ export async function clearTenantData(): Promise<void> {
     ['productos', 'configuracion', 'ventas', 'cierres', 'meta', 'pendientes', 'movimientos', 'clientes_fiado', 'fiado_movimientos', 'presupuestos', 'fiado_resumen', 'acreedores', 'acreedor_movimientos'],
     'readwrite',
   );
+  const metaStore = tx.objectStore('meta');
+  // Identidad de ESTE dispositivo para el número de documento (código +
+  // contador) — no es dato del negocio, sobrevive este borrado. Se lee
+  // ANTES del clear() y se reescribe después, dentro de la MISMA
+  // transacción: leerla fuera dejaría una ventana sin estas claves donde
+  // otro camino podría sortear un código nuevo (ver proximoNumeroDocumento).
+  const [codigoPrevio, secuenciaPrevia] = await Promise.all([
+    metaStore.get('codigo_dispositivo'),
+    metaStore.get('secuencia_documento'),
+  ]);
+
   await Promise.all([
     tx.objectStore('productos').clear(),
     tx.objectStore('configuracion').clear(),
     tx.objectStore('ventas').clear(),
     tx.objectStore('cierres').clear(),
-    tx.objectStore('meta').clear(),
+    metaStore.clear(),
     tx.objectStore('pendientes').clear(),
     tx.objectStore('movimientos').clear(),
     tx.objectStore('clientes_fiado').clear(),
@@ -672,6 +764,11 @@ export async function clearTenantData(): Promise<void> {
     tx.objectStore('fiado_resumen').clear(),
     tx.objectStore('acreedores').clear(),
     tx.objectStore('acreedor_movimientos').clear(),
+  ]);
+
+  await Promise.all([
+    ...(codigoPrevio ? [metaStore.put(codigoPrevio)] : []),
+    ...(secuenciaPrevia ? [metaStore.put(secuenciaPrevia)] : []),
     tx.done,
   ]);
 }

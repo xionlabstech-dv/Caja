@@ -194,15 +194,10 @@ export default function PresupuestosPage() {
   const compartir = async (p: Presupuesto) => {
     setCompartiendo(p.id);
     try {
-      // Mismo criterio que "Venta #N": correlativo por orden de creación,
-      // calculado sobre lo que este dispositivo conoce.
-      const ordenados = [...presupuestos].sort((a, b) => a.creado_en.localeCompare(b.creado_en));
-      const numero = ordenados.findIndex(x => x.id === p.id) + 1;
       await compartirPresupuesto({
         negocioNombre: negocioNombre || '',
         datosNegocio,
         presupuesto: p,
-        numero: numero > 0 ? numero : ordenados.length,
       });
     } catch {
       showToast('No se pudo generar el documento');
@@ -338,11 +333,6 @@ export default function PresupuestosPage() {
   const chipPuedeTenerHistorialOculto = chip === 'todos' || chip === 'convertido' || chip === 'anulado';
   const historialOcultos = presupuestos.length - presupuestosVisibles.length;
   const mostrarBotonHistorial = !verHistorialCompleto && chipPuedeTenerHistorialOculto && historialOcultos > 0;
-
-  // Correlativo por orden de creación, calculado una sola vez para toda la
-  // lista (no por fila) — mismo criterio que "Venta #N" en Resumen.
-  const ordenados = [...presupuestos].sort((a, b) => a.creado_en.localeCompare(b.creado_en));
-  const numeroPorId = new Map(ordenados.map((p, i) => [p.id, i + 1]));
 
   function textoVigencia(p: Presupuesto): string {
     if (p.estado === 'convertido') {
@@ -487,7 +477,7 @@ export default function PresupuestosPage() {
                         )}
                       </div>
                       <p className="text-xs text-texto-3 mt-1">
-                        Presupuesto #{numeroPorId.get(p.id)} · {textoVigencia(p)}
+                        {p.numero_documento ? `Presupuesto #${p.numero_documento} · ` : ''}{textoVigencia(p)}
                       </p>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">

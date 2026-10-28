@@ -371,7 +371,15 @@ export interface DatosComprobante {
   // documento sigue funcionando, solo con el nombre de cuenta de siempre.
   datosNegocio?: DatosNegocio;
   venta: Venta;
-  numero: number;
+}
+
+// Si la venta no tiene numero_documento (una guardada antes de que ese
+// campo existiera), no se muestra ningún número — ni el calculado por
+// posición que había antes: ese ya era irreproducible en una reimpresión,
+// y seguir mostrándolo sería seguir mintiendo con más pasos. La fecha y el
+// total siguen identificando el documento.
+function tituloVenta(venta: Venta): string {
+  return venta.numero_documento ? `Venta #${venta.numero_documento}` : 'Venta';
 }
 
 function itemsCantidadPrecio(item: VentaItem): { cantidadTexto: string; precioTexto: string } {
@@ -385,7 +393,7 @@ function itemsCantidadPrecio(item: VentaItem): { cantidadTexto: string; precioTe
 // --- Ticket (80mm térmico, 302px) — layout centrado de una sola columna ---
 
 function dibujarComprobanteTicket(ctx: CanvasRenderingContext2D, datos: DatosComprobante): number {
-  const { negocioNombre, datosNegocio, venta, numero } = datos;
+  const { negocioNombre, datosNegocio, venta } = datos;
   const ancho = 302;
   const padX = 16;
   const centroX = ancho / 2;
@@ -446,7 +454,7 @@ function dibujarComprobanteTicket(ctx: CanvasRenderingContext2D, datos: DatosCom
   ctx.font = '500 11px sans-serif';
   ctx.fillStyle = COLOR_TEXTO_SUAVE;
   ctx.textAlign = 'left';
-  ctx.fillText(`Venta #${numero}`, padX, y);
+  ctx.fillText(tituloVenta(venta), padX, y);
   ctx.textAlign = 'right';
   ctx.fillText(fmtFechaHora(venta.fecha), ancho - padX, y);
   y += 18;
@@ -540,7 +548,7 @@ function dibujarComprobanteTicket(ctx: CanvasRenderingContext2D, datos: DatosCom
 // --- Carta (816×1056, dos columnas) ---
 
 function dibujarComprobanteCarta(ctx: CanvasRenderingContext2D, datos: DatosComprobante): number {
-  const { negocioNombre, datosNegocio, venta, numero } = datos;
+  const { negocioNombre, datosNegocio, venta } = datos;
   const ancho = 816;
   const padX = 60;
   dibujarBarraMarca(ctx, ancho, 4);
@@ -553,7 +561,7 @@ function dibujarComprobanteCarta(ctx: CanvasRenderingContext2D, datos: DatosComp
   ];
   const derecha: LineaEncabezado[] = [
     { texto: 'COMPROBANTE DE VENTA', font: 'bold 13px sans-serif', color: COLOR_TEXTO, salto: 22 },
-    { texto: `Venta #${numero}`, font: 'bold 22px sans-serif', color: COLOR_TEXTO, salto: 26 },
+    { texto: tituloVenta(venta), font: 'bold 22px sans-serif', color: COLOR_TEXTO, salto: 26 },
     { texto: fmtFechaHora(venta.fecha), font: '13px sans-serif', color: COLOR_TEXTO_SUAVE, salto: 18 },
   ];
   let y = dibujarEncabezadoDosColumnas(ctx, ancho, padX, 56, izquierda, derecha) + 24;
@@ -652,7 +660,7 @@ function dibujarComprobanteCarta(ctx: CanvasRenderingContext2D, datos: DatosComp
   y = Math.max(y, yTotales + 66) + 24;
 
   y = dibujarLeyendaFiscal(ctx, padX, ancho - padX * 2, y, {
-    tamano: 14, textoDerecha: `Venta #${numero} · ${fmtFechaHora(venta.fecha)}`, tamanoDerecha: 12,
+    tamano: 14, textoDerecha: `${tituloVenta(venta)} · ${fmtFechaHora(venta.fecha)}`, tamanoDerecha: 12,
   });
   y += 30;
 
@@ -662,7 +670,7 @@ function dibujarComprobanteCarta(ctx: CanvasRenderingContext2D, datos: DatosComp
 // --- Media carta (816×528, mitad de una carta) ---
 
 function dibujarComprobanteMediaCarta(ctx: CanvasRenderingContext2D, datos: DatosComprobante): number {
-  const { negocioNombre, datosNegocio, venta, numero } = datos;
+  const { negocioNombre, datosNegocio, venta } = datos;
   const ancho = 816;
   const padX = 40;
   dibujarBarraMarca(ctx, ancho, 4);
@@ -676,7 +684,7 @@ function dibujarComprobanteMediaCarta(ctx: CanvasRenderingContext2D, datos: Dato
   ];
   const derecha: LineaEncabezado[] = [
     { texto: 'COMPROBANTE DE VENTA', font: 'bold 11px sans-serif', color: COLOR_TEXTO, salto: 16 },
-    { texto: `Venta #${numero}`, font: 'bold 17px sans-serif', color: COLOR_TEXTO, salto: 19 },
+    { texto: tituloVenta(venta), font: 'bold 17px sans-serif', color: COLOR_TEXTO, salto: 19 },
     { texto: fmtFechaHora(venta.fecha), font: '11.5px sans-serif', color: COLOR_TEXTO_SUAVE, salto: 15 },
   ];
   let y = dibujarEncabezadoDosColumnas(ctx, ancho, padX, 26 + 4, izquierda, derecha) + 12;
@@ -783,7 +791,7 @@ export async function generarComprobantePNG(datos: DatosComprobante): Promise<{ 
   const altoMinimo = formato === 'carta' ? 1056 : formato === 'media_carta' ? 528 : 0;
   const blob = await generarPNG(ancho, ctx => dibujar(ctx, datos), altoMinimo);
   // Nunca "factura" en el nombre del archivo — regla del proyecto.
-  return { blob, nombreArchivo: `comprobante-venta-${datos.numero}.png` };
+  return { blob, nombreArchivo: `comprobante-venta-${datos.venta.numero_documento ?? datos.venta.id}.png` };
 }
 
 export async function compartirComprobante(datos: DatosComprobante): Promise<'compartido' | 'descargado'> {
@@ -799,9 +807,12 @@ export interface DatosPresupuesto {
   // documento sigue funcionando, solo sin ese bloque.
   datosNegocio?: DatosNegocio;
   presupuesto: Presupuesto;
-  // Correlativo calculado en el cliente — mismo criterio que "Venta #N" en
-  // Resumen, nunca una columna en la base.
-  numero: number;
+}
+
+// Mismo criterio que tituloVenta: sin numero_documento (un presupuesto
+// viejo) no se muestra ningún número.
+function tituloPresupuesto(presupuesto: Presupuesto): string {
+  return presupuesto.numero_documento ? `Presupuesto #${presupuesto.numero_documento}` : 'Presupuesto';
 }
 
 function itemPresupuestoCantidadPrecioMonto(item: PresupuestoItem): { cantidadTexto: string; precioTexto: string; subtotalBs: number } {
@@ -881,7 +892,7 @@ function recuadroEstadoPresupuesto(p: Presupuesto, texto2Vigente: string): {
 }
 
 function dibujarPresupuestoCarta(ctx: CanvasRenderingContext2D, datos: DatosPresupuesto): number {
-  const { negocioNombre, datosNegocio, presupuesto, numero } = datos;
+  const { negocioNombre, datosNegocio, presupuesto } = datos;
   const ancho = 816;
   const padX = 60;
   dibujarBarraMarca(ctx, ancho, 4);
@@ -894,7 +905,7 @@ function dibujarPresupuestoCarta(ctx: CanvasRenderingContext2D, datos: DatosPres
   ];
   const derecha: LineaEncabezado[] = [
     { texto: 'PRESUPUESTO', font: 'bold 13px sans-serif', color: COLOR_TEXTO, salto: 22 },
-    { texto: `Presupuesto #${numero}`, font: 'bold 22px sans-serif', color: COLOR_TEXTO, salto: 26 },
+    { texto: tituloPresupuesto(presupuesto), font: 'bold 22px sans-serif', color: COLOR_TEXTO, salto: 26 },
     { texto: `Emitido el ${fmtFechaSolo(presupuesto.creado_en)}`, font: '13px sans-serif', color: COLOR_TEXTO_SUAVE, salto: 18 },
   ];
   let y = dibujarEncabezadoDosColumnas(ctx, ancho, padX, 56, izquierda, derecha) + 24;
@@ -1027,7 +1038,7 @@ function dibujarPresupuestoCarta(ctx: CanvasRenderingContext2D, datos: DatosPres
   y = Math.max(yNota, yTotal + 66) + 24;
 
   y = dibujarLeyendaFiscal(ctx, padX, ancho - padX * 2, y, {
-    tamano: 14, textoDerecha: `Presupuesto #${numero} · ${fmtFechaSolo(presupuesto.creado_en)}`, tamanoDerecha: 12,
+    tamano: 14, textoDerecha: `${tituloPresupuesto(presupuesto)} · ${fmtFechaSolo(presupuesto.creado_en)}`, tamanoDerecha: 12,
   });
   y += 30;
 
@@ -1035,7 +1046,7 @@ function dibujarPresupuestoCarta(ctx: CanvasRenderingContext2D, datos: DatosPres
 }
 
 function dibujarPresupuestoMediaCarta(ctx: CanvasRenderingContext2D, datos: DatosPresupuesto): number {
-  const { negocioNombre, datosNegocio, presupuesto, numero } = datos;
+  const { negocioNombre, datosNegocio, presupuesto } = datos;
   const ancho = 816;
   const padX = 40;
   dibujarBarraMarca(ctx, ancho, 4);
@@ -1051,7 +1062,7 @@ function dibujarPresupuestoMediaCarta(ctx: CanvasRenderingContext2D, datos: Dato
   // encima del número — mismo criterio que la referencia de Diseño, que
   // acá comprime el encabezado a dos líneas en vez de tres.
   const derecha: LineaEncabezado[] = [
-    { texto: `Presupuesto #${numero}`, font: 'bold 17px sans-serif', color: COLOR_TEXTO, salto: 19 },
+    { texto: tituloPresupuesto(presupuesto), font: 'bold 17px sans-serif', color: COLOR_TEXTO, salto: 19 },
     { texto: `Emitido el ${fmtFechaSolo(presupuesto.creado_en)}`, font: '11.5px sans-serif', color: COLOR_TEXTO_SUAVE, salto: 15 },
   ];
   let y = dibujarEncabezadoDosColumnas(ctx, ancho, padX, 26 + 4, izquierda, derecha) + 14;
@@ -1182,7 +1193,7 @@ export async function generarPresupuestoPNG(datos: DatosPresupuesto): Promise<{ 
   const dibujar = formato === 'carta' ? dibujarPresupuestoCarta : dibujarPresupuestoMediaCarta;
   const blob = await generarPNG(816, ctx => dibujar(ctx, datos), formato === 'carta' ? 1056 : 528);
   const sufijo = datos.presupuesto.estado === 'anulado' ? '-anulado' : '';
-  return { blob, nombreArchivo: `presupuesto-${datos.numero}${sufijo}.png` };
+  return { blob, nombreArchivo: `presupuesto-${datos.presupuesto.numero_documento ?? datos.presupuesto.id}${sufijo}.png` };
 }
 
 export async function compartirPresupuesto(datos: DatosPresupuesto): Promise<'compartido' | 'descargado'> {

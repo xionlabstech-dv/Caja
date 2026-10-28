@@ -121,10 +121,10 @@ export default function ResumenPage() {
     setTimeout(() => setToast(''), 5000);
   };
 
-  const compartirComprobanteVenta = async (venta: Venta, numero: number) => {
+  const compartirComprobanteVenta = async (venta: Venta) => {
     setCompartiendoComprobante(venta.id);
     try {
-      await compartirComprobante({ negocioNombre: negocioNombre || '', datosNegocio, venta, numero });
+      await compartirComprobante({ negocioNombre: negocioNombre || '', datosNegocio, venta });
     } catch {
       showToast('No se pudo generar el comprobante');
     } finally {
@@ -310,12 +310,11 @@ export default function ResumenPage() {
       ? ventas.reduce((min, v) => (v.fecha < min ? v.fecha : min), ventas[0].fecha)
       : null);
 
-  // Numeración por orden cronológico real (no por posición en el array: IDB
-  // getAll() devuelve las ventas ordenadas por id/UUID, sin relación alguna
-  // con la fecha). La primera venta del período es siempre #1 y no cambia al
-  // llegar más ventas nuevas.
+  // Orden cronológico real (no por posición en el array: IDB getAll()
+  // devuelve las ventas ordenadas por id/UUID, sin relación alguna con la
+  // fecha) — ya no para numerar (eso lo da venta.numero_documento, estable
+  // y reproducible), solo para el orden de la lista.
   const ventasPorFecha = [...ventas].sort((a, b) => a.fecha.localeCompare(b.fecha));
-  const numeroPorVenta = new Map(ventasPorFecha.map((v, i) => [v.id, i + 1]));
   // Más reciente primero para la lista — usamos el mismo orden cronológico
   // ya calculado en vez de asumir que el array venía ordenado.
   const ventasParaMostrar = [...ventasPorFecha].reverse();
@@ -776,7 +775,7 @@ export default function ResumenPage() {
 
                         <Button
                           variante="secundario"
-                          onClick={() => compartirComprobanteVenta(venta, numeroPorVenta.get(venta.id) ?? 0)}
+                          onClick={() => compartirComprobanteVenta(venta)}
                           disabled={compartiendoComprobante === venta.id}
                           className="w-full mt-1"
                         >
@@ -1100,7 +1099,7 @@ export default function ResumenPage() {
         {anulando && (
           <div className="space-y-4">
             <p className="text-sm text-texto-3">
-              Venta #{numeroPorVenta.get(anulando.id)} · {formatBS(anulando.total_bs)}. Esta acción no se puede deshacer.
+              {anulando.numero_documento ? `Venta #${anulando.numero_documento} · ` : ''}{formatBS(anulando.total_bs)}. Esta acción no se puede deshacer.
             </p>
 
             <div>

@@ -14,9 +14,9 @@ import {
   saveClienteFiado,
   saveMovimientoFiado,
   actualizarSaldoFiadoLocal,
-  getVentasSinCerrar,
   getPresupuesto,
   savePresupuesto,
+  proximoNumeroDocumento,
 } from '@/lib/db';
 import {
   encolarRegistrarVenta,
@@ -130,7 +130,7 @@ export default function CajaPage() {
 
   // Pantalla de éxito tras confirmar una venta — desde ahí se puede
   // compartir el comprobante mientras el cliente sigue parado ahí.
-  const [ventaConfirmada, setVentaConfirmada] = useState<{ venta: Venta; numero: number } | null>(null);
+  const [ventaConfirmada, setVentaConfirmada] = useState<Venta | null>(null);
   const [compartiendoComprobante, setCompartiendoComprobante] = useState(false);
 
   // productosVersion depende de Providers: se re-lee la lista cuando el sync
@@ -602,6 +602,13 @@ export default function CajaPage() {
         }];
     const metodoPagoVenta: MetodoPagoVenta = pagos.length > 1 ? 'mixto' : pagos[0].metodo;
 
+    // Se reserva antes de armar la venta: el número se escribe una vez y no
+    // cambia nunca (regla 5 del brief), así que tiene que viajar YA adentro
+    // del objeto que se guarda y se encola, no calcularse después a partir
+    // de una lista que puede no incluir esta venta para siempre (ver el
+    // comentario que había acá antes, sobre findIndex).
+    const numeroDocumento = await proximoNumeroDocumento();
+
     const venta: Venta = {
       id: crypto.randomUUID(),
       fecha: now.toISOString(),
@@ -615,6 +622,7 @@ export default function CajaPage() {
       sincronizada: false,
       usuario_id: user?.id,
       usuario_nombre: userNombre || undefined,
+      numero_documento: numeroDocumento,
     };
 
     // Offline-first: se guarda local de inmediato (la venta nunca depende de
@@ -727,22 +735,13 @@ export default function CajaPage() {
 
     setCarrito([]);
     cerrarPago();
-
-    // Número correlativo dentro del período abierto — el mismo criterio que
-    // ya usa Resumen (orden cronológico entre las ventas sin cerrar de todo
-    // el negocio). Se calcula sobre lo local nada más: alcanza para el
-    // comprobante recién hecho, que de todos modos aclara que no es un
-    // documento fiscal.
-    const ventasPeriodo = await getVentasSinCerrar();
-    const ordenadas = [...ventasPeriodo].sort((a, b) => a.fecha.localeCompare(b.fecha));
-    const numero = ordenadas.findIndex(v => v.id === venta.id) + 1;
-    setVentaConfirmada({ venta, numero: numero > 0 ? numero : ordenadas.length });
+    setVentaConfirmada(venta);
   };
 
-  const compartirComprobanteVenta = async (venta: Venta, numero: number) => {
+  const compartirComprobanteVenta = async (venta: Venta) => {
     setCompartiendoComprobante(true);
     try {
-      await compartirComprobante({ negocioNombre: negocioNombre || '', datosNegocio, venta, numero });
+      await compartirComprobante({ negocioNombre: negocioNombre || '', datosNegocio, venta });
     } catch {
       showToast('No se pudo generar el comprobante');
     } finally {
@@ -1496,10 +1495,10 @@ export default function CajaPage() {
             </div>
             <h2 className="text-lg font-bold text-texto">Venta registrada</h2>
             <p className="text-2xl font-bold text-marca mt-1 tabular-nums">
-              {formatBS(ventaConfirmada.venta.total_bs)}
+              {formatBS(ventaConfirmada.total_bs)}
             </p>
             {tasa > 0 && (
-              <p className="text-texto-4 text-sm tabular-nums">{formatUSD(ventaConfirmada.venta.total_usd)}</p>
+              <p className="text-texto-4 text-sm tabular-nums">{formatUSD(ventaConfirmada.total_usd)}</p>
             )}
 
             <div className="mt-6 flex flex-col gap-2">
@@ -1508,7 +1507,7 @@ export default function CajaPage() {
               </Button>
               <Button
                 variante="secundario"
-                onClick={() => compartirComprobanteVenta(ventaConfirmada.venta, ventaConfirmada.numero)}
+                onClick={() => compartirComprobanteVenta(ventaConfirmada)}
                 disabled={compartiendoComprobante}
               >
                 <Icon nombre="compartir" tamano={TAMANO_ICONO.secundario} />

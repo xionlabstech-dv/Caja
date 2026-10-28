@@ -958,6 +958,7 @@ export async function sincronizarVenta(venta: Venta, negocioId: string): Promise
       vendida_en: venta.fecha,
       usuario_id: venta.usuario_id ?? null,
       usuario_nombre: venta.usuario_nombre ?? null,
+      numero_documento: venta.numero_documento ?? null,
     }).abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
 
     if (ventaError && (ventaError as { code?: string }).code !== '23505') {
@@ -1153,6 +1154,7 @@ async function armarVentasCompletas(ventasData: any[]): Promise<Venta[]> {
     sincronizada: true,
     usuario_id: v.usuario_id ?? undefined,
     usuario_nombre: v.usuario_nombre ?? undefined,
+    numero_documento: v.numero_documento ?? undefined,
     // Anulación: se trae siempre (no solo si anulada = true) para que una
     // venta anulada por otro dispositivo llegue ya marcada, sin depender
     // de que este dispositivo haya sido el que la anuló.
@@ -1578,6 +1580,7 @@ export async function sincronizarPresupuesto(presupuesto: Presupuesto, negocioId
       creado_por: presupuesto.creado_por ?? null,
       creado_por_nombre: presupuesto.creado_por_nombre ?? null,
       creado_en: presupuesto.creado_en,
+      numero_documento: presupuesto.numero_documento ?? null,
     }).abortSignal(AbortSignal.timeout(TIMEOUT_RPC_MS));
     if (error && (error as { code?: string }).code !== '23505') throw error;
 

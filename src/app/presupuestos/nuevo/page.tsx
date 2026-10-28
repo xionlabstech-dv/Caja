@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Producto, PresupuestoItem, Presupuesto } from '@/types';
-import { getProductos, getProductoPorCodigo, savePresupuesto, getPresupuestos } from '@/lib/db';
+import { getProductos, getProductoPorCodigo, savePresupuesto, proximoNumeroDocumento } from '@/lib/db';
 import { encolarCrearPresupuesto } from '@/lib/outbox';
 import { precioBS, precioUSD, formatBS, formatUSD } from '@/lib/precio';
 import { pareceCodigoBarra } from '@/lib/barcode';
@@ -79,7 +79,6 @@ export default function NuevoPresupuestoPage() {
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
   const [guardado, setGuardado] = useState<Presupuesto | null>(null);
-  const [numeroGuardado, setNumeroGuardado] = useState(0);
   const [compartiendo, setCompartiendo] = useState(false);
   // Mismo criterio que showCarrito/showPago en Caja — el catálogo ocupa
   // toda la pantalla, y el carrito/los datos del presupuesto viven en
@@ -277,6 +276,12 @@ export default function NuevoPresupuestoPage() {
     setGuardando(true);
     setError('');
 
+    // Igual que en page.tsx: se reserva antes de armar el objeto, porque el
+    // número se escribe una vez y no cambia nunca — tiene que viajar YA
+    // adentro de lo que se guarda y se encola, no calcularse después sobre
+    // una lista que puede correrse si se borra un presupuesto anterior.
+    const numeroDocumento = await proximoNumeroDocumento();
+
     const presupuesto: Presupuesto = {
       id: crypto.randomUUID(),
       cliente_nombre: clienteNombre.trim() || undefined,
@@ -292,6 +297,7 @@ export default function NuevoPresupuestoPage() {
       creado_por_nombre: userNombre || undefined,
       creado_en: new Date().toISOString(),
       sincronizado: false,
+      numero_documento: numeroDocumento,
     };
 
     // Offline-first, igual que una venta: se guarda local de inmediato y se
@@ -300,16 +306,8 @@ export default function NuevoPresupuestoPage() {
     await savePresupuesto(presupuesto);
     await encolarCrearPresupuesto(presupuesto, negocioId);
 
-    // Correlativo por orden de creación — mismo criterio que "Venta #N" en
-    // Resumen, calculado en el cliente sobre todo lo que este dispositivo
-    // conoce (no hay concepto de "período" para presupuestos).
-    const todos = await getPresupuestos();
-    const ordenados = [...todos].sort((a, b) => a.creado_en.localeCompare(b.creado_en));
-    const numero = ordenados.findIndex(p => p.id === presupuesto.id) + 1;
-
     setGuardando(false);
     setGuardado(presupuesto);
-    setNumeroGuardado(numero > 0 ? numero : ordenados.length);
   };
 
   const compartir = async () => {
@@ -320,7 +318,6 @@ export default function NuevoPresupuestoPage() {
         negocioNombre: negocioNombre || '',
         datosNegocio,
         presupuesto: guardado,
-        numero: numeroGuardado,
       });
     } catch {
       showToast('No se pudo generar el documento');
