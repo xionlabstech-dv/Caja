@@ -1056,6 +1056,22 @@ export async function contarPendientes(): Promise<number> {
   return db.count('pendientes');
 }
 
+// Hay un cambio local de configuracion esperando en la cola — el sync no
+// debe pisarlo con lo que el servidor todavía tiene (mismo criterio que el
+// guard de savePresupuestosResumen: "el sync periódico podría revivir un
+// estado viejo encima de uno más nuevo que la cola todavía no terminó de
+// subir"). Las dos operaciones de configuracion tienen id fijo
+// (encolarActualizarTasa/encolarActualizarProductoBolsa, outbox.ts), así
+// que alcanza con dos `get` directos — no hace falta recorrer toda la cola.
+export async function hayConfiguracionPendiente(): Promise<boolean> {
+  const db = await getDB();
+  const [tasa, bolsa] = await Promise.all([
+    db.get('pendientes', 'tasa-pendiente'),
+    db.get('pendientes', 'producto-bolsa-pendiente'),
+  ]);
+  return !!tasa || !!bolsa;
+}
+
 // Deudas que el servidor rechazó y que se conservaron a propósito (ver la
 // rama de falloPermanente en outbox.ts). NO están en la cola —ya salieron—
 // pero son la única copia que queda de esa deuda, así que cuentan como

@@ -18,6 +18,7 @@ import {
   setCachedDatosNegocio,
   saveAcreedores,
   actualizarSaldoAcreedorLocal,
+  hayConfiguracionPendiente,
 } from './db';
 import {
   Producto,
@@ -318,6 +319,21 @@ export async function syncFromSupabase(
       .single();
 
     if (configData) {
+      // Si hay una operación de configuracion (tasa o producto de la
+      // bolsa) todavía esperando en la cola, el servidor que acabamos de
+      // consultar es el valor VIEJO — anterior al cambio que esa operación
+      // todavía no subió. Pisar IndexedDB y la memoria con esto reviviría
+      // el valor anterior por hasta el próximo tick, mismo problema que ya
+      // se resolvió para presupuestos/clientes_fiado. No devolver config
+      // deja a quien llama (refrescarConfig, en Providers.tsx) sin motivo
+      // para tocar el estado — la memoria y IndexedDB se quedan con lo
+      // local hasta que la cola resuelva, para bien o para mal: si el
+      // cambio se confirma, el próximo sync ya trae el valor real; si el
+      // servidor lo rechaza de forma definitiva, la operación sale de la
+      // cola y este guard se libera solo en el siguiente sync.
+      if (await hayConfiguracionPendiente()) {
+        return null;
+      }
       const config: Configuracion = { ...configData, id: 1 };
       await saveConfiguracion(config);
       return config;
